@@ -1,0 +1,379 @@
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
+import 'dart:async';
+import 'app_theme.dart';
+import 'database.dart';
+import 'issue_guard.dart';
+import 'order_details_dialog.dart';
+import 'tour_keys.dart';
+import 'works_progress_bar.dart';
+
+class KanbanScreen extends StatefulWidget {
+  const KanbanScreen({super.key});
+
+  @override
+  State<KanbanScreen> createState() => _KanbanScreenState();
+}
+
+class _KanbanScreenState extends State<KanbanScreen> {
+  List<Map<String, dynamic>> _orders = [];
+  bool _isLoading = true;
+  String _currentDateTime = "";
+  Timer? _timer;
+  final ScrollController _kanbanController = ScrollController();
+
+  final Map<String, Color> _statusColors = {
+    "Предварительная запись": AppColors.textDim,
+    "Принят в работу": AppColors.primary,
+    "Мойка": const Color(0xFF22D3EE),
+    "Химчистка": const Color(0xFFA78BFA),
+    "Полировка": const Color(0xFFF59E0B),
+    "Оклейка": AppColors.danger,
+    "Интерьер": const Color(0xFF14B8A6),
+    "Оборудование": const Color(0xFFD97706),
+    "Подготовка к выдаче": const Color(0xFF6366F1),
+    "Выдан": AppColors.success,
+  };
+
+  String _selectedStatusFilter = "Все цеха";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrders();
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      setState(() {
+        _currentDateTime = DateFormat('dd.MM.yyyy HH:mm:ss').format(DateTime.now());
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _kanbanController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadOrders() async {
+    final orders = await DatabaseHelper().getAllOrders();
+    setState(() {
+      _orders = orders;
+      _isLoading = false;
+    });
+  }
+
+  Widget _buildOrderCard(Map<String, dynamic> o, String status, {bool isFeedback = false}) {
+    final accent = _statusColors[status] ?? AppColors.primary;
+    return Container(
+      width: isFeedback ? 240 : double.infinity,
+      margin: isFeedback ? EdgeInsets.zero : const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 3,
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radius)),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "${o['client_name'] ?? ''}",
+                  style: GoogleFonts.manrope(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  "${o['make_model'] ?? ''}",
+                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if ((o['plate']?.toString() ?? "").isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    "${o['plate']}",
+                    style: GoogleFonts.manrope(
+                      color: AppColors.text,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ],
+                if (!isFeedback && o['master_name'] != null) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    "${o['master_name']}",
+                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+                if (!isFeedback && o['notes'] != null && o['notes'].toString().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    "${o['notes']}",
+                    style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.25),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
+                  ),
+                ],
+                if (!isFeedback) ...[
+                  const SizedBox(height: 8),
+                  WorksProgressBar.fromOrder(o, compact: true),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(
+                        "${o['price']} ₽",
+                        style: GoogleFonts.manrope(
+                          color: AppColors.success,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        tooltip: "Удалить",
+                        icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (context) => AlertDialog(
+                              title: Text("Удалить заказ?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                              content: Text(
+                                "Все данные заказа будут безвозвратно удалены.",
+                                style: GoogleFonts.manrope(color: AppColors.textMuted),
+                              ),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text("Удалить"),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            await DatabaseHelper().deleteOrder(o['id']);
+                            _loadOrders();
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+    }
+
+    return Scaffold(
+      backgroundColor: AppColors.bg,
+      body: KeyedSubtree(
+        key: TourKeys.kanbanArea,
+        child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.surface2,
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
+                    border: Border.all(color: AppColors.border),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _selectedStatusFilter,
+                      dropdownColor: AppColors.surface,
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
+                      style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
+                      icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted),
+                      items: ["Все цеха", ...STATUSES.where((s) => s != "Выдан")].map((status) {
+                        return DropdownMenuItem<String>(value: status, child: Text(status));
+                      }).toList(),
+                      onChanged: (val) {
+                        setState(() => _selectedStatusFilter = val!);
+                      },
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  _currentDateTime,
+                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 14, fontWeight: FontWeight.w500),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          Expanded(
+            child: Scrollbar(
+              controller: _kanbanController,
+              trackVisibility: true,
+              thumbVisibility: true,
+              child: ListView.builder(
+                controller: _kanbanController,
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                itemCount: STATUSES.length,
+                itemBuilder: (context, index) {
+                  final status = STATUSES[index];
+                  if (status == "Выдан") return const SizedBox.shrink();
+                  if (_selectedStatusFilter != "Все цеха" && status != _selectedStatusFilter) {
+                    return const SizedBox.shrink();
+                  }
+
+                  final colOrders = _orders.where((o) => o['status'] == status).toList();
+                  final accent = _statusColors[status] ?? AppColors.primary;
+
+                  return DragTarget<Map<String, dynamic>>(
+                    onAcceptWithDetails: (details) async {
+                      final order = details.data;
+                      if (order['status'] != status) {
+                        final ok = await tryUpdateOrderStatus(
+                          context,
+                          order['id'] as int,
+                          status,
+                        );
+                        if (!ok) {
+                          if (mounted) setState(() {});
+                          return;
+                        }
+                        await DatabaseHelper().addOrderEvent(order['id'], "Статус изменен на: $status");
+                        _loadOrders();
+                      }
+                    },
+                    builder: (context, candidateData, rejectedData) {
+                      final hovering = candidateData.isNotEmpty;
+                      return AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        width: 280,
+                        margin: const EdgeInsets.only(right: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: hovering ? AppColors.primarySoft.withOpacity(0.45) : AppColors.surface,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: hovering ? AppColors.primary.withOpacity(0.55) : AppColors.border,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    status,
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.text,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.bg,
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(color: AppColors.border),
+                                  ),
+                                  child: Text(
+                                    "${colOrders.length}",
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.textMuted,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Expanded(
+                              child: ListView.builder(
+                                itemCount: colOrders.length,
+                                itemBuilder: (context, i) {
+                                  final o = colOrders[i];
+                                  return Draggable<Map<String, dynamic>>(
+                                    data: o,
+                                    feedback: Material(
+                                      color: Colors.transparent,
+                                      elevation: 8,
+                                      child: Opacity(
+                                        opacity: 0.92,
+                                        child: _buildOrderCard(o, status, isFeedback: true),
+                                      ),
+                                    ),
+                                    childWhenDragging: Opacity(
+                                      opacity: 0.25,
+                                      child: _buildOrderCard(o, status),
+                                    ),
+                                    child: GestureDetector(
+                                      onTap: () async {
+                                        final shouldRefresh = await OrderDetailsDialog.open(context, o);
+                                        if (shouldRefresh == true) _loadOrders();
+                                      },
+                                      child: _buildOrderCard(o, status),
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+      ),
+    );
+  }
+}

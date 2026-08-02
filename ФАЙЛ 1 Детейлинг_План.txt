@@ -1,0 +1,44 @@
+ФАЙЛ 1: Детейлинг_План.txt
+
+ПРОЕКТ: Приложение для Детейлинг-студии (Flutter / Dart)
+ВЕРСИЯ: Alpha 0.010
+РОЛЬ ИИ: Главный разработчик (Dart / Flutter)
+УРОВЕНЬ ПОЛЬЗОВАТЕЛЯ: 0
+
+ТЕХНОЛОГИЯ (СТЕК):
+Язык: Dart
+Фреймворк: Flutter
+База данных: SQLite (sqflite + sqflite_common_ffi), версия БД: 10
+Доп.: intl, fl_chart, google_fonts (Manrope). pdf — отложено (п.16, формат у пользователя).
+
+СТРУКТУРА lib/ (ключевое):
+  main.dart, app_theme.dart, app_toast.dart, backup_helper.dart
+  database.dart (v10: скидки, промокоды, рецепты склада, is_done, workshop…)
+  kanban_screen, orders_screen, calendar_screen, workshops_screen
+  clients_screen, cash_screen, stats_screen, masters_screen
+  inventory_screen (Услуги | Склад + рецепты)
+  calculator_screen + vehicle_marking/
+  completed_orders_screen, order_details_dialog, issue_guard, master_picker
+  search_dialog, bug_report_dialog, service_category_browser, quick_datetime_picker
+
+ГЛОБАЛЬНЫЙ ПЛАН:
+
+--- ВЫПОЛНЕНО ---
+[x] Этапы 1–13, Alpha 0.005–0.007 (целостность заказа, время/цех на услугу, графики, бэкап)
+[x] Визуал CRM волны 1–3 (тема, канбан, календарь, карточка, клиенты…)
+[x] Архив «Завершённые», тонировка → заказ
+[x] п.10 Контроль выдачи (долг / незакрытые работы)
+[x] п.11–12 Роли мастеров + мастер цеха
+[x] п.13–15 Склад/рецепты, прайс тонировки по зонам, категории без emoji
+[x] п.17–19 Скидки/промо, статистика KPI, касса → заказ
+[x] п.23 Визуал: новый заказ, поиск, баг-репорт
+[x] п.24 Обновление Паспорта/Плана/Архитектуры → 0.010
+
+--- ОТЛОЖЕНО ---
+[ ] п.16 Печать/PDF по заготовке пользователя
+[ ] п.1–8 Калькулятор/оклейка/дефекты/PDF сметы/read-only
+[ ] п.9 Колонка «Выдан» на канбане (не нужна — есть архив)
+[ ] п.20–22 Авторизация / синхра / мобилка
+
+--- ТЕКУЩИЙ СТАТУС ---
+Alpha 0.010 готова к работе в смене. Дальше — по запросу (печать или ящик калькулятора).

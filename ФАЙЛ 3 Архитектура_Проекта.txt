@@ -1,0 +1,36 @@
+ФАЙЛ 3: Архитектура_Проекта.txt
+
+ПРОЕКТ: Приложение для Детейлинг-студии (Flutter / Dart)
+ВЕРСИЯ: Alpha 0.010
+
+БАЗА ДАННЫХ (database.dart)
+Версия: 10.
+Таблицы:
+  clients, cars, orders, masters, order_events, payments, cash_flow,
+  custom_works, services, inventory, service_recipes, roles, promocodes,
+  order_items (name, price, master_ids, start_time, end_time, workshop, is_done).
+
+Колонки orders (важное):
+  price (итог после скидки), paid_amount, status, is_completed,
+  discount_percent, discount_fixed, promo_code,
+  master_id (админ приёмки), tech_wash_*, notes (кэш имён услуг).
+
+Ключевые правила:
+  syncOrderFromItems — notes + price с учётом скидки заказа.
+  validateIssueOrder / updateStatus — «Выдан» только без долга и при всех is_done.
+  assignMastersToWorkshop — master_ids на все работы цеха.
+  deductRecipeForService — при первом is_done=1 по точному имени услуги.
+  priceAfterDiscount(works, %, фикс) — сначала %, потом фикс.
+
+ИНТЕРФЕЙС
+Тема: AppColors (#0B0D12 / #141821 / #1A2030, акцент #3B82F6), Manrope.
+Экраны меню: Канбан, Новый заказ, Календарь, Клиенты, Касса, Статистика,
+  Сотрудники, Услуги и Склад, Калькулятор, Завершённые; цеха index=100.
+
+Карточка заказа:
+  полный режим / workshop-режим (урезанный + мастер цеха).
+  Скидки и промо в футере; issue_guard на смене статуса.
+
+СБОРКА
+  flutter run -d windows
+  flutter build windows
