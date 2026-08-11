@@ -11,6 +11,7 @@ import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'order_details_dialog.dart';
 import 'payment_edit_dialog.dart';
+import 'pulse_anchor.dart';
 import 'responsive.dart';
 import 'tour_keys.dart';
 
@@ -21,7 +22,7 @@ class CashScreen extends StatefulWidget {
   State<CashScreen> createState() => _CashScreenState();
 }
 
-class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
+class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighlightMixin {
   @override
   void onDatabaseChanged() => _loadData();
   String _period = 'today';
@@ -32,6 +33,10 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
   double _debtTotal = 0;
   List<Map<String, dynamic>> _registerSnapshots = [];
   int? _selectedRegisterId;
+
+  static const _pulseOp = 'cash_op';
+  static const _pulseTemplates = 'cash_templates';
+  static const _pulseJournal = 'cash_journal';
 
   double _cashSum = 0;
   double _cardSum = 0;
@@ -178,11 +183,17 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
   String _fmtDt(String? raw) => AppDateTime.formatShort(raw);
 
   Future<void> _openOp({CashTemplate? template, int? editFlowId}) async {
-    final ok = await CashOperationDialog.open(
-      context,
-      template: template,
-      registerId: _selectedRegisterId,
-      editFlowId: editFlowId,
+    final pulseId = editFlowId != null
+        ? _pulseJournal
+        : (template != null ? _pulseTemplates : _pulseOp);
+    final ok = await runWithPulseHighlight(
+      pulseId,
+      () => CashOperationDialog.open(
+        context,
+        template: template,
+        registerId: _selectedRegisterId,
+        editFlowId: editFlowId,
+      ),
     );
     if (ok == true) _loadData();
   }
@@ -203,18 +214,26 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
   Future<void> _openRegisterTx(Map<String, dynamic> snap) async {
     final rid = (snap['id'] as num).toInt();
     setState(() => _selectedRegisterId = rid);
-    final changed = await CashRegisterTxDialog.open(
-      context,
-      registerId: rid,
-      registerName: snap['name']?.toString() ?? 'Касса',
-      moneyType: snap['money_type']?.toString() ?? '',
-      expected: (snap['expected'] as num?)?.toDouble() ??
-          (snap['opening'] as num?)?.toDouble() ??
-          0,
-      startDate: _registerPeriodStart(),
-      endDate: _endDate,
+    final changed = await runWithPulseHighlight(
+      rid,
+      () => CashRegisterTxDialog.open(
+        context,
+        registerId: rid,
+        registerName: snap['name']?.toString() ?? 'Касса',
+        moneyType: snap['money_type']?.toString() ?? '',
+        expected: (snap['expected'] as num?)?.toDouble() ??
+            (snap['opening'] as num?)?.toDouble() ??
+            0,
+        startDate: _registerPeriodStart(),
+        endDate: _endDate,
+      ),
     );
     if (changed == true) _loadData();
+  }
+
+  int? get _pulsingRegisterId {
+    final id = pulseHighlightId;
+    return id is int ? id : null;
   }
 
   Future<void> _editJournalRow(Map<String, dynamic> row) async {
@@ -638,18 +657,23 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
                 onSelectRegister: (id) => setState(() => _selectedRegisterId = id),
                 onOpenRegister: _openRegisterTx,
                 onChanged: _loadData,
+                pulsingRegisterId: _pulsingRegisterId,
               ),
             ),
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              height: 52,
-              child: ElevatedButton.icon(
-                onPressed: () => _openOp(),
-                icon: const Icon(Icons.add, size: 22),
-                label: Text(
-                  'Новая операция',
-                  style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16),
+            PulseAnchor(
+              active: isPulseActive(_pulseOp),
+              borderRadius: BorderRadius.circular(AppTheme.radius),
+              child: SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  onPressed: () => _openOp(),
+                  icon: const Icon(Icons.add, size: 22),
+                  label: Text(
+                    'Новая операция',
+                    style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16),
+                  ),
                 ),
               ),
             ),
@@ -664,54 +688,60 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
               ),
             ),
             const SizedBox(height: 10),
-            KeyedSubtree(
-              key: TourKeys.cashTemplates,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _templateRow('Расход', AppColors.danger, expenseTpl),
-                  _templateRow('Приход', AppColors.success, incomeTpl),
-                ],
+            PulseAnchor(
+              active: isPulseActive(_pulseTemplates),
+              child: KeyedSubtree(
+                key: TourKeys.cashTemplates,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _templateRow('Расход', AppColors.danger, expenseTpl),
+                    _templateRow('Приход', AppColors.success, incomeTpl),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 20),
-            KeyedSubtree(
-              key: TourKeys.cashJournal,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Text('Журнал', style: AppTheme.sectionTitle),
-                      const Spacer(),
-                      _miniFilter('Все', _filterSource == 'all' && _filterType == 'all', () {
-                        setState(() {
-                          _filterSource = 'all';
-                          _filterType = 'all';
-                        });
-                      }),
-                      _miniFilter('Оплаты', _filterSource == 'payment', () {
-                        setState(() => _filterSource = _filterSource == 'payment' ? 'all' : 'payment');
-                      }),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  if (_isLoading)
-                    const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
-                    )
-                  else if (rows.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 20),
-                      child: Text(
-                        'Нет операций за период',
-                        style: GoogleFonts.manrope(color: AppColors.textDim),
-                      ),
-                    )
-                  else
-                    ...rows.asMap().entries.map((e) => _journalRow(e.value, e.key.isOdd)),
-                ],
+            PulseAnchor(
+              active: isPulseActive(_pulseJournal),
+              child: KeyedSubtree(
+                key: TourKeys.cashJournal,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Text('Журнал', style: AppTheme.sectionTitle),
+                        const Spacer(),
+                        _miniFilter('Все', _filterSource == 'all' && _filterType == 'all', () {
+                          setState(() {
+                            _filterSource = 'all';
+                            _filterType = 'all';
+                          });
+                        }),
+                        _miniFilter('Оплаты', _filterSource == 'payment', () {
+                          setState(() => _filterSource = _filterSource == 'payment' ? 'all' : 'payment');
+                        }),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    if (_isLoading)
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+                      )
+                    else if (rows.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 20),
+                        child: Text(
+                          'Нет операций за период',
+                          style: GoogleFonts.manrope(color: AppColors.textDim),
+                        ),
+                      )
+                    else
+                      ...rows.asMap().entries.map((e) => _journalRow(e.value, e.key.isOdd)),
+                  ],
+                ),
               ),
             ),
           ],
@@ -747,10 +777,14 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
                 _periodChip('month', 'Месяц'),
                 _periodChip('custom', _period == 'custom' ? '$_startDate — $_endDate' : 'Период'),
                 const SizedBox(width: 8),
-                ElevatedButton.icon(
-                  onPressed: () => _openOp(),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: Text('Операция', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                PulseAnchor(
+                  active: isPulseActive(_pulseOp),
+                  borderRadius: BorderRadius.circular(AppTheme.radius),
+                  child: ElevatedButton.icon(
+                    onPressed: () => _openOp(),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: Text('Операция', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                  ),
                 ),
               ],
             ),
@@ -765,6 +799,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
               onSelectRegister: (id) => setState(() => _selectedRegisterId = id),
               onOpenRegister: _openRegisterTx,
               onChanged: _loadData,
+              pulsingRegisterId: _pulsingRegisterId,
             ),
           ),
           Padding(
@@ -793,86 +828,93 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
           Padding(
             key: TourKeys.cashTemplates,
             padding: const EdgeInsets.fromLTRB(padH, 0, padH, 8),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-              decoration: AppTheme.panelDecoration,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Text('Быстрые шаблоны', style: AppTheme.sectionTitle),
-                      const SizedBox(width: 10),
-                      Text(
-                        'один клик',
-                        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  _templateRow('Расход', AppColors.danger, expenseTpl),
-                  _templateRow('Приход', AppColors.success, incomeTpl),
-                ],
+            child: PulseAnchor(
+              active: isPulseActive(_pulseTemplates),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                decoration: AppTheme.panelDecoration,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Text('Быстрые шаблоны', style: AppTheme.sectionTitle),
+                        const SizedBox(width: 10),
+                        Text(
+                          'один клик',
+                          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    _templateRow('Расход', AppColors.danger, expenseTpl),
+                    _templateRow('Приход', AppColors.success, incomeTpl),
+                  ],
+                ),
               ),
             ),
           ),
           Padding(
             key: TourKeys.cashJournal,
             padding: const EdgeInsets.fromLTRB(padH, 4, padH, 0),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-              decoration: BoxDecoration(
-                color: AppColors.surface2.withOpacity(0.9),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLg)),
-              ),
-              child: Row(
-                children: [
-                  Text('Журнал', style: AppTheme.sectionTitle),
-                  const SizedBox(width: 14),
-                  _miniFilter('Все', _filterSource == 'all' && _filterType == 'all', () {
-                    setState(() {
-                      _filterSource = 'all';
-                      _filterType = 'all';
-                    });
-                  }),
-                  _miniFilter('Оплаты', _filterSource == 'payment', () {
-                    setState(() => _filterSource = _filterSource == 'payment' ? 'all' : 'payment');
-                  }),
-                  _miniFilter('Операции', _filterSource == 'flow', () {
-                    setState(() => _filterSource = _filterSource == 'flow' ? 'all' : 'flow');
-                  }),
-                  _miniFilter(
-                    'Приход',
-                    _filterType == 'Приход',
-                    () => setState(() => _filterType = _filterType == 'Приход' ? 'all' : 'Приход'),
-                    activeColor: AppColors.success,
-                  ),
-                  _miniFilter(
-                    'Расход',
-                    _filterType == 'Расход',
-                    () => setState(() => _filterType = _filterType == 'Расход' ? 'all' : 'Расход'),
-                    activeColor: AppColors.danger,
-                  ),
-                  const Spacer(),
-                  SizedBox(
-                    width: 130,
-                    child: DropdownButtonFormField<String?>(
-                      value: _filterMethod,
-                      isDense: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Метод',
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      ),
-                      dropdownColor: AppColors.surface,
-                      items: [
-                        const DropdownMenuItem(value: null, child: Text('Все')),
-                        ...CashMethods.all.map((m) => DropdownMenuItem(value: m, child: Text(m))),
-                      ],
-                      onChanged: (v) => setState(() => _filterMethod = v),
+            child: PulseAnchor(
+              active: isPulseActive(_pulseJournal),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLg)),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                decoration: BoxDecoration(
+                  color: AppColors.surface2.withOpacity(0.9),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLg)),
+                ),
+                child: Row(
+                  children: [
+                    Text('Журнал', style: AppTheme.sectionTitle),
+                    const SizedBox(width: 14),
+                    _miniFilter('Все', _filterSource == 'all' && _filterType == 'all', () {
+                      setState(() {
+                        _filterSource = 'all';
+                        _filterType = 'all';
+                      });
+                    }),
+                    _miniFilter('Оплаты', _filterSource == 'payment', () {
+                      setState(() => _filterSource = _filterSource == 'payment' ? 'all' : 'payment');
+                    }),
+                    _miniFilter('Операции', _filterSource == 'flow', () {
+                      setState(() => _filterSource = _filterSource == 'flow' ? 'all' : 'flow');
+                    }),
+                    _miniFilter(
+                      'Приход',
+                      _filterType == 'Приход',
+                      () => setState(() => _filterType = _filterType == 'Приход' ? 'all' : 'Приход'),
+                      activeColor: AppColors.success,
                     ),
-                  ),
-                ],
+                    _miniFilter(
+                      'Расход',
+                      _filterType == 'Расход',
+                      () => setState(() => _filterType = _filterType == 'Расход' ? 'all' : 'Расход'),
+                      activeColor: AppColors.danger,
+                    ),
+                    const Spacer(),
+                    SizedBox(
+                      width: 130,
+                      child: DropdownButtonFormField<String?>(
+                        value: _filterMethod,
+                        isDense: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Метод',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        ),
+                        dropdownColor: AppColors.surface,
+                        items: [
+                          const DropdownMenuItem(value: null, child: Text('Все')),
+                          ...CashMethods.all.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                        ],
+                        onChanged: (v) => setState(() => _filterMethod = v),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

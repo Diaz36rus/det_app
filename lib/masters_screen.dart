@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'database.dart';
+import 'pulse_anchor.dart';
 import 'responsive.dart';
 
 class MastersScreen extends StatefulWidget {
@@ -11,12 +12,14 @@ class MastersScreen extends StatefulWidget {
   State<MastersScreen> createState() => _MastersScreenState();
 }
 
-class _MastersScreenState extends State<MastersScreen> {
+class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin {
   List<Map<String, dynamic>> _masters = [];
   List<String> _roles = [];
   final _nameController = TextEditingController();
   String _selectedRole = "Универсал";
   bool _isLoading = true;
+
+  static const _pulseToolbar = 'masters_toolbar';
 
   @override
   void initState() {
@@ -59,61 +62,68 @@ class _MastersScreenState extends State<MastersScreen> {
   }
 
   Future<void> _renameMaster(Map<String, dynamic> master) async {
+    final masterId = (master['id'] as num).toInt();
     final controller = TextEditingController(text: master['name']?.toString() ?? '');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("Имя сотрудника", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(labelText: "Имя", isDense: true),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Сохранить"),
+    final ok = await runWithPulseHighlight(
+      masterId,
+      () => showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text("Имя сотрудника", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          content: TextField(
+            controller: controller,
+            decoration: const InputDecoration(labelText: "Имя", isDense: true),
+            autofocus: true,
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Сохранить"),
+            ),
+          ],
+        ),
       ),
     );
     if (ok != true) return;
     final name = controller.text.trim();
     if (name.isEmpty || name == master['name']) return;
-    await DatabaseHelper().updateMaster((master['id'] as num).toInt(), name: name);
+    await DatabaseHelper().updateMaster(masterId, name: name);
     _loadData();
   }
 
-  void _showAddRoleDialog() {
+  Future<void> _showAddRoleDialog() async {
     final roleController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: AppColors.surface,
-          title: Text("Новая роль", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-          content: TextField(
-            controller: roleController,
-            decoration: const InputDecoration(labelText: "Название роли", isDense: true),
-            autofocus: true,
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
-            ElevatedButton(
-              onPressed: () async {
-                if (roleController.text.trim().isNotEmpty) {
-                  await DatabaseHelper().addRole(roleController.text.trim());
-                  if (context.mounted) Navigator.pop(context);
-                  _loadData();
-                }
-              },
-              child: const Text("Добавить"),
+    await runWithPulseHighlight(
+      _pulseToolbar,
+      () => showDialog<void>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: Text("Новая роль", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+            content: TextField(
+              controller: roleController,
+              decoration: const InputDecoration(labelText: "Название роли", isDense: true),
+              autofocus: true,
             ),
-          ],
-        );
-      },
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
+              ElevatedButton(
+                onPressed: () async {
+                  if (roleController.text.trim().isNotEmpty) {
+                    await DatabaseHelper().addRole(roleController.text.trim());
+                    if (context.mounted) Navigator.pop(context);
+                    _loadData();
+                  }
+                },
+                child: const Text("Добавить"),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -144,8 +154,11 @@ class _MastersScreenState extends State<MastersScreen> {
   }
 
   Widget _buildToolbar() {
-    return Container(
-      margin: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 12),
+    return Padding(
+      padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 12),
+      child: PulseAnchor(
+        active: isPulseActive(_pulseToolbar),
+        child: Container(
       padding: const EdgeInsets.all(16),
       decoration: AppTheme.panelDecoration,
       child: Column(
@@ -207,6 +220,8 @@ class _MastersScreenState extends State<MastersScreen> {
           ),
         ],
       ),
+        ),
+      ),
     );
   }
 
@@ -217,8 +232,11 @@ class _MastersScreenState extends State<MastersScreen> {
       ..._roles,
     ];
     final roleValue = roleOptions.contains(role) ? role : null;
+    final masterId = (m['id'] as num).toInt();
 
-    return Container(
+    return PulseAnchor(
+      active: isPulseActive(masterId),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: AppColors.surface2.withOpacity(0.92),
@@ -293,6 +311,7 @@ class _MastersScreenState extends State<MastersScreen> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

@@ -6,6 +6,7 @@ import 'app_theme.dart';
 import 'cash_catalog.dart';
 import 'cash_operation_dialog.dart';
 import 'database.dart';
+import 'pulse_anchor.dart';
 
 /// Панель смены: несколько касс, открытие/закрытие, добавление кассы.
 class CashShiftPanel extends StatelessWidget {
@@ -16,6 +17,8 @@ class CashShiftPanel extends StatelessWidget {
   /// Клик по карточке кассы — открыть список транзакций.
   final ValueChanged<Map<String, dynamic>>? onOpenRegister;
   final VoidCallback onChanged;
+  /// Пилот PulseAnchor: id кассы, которая сейчас «дышит» за диалогом.
+  final int? pulsingRegisterId;
 
   const CashShiftPanel({
     super.key,
@@ -25,6 +28,7 @@ class CashShiftPanel extends StatelessWidget {
     this.selectedRegisterId,
     this.onSelectRegister,
     this.onOpenRegister,
+    this.pulsingRegisterId,
   });
 
   static final _money = NumberFormat('#,##0.##', 'ru_RU');
@@ -361,88 +365,93 @@ class CashShiftPanel extends StatelessWidget {
     final expected = (s['expected'] as num?)?.toDouble() ?? opening;
     final delta = expected - opening;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          if (onOpenRegister != null) {
-            onOpenRegister!(s);
-          } else if (onSelectRegister != null) {
-            onSelectRegister!(rid);
-          }
-        },
-        onLongPress: onSelectRegister == null ? null : () => onSelectRegister!(rid),
-        borderRadius: BorderRadius.circular(12),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-          decoration: BoxDecoration(
-            color: selected ? color.withOpacity(0.12) : AppColors.bg.withOpacity(0.4),
-            borderRadius: BorderRadius.circular(12),
-            border: Border(
-              left: BorderSide(color: color.withOpacity(selected ? 0.95 : 0.55), width: 3),
+    return PulseAnchor(
+      active: pulsingRegisterId == rid,
+      accent: color,
+      borderRadius: BorderRadius.circular(12),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () {
+            if (onOpenRegister != null) {
+              onOpenRegister!(s);
+            } else if (onSelectRegister != null) {
+              onSelectRegister!(rid);
+            }
+          },
+          onLongPress: onSelectRegister == null ? null : () => onSelectRegister!(rid),
+          borderRadius: BorderRadius.circular(12),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+            decoration: BoxDecoration(
+              color: selected ? color.withOpacity(0.12) : AppColors.bg.withOpacity(0.4),
+              borderRadius: BorderRadius.circular(12),
+              border: Border(
+                left: BorderSide(color: color.withOpacity(selected ? 0.95 : 0.55), width: 3),
+              ),
             ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                  ),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      s['name']?.toString() ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.manrope(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                        color: AppColors.text,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 9,
+                      height: 9,
+                      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        s['name']?.toString() ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.manrope(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          color: AppColors.text,
+                        ),
                       ),
                     ),
-                  ),
-                  Icon(Icons.chevron_right, size: 18, color: AppColors.textDim.withOpacity(0.8)),
-                ],
-              ),
-              const SizedBox(height: 3),
-              Text(
-                type,
-                style: GoogleFonts.manrope(color: color, fontSize: 11, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                '${_money.format(shiftOpen ? expected : opening)} ₽',
-                style: GoogleFonts.manrope(
-                  color: AppColors.text,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
+                    Icon(Icons.chevron_right, size: 18, color: AppColors.textDim.withOpacity(0.8)),
+                  ],
                 ),
-              ),
-              if (shiftOpen)
+                const SizedBox(height: 3),
                 Text(
-                  delta >= 0 ? 'Δ смены +${_money.format(delta)}' : 'Δ смены ${_money.format(delta)}',
+                  type,
+                  style: GoogleFonts.manrope(color: color, fontSize: 11, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${_money.format(shiftOpen ? expected : opening)} ₽',
                   style: GoogleFonts.manrope(
-                    color: delta >= 0 ? AppColors.success : AppColors.danger,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                    color: AppColors.text,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
                   ),
-                )
-              else
-                Text(
-                  'вне смены',
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
                 ),
-              const SizedBox(height: 4),
-              Text(
-                'нажмите — транзакции',
-                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 10),
-              ),
-            ],
+                if (shiftOpen)
+                  Text(
+                    delta >= 0 ? 'Δ смены +${_money.format(delta)}' : 'Δ смены ${_money.format(delta)}',
+                    style: GoogleFonts.manrope(
+                      color: delta >= 0 ? AppColors.success : AppColors.danger,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  )
+                else
+                  Text(
+                    'вне смены',
+                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+                  ),
+                const SizedBox(height: 4),
+                Text(
+                  'нажмите — транзакции',
+                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 10),
+                ),
+              ],
+            ),
           ),
         ),
       ),
