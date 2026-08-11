@@ -1,11 +1,44 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'database.dart';
 import 'order_details_dialog.dart';
 import 'tour_keys.dart';
+
+/// Считает PopupRoute (диалоги) на корневом навигаторе.
+/// Нужен в [MaterialApp.navigatorObservers], чтобы обучение пряталось,
+/// пока пользователь работает с открытым окном (поиск, баг-репорт и т.д.).
+class TourNavBridge extends NavigatorObserver {
+  TourNavBridge._();
+  static final TourNavBridge instance = TourNavBridge._();
+
+  final ValueNotifier<int> popupDepth = ValueNotifier<int>(0);
+
+  void _delta(Route<dynamic> route, int d) {
+    if (route is PopupRoute) {
+      popupDepth.value = (popupDepth.value + d).clamp(0, 99);
+    }
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) => _delta(route, 1);
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => _delta(route, -1);
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) => _delta(route, -1);
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    if (oldRoute != null) _delta(oldRoute, -1);
+    if (newRoute != null) _delta(newRoute, 1);
+  }
+}
 
 class AppTourStep {
   final String title;
@@ -15,6 +48,8 @@ class AppTourStep {
   final int? menuIndex;
   /// Перед шагом закрыть открытую карточку заказа (и подобные dialog).
   final bool dismissOrderDetails;
+  /// Нужен хотя бы один заказ в БД (иначе шаг бессмыслен / ломает сценарий).
+  final bool requireOrders;
 
   const AppTourStep({
     required this.title,
@@ -22,6 +57,7 @@ class AppTourStep {
     this.targetKey,
     this.menuIndex,
     this.dismissOrderDetails = false,
+    this.requireOrders = false,
   });
 }
 
@@ -52,14 +88,16 @@ class AppTours {
       steps: [
         AppTourStep(
           title: 'Давайте осмотримся',
-          body: 'Это короткая прогулка по приложению. Подсветка покажет, о чём речь. '
-              'В любой момент можно нажать «Пропустить».',
+          body: 'Это короткая прогулка по приложению. Подсветка покажет, о чём речь — '
+              'туда можно нажимать и вводить данные. '
+              '«Пропустить» — только этот шаг, «Закончить» — выйти из обучения.',
         ),
         AppTourStep(
           title: 'Глобальный поиск',
           body: 'Это одна из сильных сторон Det App: один поиск по всему приложению. '
-              'Введите что угодно — имя, телефон, номер авто, VIN, номер заказа — '
-              'и система найдёт и клиента, и заказ. Не нужно помнить, в каком разделе искать.',
+              'Нажмите сюда и попробуйте: окно поиска откроется поверх обучения — '
+              'можно ввести имя, телефон, номер, VIN или заказ, посмотреть результат и закрыть. '
+              'Потом продолжайте тур кнопкой «Далее».',
           targetKey: TourKeys.search,
         ),
         AppTourStep(
@@ -110,9 +148,11 @@ class AppTours {
         ),
         AppTourStep(
           title: 'Остальное меню',
-          body: 'Статистика, сотрудники, прайс, склад — когда понадобится. '
+          body: 'На телефоне в режиме «ПК + телефон» меню укорочено: смена здесь, '
+              'а статистика, сотрудники, услуги и склад — на компьютере. '
+              'Если ПК нет — в меню выберите «Полный телефон». '
               'Для первого дня достаточно доски, нового заказа и кассы.',
-          targetKey: TourKeys.menuStats,
+          targetKey: TourKeys.menuCompleted,
           menuIndex: 0,
         ),
         AppTourStep(
@@ -120,6 +160,15 @@ class AppTours {
           body: 'Нажмите дату здесь — сразу откроется календарь на этот день. '
               'Удобно, не заходя в меню.',
           targetKey: TourKeys.quickCalendar,
+          menuIndex: 0,
+        ),
+        AppTourStep(
+          title: 'Сообщить об ошибке',
+          body: 'Нашли сбой или странное поведение — нажмите «Сообщить об ошибке». '
+              'Кратко укажите: где случилось, что делали и в чём ошибка. Сообщение сохранится в базе. '
+              'Иконка списка справа — все ваши репорты: открытые, исправленные, с пометкой. '
+              'Красный значок — сколько ещё не закрыто. Так тестировщик и разработчик не теряют баги.',
+          targetKey: TourKeys.bugReport,
           menuIndex: 0,
         ),
         AppTourStep(
@@ -159,16 +208,16 @@ class AppTours {
         AppTourStep(
           title: 'Что делаем с машиной',
           body: 'Нажмите картинку услуги (мойка, полировка…). '
-              'Отметьте нужные позиции — они появятся внизу в списке.',
+              'Отметьте нужные позиции — они появятся внизу в списке. '
+              'Для оклейки откроется пакет зон: отметьте детали и сумму пакета.',
           targetKey: TourKeys.orderGallery,
           menuIndex: 1,
         ),
         AppTourStep(
           title: 'Проверьте список и сохраните',
-          body: 'Внизу — выбранные работы и сумма, где она уже известна. '
-              'Для части услуг (например тонировка и оклейка) готовой цены может не быть — '
-              'её укажете позже в карточке заказа. Когда список верный — нажмите «Создать заказ»: '
-              'заказ появится на доске.',
+          body: 'Внизу — корзина и кнопка «Создать заказ» (она в подсветке — нажмите её). '
+              'Нужны телефон, имя, авто и хотя бы одна услуга — без услуг кнопка неактивна. '
+              'После сохранения можно сразу перейти на доску или в календарь.',
           targetKey: TourKeys.orderCart,
           menuIndex: 1,
         ),
@@ -178,12 +227,14 @@ class AppTours {
               'статус, работы, оплата.',
           targetKey: TourKeys.kanbanArea,
           menuIndex: 0,
+          requireOrders: true,
         ),
         AppTourStep(
           title: 'Как принять деньги',
-          body: 'В карточке внизу: сколько должен клиент и кнопка оплаты. '
+          body: 'Откройте карточку заказа с доски. Внизу: сколько должен клиент и кнопка оплаты. '
               'Выберите способ (нал / карта / перевод) и подтвердите.',
           menuIndex: 0,
+          requireOrders: true,
         ),
         AppTourStep(
           title: 'Деньги в кассе',
@@ -197,7 +248,7 @@ class AppTours {
     AppTour(
       id: 'cash',
       title: 'Касса и смена',
-      subtitle: 'Как не потерять наличные и расходы',
+      subtitle: 'Несколько касс, смена и журнал',
       icon: Icons.account_balance_wallet_outlined,
       steps: [
         AppTourStep(
@@ -209,21 +260,21 @@ class AppTours {
         AppTourStep(
           title: 'Цифры сверху',
           body: 'Полоска сверху — итоги за день (или неделю/месяц). '
-              'Нал, карта, переводы, расходы. «Долги» — кто ещё не расплатился.',
+              'Нал, карта, перевод, по счету, расходы. «Долги» — кто ещё не расплатился.',
           targetKey: TourKeys.cashKpi,
           menuIndex: 4,
         ),
         AppTourStep(
-          title: 'Смена = ящик с деньгами',
-          body: 'Утром откройте смену и укажите, сколько наличных в кассе. '
-              'Вечером закройте и сверьте с тем, что должно остаться.',
+          title: 'Несколько касс в смене',
+          body: 'Утром откройте смену и укажите остатки по кассам: Основная, Терминал, Переводы, счёт. '
+              'Можно добавить свою кассу. Вечером закройте и сверьте факт с ожиданием.',
           targetKey: TourKeys.cashShift,
           menuIndex: 4,
         ),
         AppTourStep(
           title: 'Быстрые кнопки расходов и приходов',
           body: 'Красные — потратили, зелёные — получили не из заказа (например, продали химию). '
-              'Нажали — почти всё уже заполнено, осталось вписать сумму.',
+              'Нажали — почти всё уже заполнено, осталось вписать сумму и выбрать кассу.',
           targetKey: TourKeys.cashTemplates,
           menuIndex: 4,
         ),
@@ -313,6 +364,13 @@ class AppTourLauncher {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(
+                  'Короткие сценарии по основным экранам — от меню до кассы и карточки заказа.',
+                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+                ),
+              ),
               for (final t in AppTours.all)
                 ListTile(
                   contentPadding: EdgeInsets.zero,
@@ -454,15 +512,67 @@ class AppTourLauncher {
     }
   }
 
+  /// Показ шага через Overlay навигатора (не rootOverlay и не ModalRoute).
+  /// Так диалоги (поиск, баг-репорт и т.д.), открытые во время шага, оказываются
+  /// выше тура — с ними можно полноценно работать, затем закрыть и продолжить обучение.
+  static Future<_TourAction?> _presentStep(
+    BuildContext context, {
+    required String tourTitle,
+    required int stepIndex,
+    required int stepCount,
+    required AppTourStep step,
+  }) {
+    final completer = Completer<_TourAction?>();
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (ctx) => _TourOverlay(
+        tourTitle: tourTitle,
+        stepIndex: stepIndex,
+        stepCount: stepCount,
+        step: step,
+        onAction: (action) {
+          entry.remove();
+          if (!completer.isCompleted) completer.complete(action);
+        },
+      ),
+    );
+    // Navigator.overlay: последующие showDialog / showGeneralDialog лягут сверху.
+    // rootOverlay: true клал тур поверх всего — поиск открывался «под затемнением».
+    final navOverlay = Navigator.of(context, rootNavigator: true).overlay;
+    (navOverlay ?? Overlay.of(context)).insert(entry);
+    return completer.future;
+  }
+
   /// Возвращает false, если пользователь прервал тур.
   static Future<bool> runTour(
     BuildContext context,
     AppTour tour, {
     required TourNavigate onNavigate,
   }) async {
+    // Если диалогов нет, а счётчик «залип» — выровнять.
+    final nav = Navigator.of(context, rootNavigator: true);
+    if (!nav.canPop() && TourNavBridge.instance.popupDepth.value != 0) {
+      TourNavBridge.instance.popupDepth.value = 0;
+    }
+
     for (var i = 0; i < tour.steps.length; i++) {
       if (!context.mounted) return false;
       final step = tour.steps[i];
+
+      if (step.requireOrders) {
+        final orders = await DatabaseHelper().getAllOrders();
+        if (!context.mounted) return false;
+        if (orders.isEmpty) {
+          await _warnNeedCreateOrder(context);
+          if (!context.mounted) return false;
+          // Вернуться к шагу с корзиной / созданием заказа.
+          final back = tour.steps.indexWhere((s) => s.targetKey == TourKeys.orderCart);
+          i = back >= 0 ? back - 1 : i - 2;
+          if (i < -1) i = -1;
+          continue;
+        }
+      }
+
       if (step.dismissOrderDetails) {
         await _dismissOrderDetailsIfOpen(context);
         if (!context.mounted) return false;
@@ -476,38 +586,60 @@ class AppTourLauncher {
       }
       if (!context.mounted) return false;
 
-      final action = await Navigator.of(context, rootNavigator: true).push<_TourAction>(
-        PageRouteBuilder(
-          opaque: false,
-          barrierDismissible: false,
-          pageBuilder: (_, __, ___) => _TourOverlay(
-            tourTitle: tour.title,
-            stepIndex: i,
-            stepCount: tour.steps.length,
-            step: step,
-          ),
-        ),
+      final action = await _presentStep(
+        context,
+        tourTitle: tour.title,
+        stepIndex: i,
+        stepCount: tour.steps.length,
+        step: step,
       );
-      if (action == null || action == _TourAction.skip) return false;
-      if (action == _TourAction.next) continue;
+      if (action == null || action == _TourAction.finish) return false;
+      // next и skip — следующий шаг
+      if (action == _TourAction.next || action == _TourAction.skip) continue;
     }
     return true;
   }
+
+  static Future<void> _warnNeedCreateOrder(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text(
+          'Сначала создайте заказ',
+          style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          'Заполните клиента и услуги, затем нажмите «Создать заказ» в подсвеченной зоне. '
+          'После этого можно продолжить обучение.',
+          style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 14, height: 1.35),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Понятно', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-enum _TourAction { next, skip }
+enum _TourAction { next, skip, finish }
 
 class _TourOverlay extends StatefulWidget {
   final String tourTitle;
   final int stepIndex;
   final int stepCount;
   final AppTourStep step;
+  final ValueChanged<_TourAction> onAction;
 
   const _TourOverlay({
     required this.tourTitle,
     required this.stepIndex,
     required this.stepCount,
     required this.step,
+    required this.onAction,
   });
 
   @override
@@ -529,11 +661,18 @@ class _TourOverlayState extends State<_TourOverlay>
   Size _cardSize = const Size(340, 220);
   late final AnimationController _arrowCtrl;
   bool _refineScheduled = false;
+  /// Глубина PopupRoute на момент показа шага (для order_deep уже может быть 1).
+  late int _popupDepthAtOpen;
+
+  bool get _pausedForDialog =>
+      TourNavBridge.instance.popupDepth.value > _popupDepthAtOpen;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _popupDepthAtOpen = TourNavBridge.instance.popupDepth.value;
+    TourNavBridge.instance.popupDepth.addListener(_onPopupDepth);
     _arrowCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 720),
@@ -541,8 +680,20 @@ class _TourOverlayState extends State<_TourOverlay>
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateLayout(restartArrow: true));
   }
 
+  void _onPopupDepth() {
+    if (!mounted) return;
+    setState(() {});
+    // После закрытия диалога — перемерить цель (layout мог сдвинуться).
+    if (!_pausedForDialog) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _updateLayout(restartArrow: false);
+      });
+    }
+  }
+
   @override
   void dispose() {
+    TourNavBridge.instance.popupDepth.removeListener(_onPopupDepth);
     WidgetsBinding.instance.removeObserver(this);
     _arrowCtrl.dispose();
     super.dispose();
@@ -604,6 +755,14 @@ class _TourOverlayState extends State<_TourOverlay>
       return clampPos((screen.width - w) / 2, screen.height * 0.32);
     }
 
+    // Огромная цель (доска на весь экран): карточку в правый верх — иначе уезжает
+    // вниз за край и кнопки попадают в «дырку» hit-test.
+    final screenArea = screen.width * screen.height;
+    final holeArea = hole.width * hole.height;
+    if (holeArea > screenArea * 0.40) {
+      return clampPos(maxR - w, minT + 12);
+    }
+
     final spaceRight = maxR - hole.right - _gap;
     final spaceLeft = hole.left - minL - _gap;
     final spaceBelow = maxB - hole.bottom - _gap;
@@ -639,11 +798,8 @@ class _TourOverlayState extends State<_TourOverlay>
     }
 
     if (options.isEmpty) {
-      // Узкий экран: снизу или сверху с максимальным местом
-      if (spaceBelow >= spaceAbove) {
-        return clampPos(hole.center.dx - w / 2, hole.bottom + _gap);
-      }
-      return clampPos(hole.center.dx - w / 2, hole.top - _gap - h);
+      // Нет места сбоку — правый верх, не низ экрана
+      return clampPos(maxR - w, minT + 12);
     }
 
     options.sort((a, b) => b.score.compareTo(a.score));
@@ -770,124 +926,197 @@ class _TourOverlayState extends State<_TourOverlay>
 
   @override
   Widget build(BuildContext context) {
+    // Любой новый диалог поверх шага — полностью прячем тур (без затемнения),
+    // клики идут в открытое окно. После закрытия диалога тур возвращается.
+    if (_pausedForDialog) {
+      return const IgnorePointer(child: SizedBox.expand());
+    }
+
     final screen = MediaQuery.sizeOf(context);
     final hole = _hole;
     final isLast = widget.stepIndex >= widget.stepCount - 1;
     final cardRect = Rect.fromLTWH(_cardPos.dx, _cardPos.dy, _cardWidth, _cardSize.height);
 
-    // Без полноэкранного Material — пустая зона hole пропускает тачи вниз.
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        ..._dimPanels(screen, hole),
-        if (hole != null)
-          Positioned(
-            left: hole.left,
-            top: hole.top,
-            width: hole.width,
-            height: hole.height,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(_holeRadius),
-                  border: Border.all(color: AppColors.primary, width: 2),
-                ),
-              ),
-            ),
-          ),
-        if (hole != null)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: AnimatedBuilder(
-                animation: _arrowCtrl,
-                builder: (_, __) => CustomPaint(
-                  painter: _TourArrowPainter(
-                    card: cardRect,
-                    hole: hole,
-                    progress: Curves.easeOutCubic.transform(_arrowCtrl.value),
-                    color: AppColors.primary,
+    // Overlay + pass-through в hole; зона карточки всегда кликабельна (даже над hole).
+    final cardHit = cardRect.inflate(4);
+    return _HolePassThrough(
+      hole: hole?.deflate(3),
+      card: cardHit,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ..._dimPanels(screen, hole),
+          if (hole != null)
+            Positioned(
+              left: hole.left,
+              top: hole.top,
+              width: hole.width,
+              height: hole.height,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(_holeRadius),
+                    border: Border.all(color: AppColors.primary, width: 2),
                   ),
                 ),
               ),
             ),
-          ),
-        Positioned(
-          left: _cardPos.dx,
-          top: _cardPos.dy,
-          width: _cardWidth,
-          child: Material(
-            key: _cardKey,
-            color: AppColors.surface,
-            elevation: 12,
-            borderRadius: BorderRadius.circular(14),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.primary.withOpacity(0.45)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    widget.tourTitle,
-                    style: GoogleFonts.manrope(
-                      color: AppColors.textDim,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${widget.stepIndex + 1} / ${widget.stepCount}',
-                    style: GoogleFonts.manrope(
+          if (hole != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedBuilder(
+                  animation: _arrowCtrl,
+                  builder: (_, __) => CustomPaint(
+                    painter: _TourArrowPainter(
+                      card: cardRect,
+                      hole: hole,
+                      progress: Curves.easeOutCubic.transform(_arrowCtrl.value),
                       color: AppColors.primary,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    widget.step.title,
-                    style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 17),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    widget.step.body,
-                    style: GoogleFonts.manrope(
-                      color: AppColors.textMuted,
-                      fontSize: 13.5,
-                      height: 1.35,
+                ),
+              ),
+            ),
+          Positioned(
+            left: _cardPos.dx,
+            top: _cardPos.dy,
+            width: _cardWidth,
+            child: Material(
+              key: _cardKey,
+              color: AppColors.surface,
+              elevation: 12,
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.45)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.tourTitle,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, _TourAction.skip),
-                        child: Text(
-                          'Пропустить',
-                          style: GoogleFonts.manrope(color: AppColors.textDim),
-                        ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${widget.stepIndex + 1} / ${widget.stepCount}',
+                      style: GoogleFonts.manrope(
+                        color: AppColors.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
-                      const Spacer(),
-                      ElevatedButton(
-                        onPressed: () => Navigator.pop(context, _TourAction.next),
-                        child: Text(
-                          isLast ? 'Готово' : 'Далее',
-                          style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                        ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.step.title,
+                      style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 17),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.step.body,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textMuted,
+                        fontSize: 13.5,
+                        height: 1.35,
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        TextButton(
+                          onPressed: () => widget.onAction(_TourAction.finish),
+                          child: Text(
+                            'Закончить',
+                            style: GoogleFonts.manrope(color: AppColors.textDim),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => widget.onAction(_TourAction.skip),
+                          child: Text(
+                            'Пропустить',
+                            style: GoogleFonts.manrope(color: AppColors.textMuted),
+                          ),
+                        ),
+                        const Spacer(),
+                        ElevatedButton(
+                          onPressed: () => widget.onAction(_TourAction.next),
+                          child: Text(
+                            isLast ? 'Готово' : 'Далее',
+                            style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
+  }
+}
+
+/// В зоне [hole] hit-test пропускается в UI под оверлеем,
+/// кроме [card] — подсказка тура и её кнопки всегда принимают клики.
+class _HolePassThrough extends SingleChildRenderObjectWidget {
+  final Rect? hole;
+  final Rect? card;
+
+  const _HolePassThrough({
+    required this.hole,
+    required this.card,
+    required Widget child,
+  }) : super(child: child);
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderHolePassThrough(hole: hole, card: card);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderHolePassThrough renderObject) {
+    renderObject.hole = hole;
+    renderObject.card = card;
+  }
+}
+
+class _RenderHolePassThrough extends RenderProxyBox {
+  _RenderHolePassThrough({Rect? hole, Rect? card})
+      : _hole = hole,
+        _card = card;
+
+  Rect? _hole;
+  Rect? _card;
+
+  set hole(Rect? value) {
+    if (_hole == value) return;
+    _hole = value;
+  }
+
+  set card(Rect? value) {
+    if (_card == value) return;
+    _card = value;
+  }
+
+  @override
+  bool hitTest(BoxHitTestResult result, {required Offset position}) {
+    final c = _card;
+    if (c != null && c.contains(position)) {
+      return super.hitTest(result, position: position);
+    }
+    final h = _hole;
+    if (h != null && h.contains(position)) {
+      return false;
+    }
+    return super.hitTest(result, position: position);
   }
 }
 

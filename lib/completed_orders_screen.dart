@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'database.dart';
+import 'db_refresh_mixin.dart';
 import 'order_details_dialog.dart';
+import 'responsive.dart';
 
 class CompletedOrdersScreen extends StatefulWidget {
   const CompletedOrdersScreen({super.key});
@@ -12,7 +15,9 @@ class CompletedOrdersScreen extends StatefulWidget {
   State<CompletedOrdersScreen> createState() => _CompletedOrdersScreenState();
 }
 
-class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> {
+class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> with DbRefreshMixin {
+  @override
+  void onDatabaseChanged() => _load(_searchController.text);
   List<Map<String, dynamic>> _orders = [];
   bool _isLoading = true;
   final _searchController = TextEditingController();
@@ -50,29 +55,30 @@ class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-            child: Row(
-              children: [
-                Text("Завершённые", style: AppTheme.pageTitle),
-                const Spacer(),
-                Text(
-                  "${_orders.length}",
-                  style: GoogleFonts.manrope(
-                    color: AppColors.textDim,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+          if (!AppResponsive.isMobile(context))
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+              child: Row(
+                children: [
+                  Text("Завершённые", style: AppTheme.pageTitle),
+                  const Spacer(),
+                  Text(
+                    "${_orders.length}",
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textDim,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+            padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 12),
             child: Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -103,7 +109,7 @@ class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> {
                         ),
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                        padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 24),
                         itemCount: _orders.length,
                         itemBuilder: (context, index) {
                           final o = _orders[index];
@@ -153,7 +159,7 @@ class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> {
                                             ),
                                             const SizedBox(height: 4),
                                             Text(
-                                              "${o['created_at'] ?? ''} · ${o['status'] ?? 'Выдан'}",
+                                              "${AppDateTime.format(o['created_at'])} · ${o['status'] ?? 'Выдан'}",
                                               style: GoogleFonts.manrope(
                                                 color: AppColors.textDim,
                                                 fontSize: 12,

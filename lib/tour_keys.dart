@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'app_menu.dart';
+
 /// GlobalKey для подсветки элементов в обучении.
 class TourKeys {
   static final search = GlobalKey(debugLabel: 'tour_search');
@@ -16,6 +18,7 @@ class TourKeys {
   static final menuCompleted = GlobalKey(debugLabel: 'tour_menu_completed');
   static final quickCalendar = GlobalKey(debugLabel: 'tour_quick_calendar');
   static final trainButton = GlobalKey(debugLabel: 'tour_train');
+  static final bugReport = GlobalKey(debugLabel: 'tour_bug_report');
 
   static final orderClient = GlobalKey(debugLabel: 'tour_order_client');
   static final orderSchedule = GlobalKey(debugLabel: 'tour_order_schedule');
@@ -36,27 +39,27 @@ class TourKeys {
   static final orderDetailsNotes = GlobalKey(debugLabel: 'tour_od_notes');
   static final orderDetailsPayment = GlobalKey(debugLabel: 'tour_od_payment');
 
-  static GlobalKey? menuKeyForIndex(int index) {
-    switch (index) {
-      case 0:
+  static GlobalKey? menuKeyForIndex(int id) {
+    switch (id) {
+      case AppMenuIds.board:
         return menuBoard;
-      case 1:
+      case AppMenuIds.newOrder:
         return menuNewOrder;
-      case 2:
+      case AppMenuIds.calendar:
         return menuCalendar;
-      case 3:
+      case AppMenuIds.clients:
         return menuClients;
-      case 4:
+      case AppMenuIds.cash:
         return menuCash;
-      case 5:
+      case AppMenuIds.stats:
         return menuStats;
-      case 6:
+      case AppMenuIds.staff:
         return menuStaff;
-      case 7:
+      case AppMenuIds.inventory:
         return menuInventory;
-      case 8:
+      case AppMenuIds.preview:
         return menuCalc;
-      case 9:
+      case AppMenuIds.completed:
         return menuCompleted;
       default:
         return null;

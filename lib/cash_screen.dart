@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'cash_catalog.dart';
 import 'cash_operation_dialog.dart';
+import 'cash_register_tx_dialog.dart';
 import 'cash_shift_panel.dart';
 import 'database.dart';
+import 'db_refresh_mixin.dart';
 import 'order_details_dialog.dart';
+import 'payment_edit_dialog.dart';
+import 'responsive.dart';
 import 'tour_keys.dart';
 
 class CashScreen extends StatefulWidget {
@@ -16,14 +21,17 @@ class CashScreen extends StatefulWidget {
   State<CashScreen> createState() => _CashScreenState();
 }
 
-class _CashScreenState extends State<CashScreen> {
+class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
+  @override
+  void onDatabaseChanged() => _loadData();
   String _period = 'today';
   String _startDate = '';
   String _endDate = '';
   List<Map<String, dynamic>> _journal = [];
   Map<String, dynamic>? _shift;
-  double? _expectedCash;
   double _debtTotal = 0;
+  List<Map<String, dynamic>> _registerSnapshots = [];
+  int? _selectedRegisterId;
 
   double _cashSum = 0;
   double _cardSum = 0;
@@ -86,9 +94,19 @@ class _CashScreenState extends State<CashScreen> {
   Future<void> _loadData() async {
     final journal = await DatabaseHelper().getCashJournal(_startDate, _endDate);
     final shift = await DatabaseHelper().getCurrentShift();
-    double? expected;
+    List<Map<String, dynamic>> snaps;
     if (shift != null) {
-      expected = await DatabaseHelper().getShiftExpectedCash((shift['id'] as num).toInt());
+      final sid = (shift['id'] as num).toInt();
+      snaps = await DatabaseHelper().getShiftRegisterSnapshots(sid);
+    } else {
+      final regs = await DatabaseHelper().getCashRegisters();
+      snaps = regs
+          .map((r) => {
+                ...r,
+                'opening': 0.0,
+                'expected': 0.0,
+              })
+          .toList();
     }
     final debt = await DatabaseHelper().getTotalDebt();
 
@@ -97,7 +115,6 @@ class _CashScreenState extends State<CashScreen> {
       final amount = (row['amount'] as num?)?.toDouble() ?? 0;
       final type = row['type']?.toString() ?? '';
       final method = row['method']?.toString() ?? '';
-      final source = row['source']?.toString() ?? '';
 
       if (type == 'Расход') {
         expense += amount;
@@ -117,7 +134,7 @@ class _CashScreenState extends State<CashScreen> {
           invoice += amount;
           break;
         default:
-          if (source == 'payment') card += amount;
+          // «Не указан» и прочее — не кладём в «Карта»
           break;
       }
     }
@@ -126,7 +143,12 @@ class _CashScreenState extends State<CashScreen> {
     setState(() {
       _journal = journal;
       _shift = shift;
-      _expectedCash = expected;
+      _registerSnapshots = snaps;
+      if (_selectedRegisterId != null &&
+          !snaps.any((s) => (s['id'] as num).toInt() == _selectedRegisterId)) {
+        _selectedRegisterId = snaps.isEmpty ? null : (snaps.first['id'] as num).toInt();
+      }
+      _selectedRegisterId ??= snaps.isEmpty ? null : (snaps.first['id'] as num).toInt();
       _debtTotal = debt;
       _cashSum = cash;
       _cardSum = card;
@@ -153,15 +175,15 @@ class _CashScreenState extends State<CashScreen> {
     }).toList();
   }
 
-  String _fmtDt(String? raw) {
-    if (raw == null || raw.isEmpty) return '';
-    final dt = DateTime.tryParse(raw.contains(' ') ? raw.replaceFirst(' ', 'T') : raw);
-    if (dt == null) return raw;
-    return DateFormat('dd.MM HH:mm').format(dt);
-  }
+  String _fmtDt(String? raw) => AppDateTime.formatShort(raw);
 
-  Future<void> _openOp({CashTemplate? template}) async {
-    final ok = await CashOperationDialog.open(context, template: template);
+  Future<void> _openOp({CashTemplate? template, int? editFlowId}) async {
+    final ok = await CashOperationDialog.open(
+      context,
+      template: template,
+      registerId: _selectedRegisterId,
+      editFlowId: editFlowId,
+    );
     if (ok == true) _loadData();
   }
 
@@ -170,6 +192,95 @@ class _CashScreenState extends State<CashScreen> {
     if (order == null || !mounted) return;
     final refreshed = await OrderDetailsDialog.open(context, order);
     if (refreshed == true) _loadData();
+  }
+
+  String _registerPeriodStart() {
+    final opened = _shift?['opened_at']?.toString() ?? '';
+    if (opened.length >= 10) return opened.substring(0, 10);
+    return _startDate;
+  }
+
+  Future<void> _openRegisterTx(Map<String, dynamic> snap) async {
+    final rid = (snap['id'] as num).toInt();
+    setState(() => _selectedRegisterId = rid);
+    final changed = await CashRegisterTxDialog.open(
+      context,
+      registerId: rid,
+      registerName: snap['name']?.toString() ?? 'Касса',
+      moneyType: snap['money_type']?.toString() ?? '',
+      expected: (snap['expected'] as num?)?.toDouble() ??
+          (snap['opening'] as num?)?.toDouble() ??
+          0,
+      startDate: _registerPeriodStart(),
+      endDate: _endDate,
+    );
+    if (changed == true) _loadData();
+  }
+
+  Future<void> _editJournalRow(Map<String, dynamic> row) async {
+    final source = row['source']?.toString() ?? '';
+    final id = (row['id'] as num?)?.toInt();
+    if (id == null) return;
+
+    if (source == 'flow') {
+      await _openOp(editFlowId: id);
+      return;
+    }
+    if (source == 'payment') {
+      final result = await PaymentEditDialog.open(
+        context,
+        paymentId: id,
+        amount: (row['amount'] as num?)?.toDouble() ?? 0,
+        method: row['method']?.toString() ?? '',
+        registerId: (row['register_id'] as num?)?.toInt(),
+        orderId: (row['order_id'] as num?)?.toInt(),
+        title: row['title']?.toString() ?? 'Оплата',
+      );
+      if (result == 'saved' || result == 'voided') {
+        _loadData();
+      } else if (result == 'order') {
+        final oid = (row['order_id'] as num?)?.toInt();
+        if (oid != null) await _openOrder(oid);
+      }
+    }
+  }
+
+  Future<void> _deleteJournalRow(Map<String, dynamic> row) async {
+    final source = row['source']?.toString() ?? '';
+    final id = (row['id'] as num?)?.toInt();
+    if (id == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text(
+          source == 'payment' ? 'Отменить оплату?' : 'Удалить операцию?',
+          style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          source == 'payment'
+              ? 'Платёж будет удалён, сумма в заказе пересчитается.'
+              : 'Операция будет удалена безвозвратно.',
+          style: GoogleFonts.manrope(color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Нет')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(source == 'payment' ? 'Отменить' : 'Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    if (source == 'flow') {
+      await DatabaseHelper().deleteCashFlow(id);
+    } else {
+      await DatabaseHelper().voidPayment(id);
+    }
+    _loadData();
   }
 
   Future<void> _showDebts() async {
@@ -181,8 +292,8 @@ class _CashScreenState extends State<CashScreen> {
         backgroundColor: AppColors.surface,
         title: Text('Долги по заказам', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
         content: SizedBox(
-          width: 480,
-          height: 420,
+          width: AppResponsive.dialogWidth(ctx, desktop: 480),
+          height: AppResponsive.isMobile(ctx) ? MediaQuery.sizeOf(ctx).height * 0.55 : 420,
           child: debts.isEmpty
               ? Center(child: Text('Долгов нет', style: GoogleFonts.manrope(color: AppColors.textDim)))
               : ListView.separated(
@@ -250,10 +361,14 @@ class _CashScreenState extends State<CashScreen> {
     required Color color,
     VoidCallback? onTap,
     bool emphasize = false,
+    /// false — фиксированная ширина (горизонтальный скролл на mobile).
+    bool expand = true,
+    bool compact = false,
   }) {
     final child = Container(
-      height: 72,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      width: expand ? null : 132,
+      height: compact ? 56 : 72,
+      padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14, vertical: compact ? 8 : 10),
       decoration: BoxDecoration(
         color: AppColors.surface2,
         borderRadius: BorderRadius.circular(AppTheme.radius),
@@ -270,30 +385,40 @@ class _CashScreenState extends State<CashScreen> {
         children: [
           Text(
             title,
-            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 11, fontWeight: FontWeight.w700),
+            style: GoogleFonts.manrope(
+              color: AppColors.textMuted,
+              fontSize: compact ? 10 : 11,
+              fontWeight: FontWeight.w700,
+            ),
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: compact ? 2 : 4),
           FittedBox(
             fit: BoxFit.scaleDown,
             alignment: Alignment.centerLeft,
             child: Text(
               '${_money.format(amount)} ₽',
-              style: GoogleFonts.manrope(color: color, fontSize: 18, fontWeight: FontWeight.w800, height: 1.1),
+              style: GoogleFonts.manrope(
+                color: color,
+                fontSize: compact ? 15 : 18,
+                fontWeight: FontWeight.w800,
+                height: 1.1,
+              ),
             ),
           ),
         ],
       ),
     );
-    if (onTap == null) return Expanded(child: child);
-    return Expanded(
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(AppTheme.radius), child: child),
-      ),
-    );
+    final tappable = onTap == null
+        ? child
+        : Material(
+            color: Colors.transparent,
+            child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(AppTheme.radius), child: child),
+          );
+    if (!expand) return tappable;
+    return Expanded(child: tappable);
   }
 
-  Widget _templateChip(CashTemplate t) {
+  Widget _templateChip(CashTemplate t, {bool emphasize = false}) {
     final income = t.type == 'Приход';
     final accent = income ? AppColors.success : AppColors.danger;
     return Padding(
@@ -304,20 +429,20 @@ class _CashScreenState extends State<CashScreen> {
           onTap: () => _openOp(template: t),
           borderRadius: BorderRadius.circular(10),
           child: Container(
-            height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            height: emphasize ? 40 : 36,
+            padding: EdgeInsets.symmetric(horizontal: emphasize ? 14 : 12),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.10),
+              color: accent.withOpacity(emphasize ? 0.22 : 0.10),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: accent.withOpacity(0.40)),
+              border: Border.all(color: accent.withOpacity(emphasize ? 0.75 : 0.40), width: emphasize ? 1.4 : 1),
             ),
             child: Text(
               t.label,
               style: GoogleFonts.manrope(
                 color: accent,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                fontSize: emphasize ? 13.5 : 13,
               ),
             ),
           ),
@@ -347,7 +472,9 @@ class _CashScreenState extends State<CashScreen> {
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
-              child: Row(children: items.map(_templateChip).toList()),
+              child: Row(
+                children: items.map((t) => _templateChip(t, emphasize: true)).toList(),
+              ),
             ),
           ),
         ],
@@ -355,23 +482,27 @@ class _CashScreenState extends State<CashScreen> {
     );
   }
 
-  Widget _journalRow(Map<String, dynamic> row, bool alt) {
+  Widget _journalRow(Map<String, dynamic> row, bool alt, {bool desktopActions = false}) {
     final isIncome = row['type']?.toString() == 'Приход';
     final color = isIncome ? AppColors.success : AppColors.danger;
     final sign = isIncome ? '+' : '−';
     final amount = (row['amount'] as num?)?.toDouble() ?? 0;
     final orderId = (row['order_id'] as num?)?.toInt();
     final source = row['source']?.toString() ?? '';
-    final clickable = orderId != null && source == 'payment';
+    final clickable = orderId != null && source == 'payment' && !desktopActions;
     final meta = [
       row['category']?.toString() ?? '',
       row['method']?.toString() ?? '',
+      if (source == 'payment') 'оплата',
+      if (source == 'flow') 'операция',
     ].where((s) => s.isNotEmpty).join(' · ');
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: clickable ? () => _openOrder(orderId) : null,
+        onTap: desktopActions
+            ? () => _editJournalRow(row)
+            : (clickable ? () => _openOrder(orderId) : null),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
           decoration: BoxDecoration(
@@ -402,7 +533,7 @@ class _CashScreenState extends State<CashScreen> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.manrope(
-                        color: clickable ? AppColors.primary : AppColors.text,
+                        color: (clickable || desktopActions) ? AppColors.primary : AppColors.text,
                         fontWeight: FontWeight.w600,
                         fontSize: 14,
                       ),
@@ -428,6 +559,21 @@ class _CashScreenState extends State<CashScreen> {
                   style: GoogleFonts.manrope(color: color, fontWeight: FontWeight.w800, fontSize: 15),
                 ),
               ),
+              if (desktopActions) ...[
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'Изменить',
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  onPressed: () => _editJournalRow(row),
+                ),
+                IconButton(
+                  tooltip: 'Удалить',
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(Icons.delete_outline, size: 18, color: AppColors.danger.withOpacity(0.9)),
+                  onPressed: () => _deleteJournalRow(row),
+                ),
+              ],
             ],
           ),
         ),
@@ -435,20 +581,173 @@ class _CashScreenState extends State<CashScreen> {
     );
   }
 
+  /// Mobile: смена + компактные KPI + операция + шаблоны + журнал.
+  Widget _buildMobileCash() {
+    final expenseTpl = kCashTemplates.where((t) => t.type == 'Расход').toList();
+    final incomeTpl = kCashTemplates.where((t) => t.type == 'Приход').toList();
+    final rows = _filteredJournal.take(40).toList();
+
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+          children: [
+            Text('Касса', style: AppTheme.pageTitle),
+            const SizedBox(height: 6),
+            Text(
+              'Смена, итоги и операции',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _periodChip('today', 'Сегодня'),
+                  _periodChip('week', 'Неделя'),
+                  _periodChip('month', 'Месяц'),
+                  _periodChip(
+                    'custom',
+                    _period == 'custom' ? '$_startDate — $_endDate' : 'Период',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            KeyedSubtree(
+              key: TourKeys.cashKpi,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    SizedBox(width: 120, child: _kpi(title: 'Наличные', amount: _cashSum, color: AppColors.success, expand: false)),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 110, child: _kpi(title: 'Карта', amount: _cardSum, color: AppColors.primary, expand: false)),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 110, child: _kpi(title: 'Перевод', amount: _transferSum, color: const Color(0xFF38BDF8), expand: false)),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 110, child: _kpi(title: 'По счету', amount: _invoiceSum, color: const Color(0xFFA78BFA), expand: false)),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 110, child: _kpi(title: 'Расходы', amount: _expenseSum, color: AppColors.danger, expand: false)),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 110, child: _kpi(title: 'Итого', amount: _net, color: AppColors.text, emphasize: true, expand: false)),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 110, child: _kpi(title: 'Долги', amount: _debtTotal, color: AppColors.danger, onTap: _showDebts, expand: false)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            KeyedSubtree(
+              key: TourKeys.cashShift,
+              child: CashShiftPanel(
+                shift: _shift,
+                registerSnapshots: _registerSnapshots,
+                selectedRegisterId: _selectedRegisterId,
+                onSelectRegister: (id) => setState(() => _selectedRegisterId = id),
+                onOpenRegister: _openRegisterTx,
+                onChanged: _loadData,
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              height: 52,
+              child: ElevatedButton.icon(
+                onPressed: () => _openOp(),
+                icon: const Icon(Icons.add, size: 22),
+                label: Text(
+                  'Новая операция',
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Быстрые шаблоны',
+              style: GoogleFonts.manrope(
+                color: AppColors.textDim,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 10),
+            KeyedSubtree(
+              key: TourKeys.cashTemplates,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _templateRow('Расход', AppColors.danger, expenseTpl),
+                  _templateRow('Приход', AppColors.success, incomeTpl),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            KeyedSubtree(
+              key: TourKeys.cashJournal,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Text('Журнал', style: AppTheme.sectionTitle),
+                      const Spacer(),
+                      _miniFilter('Все', _filterSource == 'all' && _filterType == 'all', () {
+                        setState(() {
+                          _filterSource = 'all';
+                          _filterType = 'all';
+                        });
+                      }),
+                      _miniFilter('Оплаты', _filterSource == 'payment', () {
+                        setState(() => _filterSource = _filterSource == 'payment' ? 'all' : 'payment');
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  if (_isLoading)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+                    )
+                  else if (rows.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      child: Text(
+                        'Нет операций за период',
+                        style: GoogleFonts.manrope(color: AppColors.textDim),
+                      ),
+                    )
+                  else
+                    ...rows.asMap().entries.map((e) => _journalRow(e.value, e.key.isOdd)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (AppResponsive.isMobile(context)) {
+      return _buildMobileCash();
+    }
+
     final rows = _filteredJournal;
     final expenseTpl = kCashTemplates.where((t) => t.type == 'Расход').toList();
     final incomeTpl = kCashTemplates.where((t) => t.type == 'Приход').toList();
+    const padH = 24.0;
 
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // --- Шапка ---
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+            padding: const EdgeInsets.fromLTRB(padH, 20, padH, 10),
             child: Row(
               children: [
                 Text('Касса', style: AppTheme.pageTitle),
@@ -466,73 +765,85 @@ class _CashScreenState extends State<CashScreen> {
               ],
             ),
           ),
-
-          // --- KPI + смена ---
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 14),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: KeyedSubtree(
-                    key: TourKeys.cashKpi,
-                    child: Row(
-                    children: [
-                      _kpi(title: 'Наличные', amount: _cashSum, color: AppColors.success),
-                      const SizedBox(width: 8),
-                      _kpi(title: 'Карта', amount: _cardSum, color: AppColors.primary),
-                      const SizedBox(width: 8),
-                      _kpi(title: 'Перевод', amount: _transferSum, color: const Color(0xFF38BDF8)),
-                      const SizedBox(width: 8),
-                      _kpi(title: 'По счёту', amount: _invoiceSum, color: const Color(0xFFA78BFA)),
-                      const SizedBox(width: 8),
-                      _kpi(title: 'Расходы', amount: _expenseSum, color: AppColors.danger),
-                      const SizedBox(width: 8),
-                      _kpi(title: 'Итого', amount: _net, color: AppColors.text, emphasize: true),
-                      const SizedBox(width: 8),
-                      _kpi(title: 'Долги', amount: _debtTotal, color: AppColors.danger, onTap: _showDebts),
-                    ],
-                  ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  key: TourKeys.cashShift,
-                  width: 240,
-                  child: CashShiftPanel(
-                    shift: _shift,
-                    expectedCash: _expectedCash,
-                    onChanged: _loadData,
-                  ),
-                ),
-              ],
+            key: TourKeys.cashShift,
+            padding: const EdgeInsets.fromLTRB(padH, 0, padH, 8),
+            child: CashShiftPanel(
+              shift: _shift,
+              registerSnapshots: _registerSnapshots,
+              selectedRegisterId: _selectedRegisterId,
+              onSelectRegister: (id) => setState(() => _selectedRegisterId = id),
+              onOpenRegister: _openRegisterTx,
+              onChanged: _loadData,
             ),
           ),
-
-          // --- Шаблоны двумя группами ---
+          Padding(
+            padding: const EdgeInsets.fromLTRB(padH, 0, padH, 6),
+            child: KeyedSubtree(
+              key: TourKeys.cashKpi,
+              child: Row(
+                children: [
+                  _kpi(title: 'Наличные', amount: _cashSum, color: AppColors.success, compact: true),
+                  const SizedBox(width: 6),
+                  _kpi(title: 'Карта', amount: _cardSum, color: AppColors.primary, compact: true),
+                  const SizedBox(width: 6),
+                  _kpi(title: 'Перевод', amount: _transferSum, color: const Color(0xFF38BDF8), compact: true),
+                  const SizedBox(width: 6),
+                  _kpi(title: 'По счету', amount: _invoiceSum, color: const Color(0xFFA78BFA), compact: true),
+                  const SizedBox(width: 6),
+                  _kpi(title: 'Расходы', amount: _expenseSum, color: AppColors.danger, compact: true),
+                  const SizedBox(width: 6),
+                  _kpi(title: 'Итого', amount: _net, color: AppColors.text, emphasize: true, compact: true),
+                  const SizedBox(width: 6),
+                  _kpi(title: 'Долги', amount: _debtTotal, color: AppColors.danger, onTap: _showDebts, compact: true),
+                ],
+              ),
+            ),
+          ),
           Padding(
             key: TourKeys.cashTemplates,
-            padding: const EdgeInsets.fromLTRB(24, 0, 24, 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Быстрые шаблоны',
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.4),
-                ),
-                const SizedBox(height: 8),
-                _templateRow('Расход', AppColors.danger, expenseTpl),
-                _templateRow('Приход', AppColors.success, incomeTpl),
-              ],
-            ),
-          ),
-
-          // --- Журнал: заголовок + фильтры ---
-          Padding(
-            key: TourKeys.cashJournal,
-            padding: const EdgeInsets.fromLTRB(24, 6, 24, 0),
+            padding: const EdgeInsets.fromLTRB(padH, 0, padH, 8),
             child: Container(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+              decoration: BoxDecoration(
+                color: AppColors.surface2,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.primary.withOpacity(0.45)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.bolt_rounded, size: 18, color: AppColors.primary.withOpacity(0.95)),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Быстрые шаблоны',
+                        style: GoogleFonts.manrope(
+                          color: AppColors.text,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'один клик — новая операция',
+                        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  _templateRow('Расход', AppColors.danger, expenseTpl),
+                  _templateRow('Приход', AppColors.success, incomeTpl),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            key: TourKeys.cashJournal,
+            padding: const EdgeInsets.fromLTRB(padH, 4, padH, 0),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
               decoration: BoxDecoration(
                 color: AppColors.surface2,
                 borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
@@ -589,11 +900,9 @@ class _CashScreenState extends State<CashScreen> {
               ),
             ),
           ),
-
-          // --- Список ---
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+              padding: const EdgeInsets.fromLTRB(padH, 0, padH, 20),
               child: Container(
                 decoration: BoxDecoration(
                   color: AppColors.surface.withOpacity(0.35),
@@ -612,7 +921,8 @@ class _CashScreenState extends State<CashScreen> {
                           )
                         : ListView.builder(
                             itemCount: rows.length,
-                            itemBuilder: (context, index) => _journalRow(rows[index], index.isOdd),
+                            itemBuilder: (context, index) =>
+                                _journalRow(rows[index], index.isOdd, desktopActions: true),
                           ),
               ),
             ),
@@ -638,7 +948,7 @@ class _CashScreenState extends State<CashScreen> {
         selected: active,
         onSelected: (_) => onTap(),
         selectedColor: accent.withOpacity(0.40),
-        backgroundColor: AppColors.bg,
+        backgroundColor: Colors.transparent,
         side: BorderSide(color: active ? accent : AppColors.border),
         showCheckmark: false,
         visualDensity: VisualDensity.compact,

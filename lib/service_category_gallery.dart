@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'service_category_browser.dart';
+import 'wrap_catalog.dart';
 
 /// Явный маппинг категория → asset (имена файлов в assets/images/).
 const Map<String, String> kCategoryImageAssets = {
@@ -13,10 +14,6 @@ const Map<String, String> kCategoryImageAssets = {
   'Оклейка (Пленка)': 'assets/images/wrapping.jpg',
   'Тонировка': 'assets/images/tinting.jpg',
 };
-
-bool _isWrapRiskZone(Map<String, dynamic> s) {
-  return (s['name'] ?? '').toString().contains(' · ЗР · ');
-}
 
 String? imageAssetForCategory(String category) {
   if (kCategoryImageAssets.containsKey(category)) {
@@ -39,6 +36,10 @@ class ServiceCategoryGallery extends StatelessWidget {
   final String carCategory;
   final Set<String> selectedNames;
   final void Function(String name, double price, String category) onToggle;
+  /// Пакет оклейки из оверлея (зоны + сумма).
+  final void Function(WrapPackageDraft draft)? onWrapPackage;
+  final Set<String> wrapSelectedNames;
+  final double wrapPackagePrice;
 
   const ServiceCategoryGallery({
     super.key,
@@ -46,6 +47,9 @@ class ServiceCategoryGallery extends StatelessWidget {
     required this.carCategory,
     required this.selectedNames,
     required this.onToggle,
+    this.onWrapPackage,
+    this.wrapSelectedNames = const {},
+    this.wrapPackagePrice = 0,
   });
 
   Future<void> _openCategory(
@@ -53,6 +57,7 @@ class ServiceCategoryGallery extends StatelessWidget {
     String category,
     List<Map<String, dynamic>> items,
   ) async {
+    final isWrap = category == 'Оклейка (Пленка)';
     await showGeneralDialog<void>(
       context: context,
       barrierDismissible: true,
@@ -62,15 +67,26 @@ class ServiceCategoryGallery extends StatelessWidget {
       pageBuilder: (ctx, anim, secondary) {
         return SafeArea(
           child: Center(
-            child: _CategoryExpandCard(
-              category: category,
-              asset: imageAssetForCategory(category),
-              items: items,
-              carCategory: carCategory,
-              selectedNames: selectedNames,
-              onToggle: onToggle,
-              onDismiss: () => Navigator.of(ctx).pop(),
-            ),
+            child: isWrap
+                ? _WrapExpandCard(
+                    asset: imageAssetForCategory(category),
+                    initiallySelected: wrapSelectedNames,
+                    initialPrice: wrapPackagePrice,
+                    onApply: (draft) {
+                      onWrapPackage?.call(draft);
+                      Navigator.of(ctx).pop();
+                    },
+                    onDismiss: () => Navigator.of(ctx).pop(),
+                  )
+                : _CategoryExpandCard(
+                    category: category,
+                    asset: imageAssetForCategory(category),
+                    items: items,
+                    carCategory: carCategory,
+                    selectedNames: selectedNames,
+                    onToggle: onToggle,
+                    onDismiss: () => Navigator.of(ctx).pop(),
+                  ),
           ),
         );
       },
@@ -98,7 +114,6 @@ class ServiceCategoryGallery extends StatelessWidget {
       );
     }
 
-    // Ячейки 263×263 (~1.5× от прежних 175).
     return GridView.builder(
       padding: const EdgeInsets.only(bottom: 4),
       itemCount: categories.length,
@@ -111,8 +126,9 @@ class ServiceCategoryGallery extends StatelessWidget {
       itemBuilder: (context, index) {
         final cat = categories[index];
         final items = grouped[cat]!;
-        final selectedCount =
-            items.where((s) => selectedNames.contains(s['name']?.toString())).length;
+        final selectedCount = cat == 'Оклейка (Пленка)'
+            ? wrapSelectedNames.length
+            : items.where((s) => selectedNames.contains(s['name']?.toString())).length;
         return _CategoryTile(
           category: cat,
           asset: imageAssetForCategory(cat),
@@ -165,13 +181,13 @@ class _CategoryTile extends StatelessWidget {
                         category,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.manrope(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        height: 1.15,
-                        shadows: const [Shadow(blurRadius: 8, color: Colors.black54)],
-                      ),
+                        style: GoogleFonts.manrope(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w800,
+                          height: 1.15,
+                          shadows: const [Shadow(blurRadius: 8, color: Colors.black54)],
+                        ),
                       ),
                       if (selectedCount > 0) ...[
                         const SizedBox(height: 4),
@@ -217,6 +233,113 @@ class _CategoryImage extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+        ),
+      ),
+    );
+  }
+}
+
+/// Оверлей оклейки: каталог Перед/Борта/Зад на фоне картинки.
+class _WrapExpandCard extends StatelessWidget {
+  final String? asset;
+  final Set<String> initiallySelected;
+  final double initialPrice;
+  final ValueChanged<WrapPackageDraft> onApply;
+  final VoidCallback onDismiss;
+
+  const _WrapExpandCard({
+    required this.asset,
+    required this.initiallySelected,
+    required this.initialPrice,
+    required this.onApply,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final cardW = (size.width * 0.72).clamp(420.0, 920.0);
+    final cardH = (size.height * 0.84).clamp(480.0, 820.0);
+
+    return Material(
+      color: Colors.transparent,
+      child: GestureDetector(
+        onTap: onDismiss,
+        behavior: HitTestBehavior.opaque,
+        child: Center(
+          child: GestureDetector(
+            onTap: () {},
+            child: Hero(
+              tag: 'category-hero-Оклейка (Пленка)',
+              child: Material(
+                color: Colors.transparent,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: SizedBox(
+                    width: cardW,
+                    height: cardH,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        _CategoryImage(asset: asset),
+                        Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.black.withOpacity(0.5),
+                                Colors.black.withOpacity(0.82),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      'Оклейка (Пленка)',
+                                      style: GoogleFonts.manrope(
+                                        color: Colors.white,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Закрыть',
+                                    onPressed: onDismiss,
+                                    icon: const Icon(Icons.close, color: Colors.white70),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                                child: WrapPackageEditor(
+                                  dark: true,
+                                  initiallySelected: initiallySelected,
+                                  initialPrice: initialPrice,
+                                  onApply: onApply,
+                                  onCancel: onDismiss,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -281,11 +404,6 @@ class _CategoryExpandCardState extends State<_CategoryExpandCard> {
     final cardW = (size.width * 0.52).clamp(360.0, 560.0);
     final cardH = (size.height * 0.72).clamp(420.0, 640.0);
 
-    final isWrap = widget.category == 'Оклейка (Пленка)';
-    final popular =
-        isWrap ? widget.items.where((s) => !_isWrapRiskZone(s)).toList() : widget.items;
-    final risk = isWrap ? widget.items.where(_isWrapRiskZone).toList() : <Map<String, dynamic>>[];
-
     return Material(
       color: Colors.transparent,
       child: GestureDetector(
@@ -293,7 +411,7 @@ class _CategoryExpandCardState extends State<_CategoryExpandCard> {
         behavior: HitTestBehavior.opaque,
         child: Center(
           child: GestureDetector(
-            onTap: () {}, // не закрывать при тапе по карточке
+            onTap: () {},
             child: Hero(
               tag: 'category-hero-${widget.category}',
               child: Material(
@@ -348,44 +466,7 @@ class _CategoryExpandCardState extends State<_CategoryExpandCard> {
                               child: ListView(
                                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
                                 children: [
-                                  if (isWrap && popular.isNotEmpty) ...[
-                                    Text(
-                                      "Частые",
-                                      style: GoogleFonts.manrope(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                  ],
-                                  for (final s in popular) _serviceRow(s),
-                                  if (risk.isNotEmpty) ...[
-                                    const SizedBox(height: 8),
-                                    Theme(
-                                      data: Theme.of(context).copyWith(
-                                        dividerColor: Colors.transparent,
-                                        unselectedWidgetColor: Colors.white70,
-                                      ),
-                                      child: ExpansionTile(
-                                        initiallyExpanded: false,
-                                        tilePadding: EdgeInsets.zero,
-                                        iconColor: Colors.white,
-                                        collapsedIconColor: Colors.white70,
-                                        title: Text(
-                                          "Зоны риска · ${risk.length}",
-                                          style: GoogleFonts.manrope(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                        children: [
-                                          for (final s in risk) _serviceRow(s),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
+                                  for (final s in widget.items) _serviceRow(s),
                                 ],
                               ),
                             ),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'database.dart';
+import 'responsive.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key});
@@ -284,7 +285,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
+          padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 12, AppResponsive.isMobile(context) ? 12 : 24, 12),
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -310,7 +311,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                   child: Text("Ничего не найдено", style: GoogleFonts.manrope(color: AppColors.textDim)),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 24),
                   itemCount: cats.length,
                   itemBuilder: (context, index) {
                     final catName = cats[index];
@@ -359,7 +360,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 12),
+          padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 12, AppResponsive.isMobile(context) ? 12 : 24, 12),
           child: Row(
             children: [
               Expanded(
@@ -385,7 +386,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 24),
                   itemCount: _inventory.length,
                   itemBuilder: (context, index) {
                     final item = _inventory[index];
@@ -455,12 +456,12 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+            padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, 8),
             child: Row(
               children: [
                 Text("Услуги и склад", style: AppTheme.pageTitle),
@@ -582,7 +583,7 @@ class _RecipeEditorDialogState extends State<_RecipeEditorDialog> {
         style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 16),
       ),
       content: SizedBox(
-        width: 420,
+        width: AppResponsive.dialogWidth(context, desktop: 420),
         child: _loading
             ? const SizedBox(
                 height: 80,

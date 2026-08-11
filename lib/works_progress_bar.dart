@@ -28,7 +28,7 @@ class WorksProgressBar extends StatelessWidget {
   factory WorksProgressBar.fromItems(List<Map<String, dynamic>> items, {bool compact = false}) {
     // Шапка пакета оклейки не считается отдельной работой.
     final countable = items.where((w) {
-      if (isWrapPackageHeader(w['name']?.toString()) && w['parent_id'] == null) {
+      if (isZonePackageHeader(w['name']?.toString()) && w['parent_id'] == null) {
         return false;
       }
       return true;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'database.dart';
+import 'responsive.dart';
 
 class MastersScreen extends StatefulWidget {
   const MastersScreen({super.key});
@@ -144,7 +145,7 @@ class _MastersScreenState extends State<MastersScreen> {
 
   Widget _buildToolbar() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+      margin: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppColors.surface2,
@@ -307,12 +308,12 @@ class _MastersScreenState extends State<MastersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+            padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, 16),
             child: Row(
               children: [
                 Text("Сотрудники", style: AppTheme.pageTitle),
@@ -340,7 +341,7 @@ class _MastersScreenState extends State<MastersScreen> {
                         ),
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                        padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 24),
                         itemCount: _masters.length,
                         itemBuilder: (context, index) => _buildMasterCard(_masters[index]),
                       ),

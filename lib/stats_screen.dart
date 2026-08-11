@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'app_theme.dart';
 import 'database.dart';
+import 'responsive.dart';
 
 class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key});
@@ -22,6 +23,8 @@ class _StatsScreenState extends State<StatsScreen> {
   List<Map<String, dynamic>> _topByRevenue = [];
   List<double> _dayTotals = List.filled(30, 0);
   List<String> _dayLabels = List.filled(30, "");
+  List<Map<String, dynamic>> _masterDay = [];
+  late DateTime _masterDayDate;
   bool _isLoading = true;
 
   final _money = NumberFormat('#,##0.##', 'ru_RU');
@@ -29,6 +32,8 @@ class _StatsScreenState extends State<StatsScreen> {
   @override
   void initState() {
     super.initState();
+    final now = DateTime.now();
+    _masterDayDate = DateTime(now.year, now.month, now.day);
     _loadStats();
   }
 
@@ -39,6 +44,9 @@ class _StatsScreenState extends State<StatsScreen> {
     final topByCount = await DatabaseHelper().getServicesStats();
     final topByRevenue = await DatabaseHelper().getTopServicesByRevenue();
     final byDay = await DatabaseHelper().getRevenueByDay(30);
+    final masterDay = await DatabaseHelper().getMasterDayStats(
+      DateFormat('yyyy-MM-dd').format(_masterDayDate),
+    );
 
     final map = <String, double>{};
     for (final r in byDay) {
@@ -66,8 +74,92 @@ class _StatsScreenState extends State<StatsScreen> {
       _topByRevenue = topByRevenue;
       _dayLabels = labels;
       _dayTotals = totals;
+      _masterDay = masterDay;
       _isLoading = false;
     });
+  }
+
+  Future<void> _pickMasterDay() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _masterDayDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked == null) return;
+    setState(() {
+      _masterDayDate = DateTime(picked.year, picked.month, picked.day);
+      _isLoading = true;
+    });
+    await _loadStats();
+  }
+
+  Widget _masterDayReport() {
+    final dayLabel = DateFormat('dd.MM.yyyy').format(_masterDayDate);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Мастера за день',
+                  style: AppTheme.sectionTitle,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _pickMasterDay,
+                icon: const Icon(Icons.calendar_today, size: 16),
+                label: Text(dayLabel, style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_masterDay.isEmpty)
+            Text(
+              'Нет мастеров в справочнике',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+            )
+          else
+            ..._masterDay.map((m) {
+              final n = (m['orders_count'] as num?)?.toInt() ?? 0;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        m['name']?.toString() ?? '—',
+                        style: GoogleFonts.manrope(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '$n зак.',
+                      style: GoogleFonts.manrope(
+                        color: n > 0 ? AppColors.success : AppColors.textDim,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
   }
 
   Widget _kpiCard(String title, String value, Color color) {
@@ -258,40 +350,76 @@ class _StatsScreenState extends State<StatsScreen> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
-        backgroundColor: AppColors.bg,
+        backgroundColor: Colors.transparent,
         body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
 
+    final mobile = AppResponsive.isMobile(context);
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: Padding(
-        padding: AppTheme.pagePadding,
+        padding: mobile ? const EdgeInsets.fromLTRB(12, 12, 12, 16) : AppTheme.pagePadding,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text("Статистика", style: AppTheme.pageTitle),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                _kpiCard("Сегодня", "${_money.format(_revToday)} ₽", AppColors.success),
-                const SizedBox(width: 10),
-                _kpiCard("Месяц", "${_money.format(_revMonth)} ₽", AppColors.primary),
-                const SizedBox(width: 10),
-                _kpiCard("Средний чек", "${_money.format(_avgCheck)} ₽", AppColors.text),
-                const SizedBox(width: 10),
-                _kpiCard("Заказов", "${_ordersCount.toInt()}", AppColors.textMuted),
-                const SizedBox(width: 10),
-                _kpiCard("Долг открытых", "${_money.format(_openDebt)} ₽", AppColors.danger),
-              ],
+            if (!mobile) ...[
+              Text("Статистика", style: AppTheme.pageTitle),
+              const SizedBox(height: 16),
+            ],
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _kpiCard("Сегодня", "${_money.format(_revToday)} ₽", AppColors.success),
+                  const SizedBox(width: 10),
+                  _kpiCard("Месяц", "${_money.format(_revMonth)} ₽", AppColors.primary),
+                  const SizedBox(width: 10),
+                  _kpiCard("Средний чек", "${_money.format(_avgCheck)} ₽", AppColors.text),
+                  const SizedBox(width: 10),
+                  _kpiCard("Заказов", "${_ordersCount.toInt()}", AppColors.textMuted),
+                  const SizedBox(width: 10),
+                  _kpiCard("Долг открытых", "${_money.format(_openDebt)} ₽", AppColors.danger),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             Text("Выручка за 30 дней", style: AppTheme.sectionTitle),
             const SizedBox(height: 8),
             _buildChart(),
             const SizedBox(height: 16),
+            _masterDayReport(),
+            const SizedBox(height: 16),
             Expanded(
-              child: Row(
+              child: mobile
+                  ? ListView(
+                      children: [
+                        SizedBox(
+                          height: 280,
+                          child: _topList(
+                            title: "Топ по количеству",
+                            items: _topByCount,
+                            valueKey: 'count',
+                            valueLabel: (s) => "${(s['count'] as num?)?.toInt() ?? 0} раз",
+                            valueNum: (s) => ((s['count'] as num?)?.toDouble() ?? 0),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          height: 280,
+                          child: _topList(
+                            title: "Топ по выручке",
+                            items: _topByRevenue,
+                            valueKey: 'revenue',
+                            valueLabel: (s) =>
+                                "${_money.format((s['revenue'] as num?)?.toDouble() ?? 0)} ₽",
+                            valueNum: (s) => ((s['revenue'] as num?)?.toDouble() ?? 0),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _topList(

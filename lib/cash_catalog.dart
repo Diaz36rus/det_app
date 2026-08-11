@@ -8,6 +8,18 @@ class CashMethods {
   static const all = [cash, card, transfer, invoice];
 }
 
+/// Типы денег для касс (совпадают с методами оплаты).
+typedef CashMoneyType = String;
+
+class CashRegisterSeeds {
+  static const defaults = [
+    {'name': 'Основная', 'money_type': CashMethods.cash, 'sort_order': 0},
+    {'name': 'Терминал', 'money_type': CashMethods.card, 'sort_order': 1},
+    {'name': 'Переводы', 'money_type': CashMethods.transfer, 'sort_order': 2},
+    {'name': 'Расчётный счёт', 'money_type': CashMethods.invoice, 'sort_order': 3},
+  ];
+}
+
 class CashCategories {
   static const expense = [
     'Материалы / химия',

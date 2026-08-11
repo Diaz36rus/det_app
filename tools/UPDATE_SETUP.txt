@@ -1,0 +1,54 @@
+Det App — автообновление по LAN (ПК + телефон)
+==============================================
+
+СХЕМА
+-----
+1) Собираете релиз:
+     flutter build apk --release          # телефон
+     tools\pack_release.ps1               # Windows + latest.json (+ android_* если есть APK)
+
+   Появятся:
+     dist\DetApp-portable-*.zip
+     dist\DetApp-app-VERSION+N.zip
+     dist\DetApp-VERSION+N-android.apk
+     dist\latest.json
+     dist\update_pack_meta.json
+
+2) Одним шагом опубликовать и раздать:
+     powershell -ExecutionPolicy Bypass -File tools\serve_updates.ps1
+
+   Или вручную:
+     powershell -ExecutionPolicy Bypass -File tools\publish_update.ps1 `
+       -PublishDir C:\detapp-updates `
+       -BaseUrl http://192.168.x.x:8080
+     cd C:\detapp-updates
+     python -m http.server 8080
+
+3) Канал на клиентах — URL манифеста:
+     http://192.168.x.x:8080/latest.json
+
+   Windows: DetApp-portable\update_channel.json
+   Android: меню → «Обновить» → вставить URL → «Сохранить URL и проверить»
+            (если телефон уже клиент sync — URL часто подставится сам)
+
+4) Обновление:
+   ПК:      «Обновить» → скачать → «Перезапустить»
+   Телефон: «Обновить» → «Скачать APK» → установщик Android → «Все равно установить»
+
+
+ЧТО ПРОИСХОДИТ ПРИ ОБНОВЛЕНИИ
+-----------------------------
+- Скачивается zip, проверяется SHA256
+- Бэкап detailing.db → Documents\det_app_backups\pre-update-*.db
+- Запускается update\DetAppUpdate.ps1
+- Приложение закрывается → app переименовывается в app.bak →
+  копируется новая app → снова запуск det_app.exe
+- detailing.db в Документах НЕ трогается
+
+
+ВАЖНО
+-----
+- Обновляйте оба ПК студии (хост и клиент sync) на одну версию.
+- Не откатывайтесь на старый билд, если схема БД уже новее
+  (приложение покажет ошибку при старте).
+- Лог updater: %TEMP%\detapp-update-logs\

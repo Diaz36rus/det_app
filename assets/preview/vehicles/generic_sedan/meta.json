@@ -1,0 +1,7 @@
+{
+  "bodyStyleId": "generic_sedan",
+  "label": "Седан (generic)",
+  "cameras": ["side", "rear_quarter", "front_quarter"],
+  "layers": ["body_base", "body_mask", "chrome_mask", "glass", "shadow"],
+  "renderer": "placeholder"
+}

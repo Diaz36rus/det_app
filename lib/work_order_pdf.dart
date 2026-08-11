@@ -403,7 +403,7 @@ class WorkOrderPdf {
                 _cell(_executor(w, masters), height: rowH),
                 _cell('', height: rowH),
                 _cell('${_money(w['price'])} ₽', align: pw.Alignment.centerRight, height: rowH),
-                _cell('', height: rowH),
+                _cell(w['comment']?.toString() ?? '', height: rowH),
                 _cell('', height: rowH),
               ]),
             );

@@ -1,13 +1,38 @@
-import 'package:sqflite/sqflite.dart';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
-import 'dart:io';
+import 'app_version.dart';
+import 'package:sqflite/sqflite.dart';
+
+import 'sync/remote_database.dart';
+import 'sync/sync_config.dart';
+import 'cash_catalog.dart';
+import 'wrap_catalog.dart';
 
 // --- НАЧАЛО БЛОКА: КОНСТАНТЫ ---
 List<String> STATUSES = [
   "Предварительная запись", "Принят в работу", "Мойка", "Химчистка", "Полировка",
   "Оклейка", "Интерьер", "Оборудование", "Подготовка к выдаче", "Выдан"
 ];
+
+/// Статус при создании заказа: если начало в будущем — предварительная запись.
+String resolveInitialOrderStatus(String? startTime) {
+  if (startTime == null || startTime.trim().isEmpty) {
+    return "Предварительная запись";
+  }
+  try {
+    final n = startTime.replaceFirst('T', ' ').split('.').first.trim();
+    final iso = n.contains(' ') ? n.replaceFirst(' ', 'T') : n;
+    final dt = DateTime.parse(iso);
+    if (dt.isAfter(DateTime.now())) return "Предварительная запись";
+  } catch (_) {
+    return "Предварительная запись";
+  }
+  return "Принят в работу";
+}
 
 List<String> WORKSHOPS = ["Мойка", "Химчистка", "Полировка", "Оклейка", "Интерьер", "Оборудование"];
 
@@ -65,6 +90,13 @@ String? workshopForService({String? category, String? name}) {
 /// Шапка пакета оклейки в заказе (одна коммерческая строка).
 bool isWrapPackageHeader(String? name) => (name ?? '').trim() == 'Оклейка';
 
+/// Шапка пакета тонировки.
+bool isTintPackageHeader(String? name) => (name ?? '').trim() == 'Тонировка';
+
+/// Шапка зонального пакета (оклейка или тонировка).
+bool isZonePackageHeader(String? name) =>
+    isWrapPackageHeader(name) || isTintPackageHeader(name);
+
 /// Позиция состава пакета оклейки (не тонировка, не шапка).
 bool isWrapPackageLine({String? category, String? name}) {
   final n = (name ?? '').trim();
@@ -78,6 +110,32 @@ bool isWrapPackageLine({String? category, String? name}) {
   }
   return false;
 }
+
+/// Позиция состава пакета тонировки (в т.ч. из калькулятора: «Тонировка · зона · плёнка»).
+bool isTintPackageLine({String? category, String? name}) {
+  final n = (name ?? '').trim();
+  if (n.isEmpty || isTintPackageHeader(n)) return false;
+  if (n.startsWith('Тонировка ·') || n.startsWith('Тонировка ')) return true;
+  if ((category ?? '').trim() == 'Тонировка') return true;
+  return false;
+}
+
+bool isZonePackageLine({String? category, String? name}) =>
+    isWrapPackageLine(category: category, name: name) ||
+    isTintPackageLine(category: category, name: name);
+
+/// Категория прайса → тип пакета.
+String? zonePackageKindForCategory(String? category) {
+  final c = (category ?? '').trim();
+  if (c == 'Оклейка (Пленка)') return 'wrap';
+  if (c == 'Тонировка') return 'tint';
+  return null;
+}
+
+String zonePackageHeaderName(String kind) => kind == 'tint' ? 'Тонировка' : 'Оклейка';
+String zonePackageWorkshop(String kind) => 'Оклейка';
+String zonePackageCategory(String kind) =>
+    kind == 'tint' ? 'Тонировка' : 'Оклейка (Пленка)';
 // --- КОНЕЦ БЛОКА ---
 
 /// Старые категории с emoji → без emoji (миграция + seed).
@@ -118,25 +176,8 @@ List<Map<String, dynamic>> SERVICES_TREE = [
   {"cat": "Антидождь", "name": "Krytex все остекление 2 кл.", "p1": 0, "p2": 10000, "p3": 0, "p4": 0, "fp": 0},
   {"cat": "Антидождь", "name": "Krytex все остекление 3 кл.", "p1": 0, "p2": 0, "p3": 12000, "p4": 0, "fp": 0},
   {"cat": "Антидождь", "name": "Krytex все остекление 4 кл.", "p1": 0, "p2": 0, "p3": 0, "p4": 12000, "fp": 0},
-  // Оклейка: частые + зоны риска (цены — fixed_price, класс не влияет)
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · Капот", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · Фары", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · Крыша (полоса)", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · Полная оклейка кузова", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Капот", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Передний бампер", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Фары", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Передние крылья", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Расширители передних арок", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Зеркала", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Стойки лобового", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Полоса крыши", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Стойки глянцевые", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Пороги внутри (короткие)", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Пороги внутри (длинные)", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Зона погрузки", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Зона под ручками", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Оклейка (Пленка)", "name": "Оклейка · ЗР · Зона пескоструя заднего бампера", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
+  // Оклейка: популярные + Перед / Борт / Зад (см. wrap_catalog.dart)
+  ...wrapServicesTreeEntries(),
   // Тонировка по зонам (цены — заполни в «Услуги»)
   {"cat": "Тонировка", "name": "Тонировка · Лобовое стекло", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
   {"cat": "Тонировка", "name": "Тонировка · Передние боковые", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 0},
@@ -154,19 +195,56 @@ class DatabaseHelper {
 
   static Database? _database;
 
+  /// Ревизия данных: +1 после мутаций (локально или с LAN-клиента).
+  /// Экраны слушают через [DbRefreshMixin] / addListener.
+  static final ValueNotifier<int> dataRevision = ValueNotifier<int>(0);
+
+  static void bumpDataRevision() {
+    void bump() {
+      dataRevision.value = dataRevision.value + 1;
+    }
+
+    // Сразу — чтобы лист дефектов / карточка услышали LAN-insert без ожидания кадра.
+    bump();
+    // И через кадр — подстраховка, если слушатель был в середине build.
+    final binding = SchedulerBinding.instance;
+    binding.scheduleFrameCallback((_) => bump());
+    binding.ensureVisualUpdate();
+  }
+
   Future<Database> get database async {
     if (_database != null) return _database!;
     _database = await _initDatabase();
     return _database!;
   }
 
-  /// Полный сброс: закрыть соединение, удалить файл БД, создать заново + дефолтные данные.
-  /// Бэкапы в det_app_backups не трогает.
-  Future<void> resetDatabase() async {
+  Future<void> _closeDb() async {
     if (_database != null) {
       await _database!.close();
       _database = null;
     }
+  }
+
+  /// Локальный файл detailing.db (режим хост / обычный).
+  Future<void> reopenAsLocal() async {
+    await _closeDb();
+    _database = await _openLocal();
+  }
+
+  /// Клиент: все запросы на хост по LAN.
+  Future<void> reopenAsClient({required String url, required String token}) async {
+    await _closeDb();
+    _database = await RemoteDatabase.connect(baseUrl: url, token: token);
+  }
+
+  /// Полный сброс: закрыть соединение, удалить файл БД, создать заново + дефолтные данные.
+  /// Бэкапы в det_app_backups не трогает. Только для локального режима.
+  Future<void> resetDatabase() async {
+    final cfg = await SyncConfig.load();
+    if (cfg.isClient) {
+      throw StateError('Сброс БД недоступен в режиме клиента (данные на хосте).');
+    }
+    await _closeDb();
     final documentsDirectory = await getApplicationDocumentsDirectory();
     final path = join(documentsDirectory.path, "detailing.db");
     await deleteDatabase(path);
@@ -174,10 +252,44 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
+    final cfg = await SyncConfig.load();
+    if (cfg.isClient && cfg.normalizedBaseUrl.isNotEmpty) {
+      try {
+        return await RemoteDatabase.connect(
+          baseUrl: cfg.normalizedBaseUrl,
+          token: cfg.token,
+        );
+      } catch (e) {
+        // Старт без хоста — локальная копия, чтобы UI открылся.
+        debugPrint('Client connect failed, fallback local: $e');
+      }
+    }
+    return _openLocal();
+  }
+
+  Future<Database> _openLocal() async {
     Directory documentsDirectory = await getApplicationDocumentsDirectory();
     String path = join(documentsDirectory.path, "detailing.db");
-    // v15: баг-репорты в БД (вместо файла)
-    return await openDatabase(path, version: 15, onCreate: _onCreate, onUpgrade: _onUpgrade);
+    return await openDatabase(
+      path,
+      version: AppVersion.dbSchema,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
+      onDowngrade: (db, oldVersion, newVersion) async {
+        throw StateError(
+          'База данных новее приложения (схема $oldVersion, приложение $newVersion). '
+          'Установите обновление или восстановите бэкап из Documents\\det_app_backups.',
+        );
+      },
+    );
+  }
+
+  Future<void> _ensureColumn(Database db, String table, String column, String typeSql) async {
+    final info = await db.rawQuery('PRAGMA table_info($table)');
+    final names = info.map((r) => r['name']?.toString()).toSet();
+    if (!names.contains(column)) {
+      await db.execute('ALTER TABLE $table ADD COLUMN $column $typeSql;');
+    }
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -192,19 +304,51 @@ class DatabaseHelper {
       end_date TEXT DEFAULT '', client_notes TEXT DEFAULT '', client_visible_notes TEXT DEFAULT '', 
       master_notes TEXT DEFAULT '', payment_method TEXT DEFAULT 'Не указан', task_prices TEXT DEFAULT '',
       is_workshop_completed INTEGER DEFAULT 0,
+      tech_wash_start TEXT,
+      tech_wash_end TEXT,
       discount_percent REAL DEFAULT 0,
       discount_fixed REAL DEFAULT 0,
-      promo_code TEXT DEFAULT ''
+      promo_code TEXT DEFAULT '',
+      handover_ready INTEGER DEFAULT 0,
+      handover_works INTEGER DEFAULT 0,
+      handover_payment INTEGER DEFAULT 0,
+      handover_keys INTEGER DEFAULT 0,
+      handover_inspect INTEGER DEFAULT 0,
+      handover_notified INTEGER DEFAULT 0
     )''');
     await db.execute('''CREATE TABLE masters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT DEFAULT 'Универсал')''');
     await db.execute('''CREATE TABLE order_events (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, event_text TEXT, created_at TEXT)''');
+    await db.execute('''CREATE TABLE order_defects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      workshop TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      created_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE order_defect_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      defect_id INTEGER NOT NULL,
+      photo_b64 TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE wrap_films (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE
+    )''');
+    await db.execute('''CREATE TABLE order_wrap_films (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      film_id INTEGER NOT NULL,
+      meters REAL DEFAULT 0
+    )''');
     await db.execute('''CREATE TABLE payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       order_id INTEGER NOT NULL,
       amount REAL,
       method TEXT,
       created_at TEXT,
-      shift_id INTEGER
+      shift_id INTEGER,
+      register_id INTEGER
     )''');
     await db.execute('''CREATE TABLE cash_flow (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -215,6 +359,7 @@ class DatabaseHelper {
       category TEXT DEFAULT 'Прочее',
       method TEXT DEFAULT 'Наличные',
       shift_id INTEGER,
+      register_id INTEGER,
       counterparty TEXT DEFAULT '',
       master_id INTEGER,
       inventory_id INTEGER,
@@ -235,6 +380,25 @@ class DatabaseHelper {
       note TEXT DEFAULT '',
       status TEXT DEFAULT 'open'
     )''');
+    await db.execute('''CREATE TABLE cash_registers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      money_type TEXT NOT NULL DEFAULT 'Наличные',
+      is_active INTEGER DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT ''
+    )''');
+    await db.execute('''CREATE TABLE cash_shift_balances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shift_id INTEGER NOT NULL,
+      register_id INTEGER NOT NULL,
+      opening REAL DEFAULT 0,
+      expected REAL,
+      fact REAL,
+      difference REAL,
+      UNIQUE(shift_id, register_id)
+    )''');
+    await _seedCashRegisters(db);
     await db.execute('''CREATE TABLE custom_works (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, category TEXT DEFAULT 'Прочее', price REAL DEFAULT 0)''');
     await db.execute('''CREATE TABLE services (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL, name TEXT NOT NULL UNIQUE, price1 REAL DEFAULT 0, price2 REAL DEFAULT 0, price3 REAL DEFAULT 0, price4 REAL DEFAULT 0, fixed_price REAL DEFAULT 0)''');
     await db.execute('''CREATE TABLE inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, quantity REAL DEFAULT 0, unit TEXT DEFAULT 'шт')''');
@@ -257,7 +421,8 @@ class DatabaseHelper {
       order_id INTEGER, name TEXT, price REAL, master_ids TEXT,
       start_time TEXT, end_time TEXT, workshop TEXT,
       is_done INTEGER DEFAULT 0,
-      parent_id INTEGER
+      parent_id INTEGER,
+      comment TEXT DEFAULT ''
     )''');
     await db.execute('''CREATE TABLE bug_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -268,6 +433,18 @@ class DatabaseHelper {
       fix_note TEXT DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT
+    )''');
+    await db.execute('''CREATE TABLE app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT DEFAULT ''
+    )''');
+    await db.execute('''CREATE TABLE app_error_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      level TEXT DEFAULT 'error',
+      source TEXT DEFAULT '',
+      message TEXT NOT NULL,
+      stack TEXT DEFAULT '',
+      created_at TEXT NOT NULL
     )''');
   }
 
@@ -415,6 +592,178 @@ class DatabaseHelper {
         updated_at TEXT
       )''');
     }
+    // --- Версия 16: tech_wash на orders (раньше был только в upgrade v6, не в onCreate) ---
+    if (oldVersion < 16) {
+      await _ensureColumn(db, 'orders', 'tech_wash_start', 'TEXT');
+      await _ensureColumn(db, 'orders', 'tech_wash_end', 'TEXT');
+    }
+    // --- Версия 17: настройки sync + лог ошибок для диагностики ---
+    if (oldVersion < 17) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT DEFAULT ''
+      )''');
+      await db.execute('''CREATE TABLE IF NOT EXISTS app_error_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        level TEXT DEFAULT 'error',
+        source TEXT DEFAULT '',
+        message TEXT NOT NULL,
+        stack TEXT DEFAULT '',
+        created_at TEXT NOT NULL
+      )''');
+    }
+    // --- Версия 18: комментарий к каждой работе ---
+    if (oldVersion < 18) {
+      await _ensureColumn(db, 'order_items', 'comment', "TEXT DEFAULT ''");
+    }
+    // --- Версия 19: оклейка Перед/Борт/Зад вместо зон риска ---
+    if (oldVersion < 19) {
+      await _migrateWrapCatalogV19(db);
+    }
+    // --- Версия 20: несколько касс в смене ---
+    if (oldVersion < 20) {
+      await _migrateCashRegistersV20(db);
+    }
+    // --- Версия 21: дефекты с фото, материалы оклейки и чек-лист выдачи ---
+    if (oldVersion < 21) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS order_defects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        workshop TEXT DEFAULT '',
+        description TEXT DEFAULT '',
+        created_at TEXT NOT NULL
+      )''');
+      await db.execute('''CREATE TABLE IF NOT EXISTS order_defect_photos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        defect_id INTEGER NOT NULL,
+        photo_b64 TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )''');
+      await db.execute('''CREATE TABLE IF NOT EXISTS wrap_films (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+      )''');
+      await db.execute('''CREATE TABLE IF NOT EXISTS order_wrap_films (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        film_id INTEGER NOT NULL,
+        meters REAL DEFAULT 0
+      )''');
+      for (final column in const [
+        'handover_ready',
+        'handover_works',
+        'handover_payment',
+        'handover_keys',
+        'handover_inspect',
+        'handover_notified',
+      ]) {
+        await _ensureColumn(db, 'orders', column, 'INTEGER DEFAULT 0');
+      }
+    }
+  }
+
+  static Future<void> _seedCashRegisters(Database db) async {
+    final now = DateTime.now().toIso8601String().substring(0, 16);
+    for (final r in CashRegisterSeeds.defaults) {
+      await db.insert('cash_registers', {
+        'name': r['name'],
+        'money_type': r['money_type'],
+        'is_active': 1,
+        'sort_order': r['sort_order'],
+        'created_at': now,
+      });
+    }
+  }
+
+  Future<void> _migrateCashRegistersV20(Database db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS cash_registers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      money_type TEXT NOT NULL DEFAULT 'Наличные',
+      is_active INTEGER DEFAULT 1,
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT ''
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS cash_shift_balances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      shift_id INTEGER NOT NULL,
+      register_id INTEGER NOT NULL,
+      opening REAL DEFAULT 0,
+      expected REAL,
+      fact REAL,
+      difference REAL,
+      UNIQUE(shift_id, register_id)
+    )''');
+    await _ensureColumn(db, 'cash_flow', 'register_id', 'INTEGER');
+    await _ensureColumn(db, 'payments', 'register_id', 'INTEGER');
+
+    final existing = await db.query('cash_registers', limit: 1);
+    if (existing.isEmpty) {
+      await _seedCashRegisters(db);
+    }
+
+    // Проставляем register_id по money_type / method для старых строк.
+    final regs = await db.query('cash_registers', where: 'is_active = 1');
+    final byType = <String, int>{};
+    for (final r in regs) {
+      final t = r['money_type']?.toString() ?? '';
+      byType.putIfAbsent(t, () => (r['id'] as num).toInt());
+    }
+    for (final entry in byType.entries) {
+      await db.rawUpdate(
+        'UPDATE cash_flow SET register_id = ? WHERE register_id IS NULL AND method = ?',
+        [entry.value, entry.key],
+      );
+      await db.rawUpdate(
+        'UPDATE payments SET register_id = ? WHERE register_id IS NULL AND method = ?',
+        [entry.value, entry.key],
+      );
+    }
+
+    // Открытая смена: стартовые балансы (нал → opening_cash смены).
+    final open = await db.query('cash_shifts', where: "status = 'open'", limit: 1);
+    if (open.isNotEmpty) {
+      final shiftId = (open.first['id'] as num).toInt();
+      final openingCash = (open.first['opening_cash'] as num?)?.toDouble() ?? 0;
+      for (final r in regs) {
+        final rid = (r['id'] as num).toInt();
+        final isCash = r['money_type']?.toString() == CashMethods.cash;
+        await db.insert(
+          'cash_shift_balances',
+          {
+            'shift_id': shiftId,
+            'register_id': rid,
+            'opening': isCash ? openingCash : 0,
+          },
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+    }
+  }
+
+  /// Удаляет устаревшие «ЗР» и добивает новый каталог оклейки.
+  static Future<void> _migrateWrapCatalogV19(Database db) async {
+    await db.delete(
+      'services',
+      where: "category = ? AND name LIKE ?",
+      whereArgs: ['Оклейка (Пленка)', '% · ЗР · %'],
+    );
+    // Старые «частые» без зоны — тоже пересоздаём из каталога (ignore dup).
+    for (final s in wrapServicesTreeEntries()) {
+      await db.insert(
+        'services',
+        {
+          'category': s['cat'],
+          'name': s['name'],
+          'price1': s['p1'],
+          'price2': s['p2'],
+          'price3': s['p3'],
+          'price4': s['p4'],
+          'fixed_price': s['fp'],
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
   }
 
   /// Собирает сиротские позиции оклейки в пакеты по заказам.
@@ -471,6 +820,7 @@ class DatabaseHelper {
           'is_done': 0,
           'workshop': 'Оклейка',
           'parent_id': null,
+          'comment': '',
         });
       }
 
@@ -552,6 +902,22 @@ class DatabaseHelper {
       }
       await db.delete(
         'services',
+        where: "category = ? AND name LIKE ?",
+        whereArgs: ['Оклейка (Пленка)', '% · ЗР · %'],
+      );
+      await db.delete(
+        'services',
+        where: 'name = ?',
+        whereArgs: ['Оклейка · Борт · Накладка / молдинг двери'],
+      );
+      for (final name in [
+        'Оклейка · Перед · Кожух дворников',
+        'Оклейка · Борт · Зеркало (нижняя крышка)',
+      ]) {
+        await db.delete('services', where: 'name = ?', whereArgs: [name]);
+      }
+      await db.delete(
+        'services',
         where: "category = ? OR name = ?",
         whereArgs: ['Уборка салона', 'Уборка салона'],
       );
@@ -582,8 +948,8 @@ class DatabaseHelper {
     final db = await database;
     return await db.rawQuery('''
       SELECT orders.*, clients.name as client_name, clients.phone as client_phone, cars.make_model, cars.plate, m.name as master_name,
-        (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.name = 'Оклейка' AND order_items.parent_id IS NULL)) as works_total,
-        (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.name = 'Оклейка' AND order_items.parent_id IS NULL)) as works_done
+        (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
+        (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_done
       FROM orders JOIN clients ON orders.client_id = clients.id JOIN cars ON orders.car_id = cars.id
       LEFT JOIN masters m ON orders.master_id = m.id
       WHERE orders.is_completed = 0 ORDER BY orders.id DESC
@@ -596,8 +962,8 @@ class DatabaseHelper {
       SELECT orders.*, clients.name as client_name, clients.phone as client_phone, clients.is_vip,
              cars.make_model, cars.plate, cars.vin, cars.category,
              m.name as master_name,
-             (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.name = 'Оклейка' AND order_items.parent_id IS NULL)) as works_total,
-             (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.name = 'Оклейка' AND order_items.parent_id IS NULL)) as works_done
+             (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
+             (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_done
       FROM orders
       JOIN clients ON orders.client_id = clients.id
       JOIN cars ON orders.car_id = cars.id
@@ -615,8 +981,8 @@ class DatabaseHelper {
       return await db.rawQuery('''
         SELECT orders.*, clients.name as client_name, clients.phone as client_phone,
                cars.make_model, cars.plate, cars.vin, m.name as master_name,
-               (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.name = 'Оклейка' AND order_items.parent_id IS NULL)) as works_total,
-               (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.name = 'Оклейка' AND order_items.parent_id IS NULL)) as works_done
+               (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
+               (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_done
         FROM orders
         JOIN clients ON orders.client_id = clients.id
         JOIN cars ON orders.car_id = cars.id
@@ -629,8 +995,8 @@ class DatabaseHelper {
     return await db.rawQuery('''
       SELECT orders.*, clients.name as client_name, clients.phone as client_phone,
              cars.make_model, cars.plate, cars.vin, m.name as master_name,
-             (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.name = 'Оклейка' AND order_items.parent_id IS NULL)) as works_total,
-             (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.name = 'Оклейка' AND order_items.parent_id IS NULL)) as works_done
+             (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
+             (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_done
       FROM orders
       JOIN clients ON orders.client_id = clients.id
       JOIN cars ON orders.car_id = cars.id
@@ -646,6 +1012,7 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getOrdersForCalendar(String dateStr) async {
     final db = await database;
+    // День через substr после T→пробел. Длинные заказы: start_day ≤ день ≤ end_day.
     return await db.rawQuery('''
       SELECT orders.id, orders.status, orders.start_time, orders.end_time, orders.due_date, orders.tech_wash_start, orders.tech_wash_end, 
              clients.name as client_name, cars.make_model, cars.plate
@@ -653,20 +1020,39 @@ class DatabaseHelper {
       JOIN clients ON orders.client_id = clients.id
       JOIN cars ON orders.car_id = cars.id
       WHERE orders.is_completed = 0 AND (
-        date(orders.due_date) = date(?) 
-        OR (orders.tech_wash_start IS NOT NULL AND date(orders.tech_wash_start) = date(?))
+        (
+          orders.start_time IS NOT NULL AND trim(orders.start_time) != ''
+          AND substr(replace(orders.start_time, 'T', ' '), 1, 10) <= ?
+          AND substr(replace(coalesce(nullif(trim(orders.end_time), ''), orders.start_time), 'T', ' '), 1, 10) >= ?
+        )
+        OR (
+          orders.due_date IS NOT NULL AND trim(orders.due_date) != ''
+          AND substr(replace(orders.due_date, 'T', ' '), 1, 10) = ?
+        )
+        OR (
+          orders.end_date IS NOT NULL AND trim(orders.end_date) != ''
+          AND substr(replace(orders.end_date, 'T', ' '), 1, 10) = ?
+        )
+        OR (
+          orders.tech_wash_start IS NOT NULL AND trim(orders.tech_wash_start) != ''
+          AND substr(replace(orders.tech_wash_start, 'T', ' '), 1, 10) <= ?
+          AND substr(replace(coalesce(nullif(trim(orders.tech_wash_end), ''), orders.tech_wash_start), 'T', ' '), 1, 10) >= ?
+        )
       )
       ORDER BY orders.start_time ASC
-    ''', [dateStr, dateStr]);
+    ''', [dateStr, dateStr, dateStr, dateStr, dateStr, dateStr]);
   }
 
   /// Работы с заданным временем на выбранный день (для режима «Детальное время»).
-  /// Дата = первые 10 символов (ГГГГ-ММ-ДД).
+  /// Если у позиции нет своего времени — берём график заказа (start_time/end_time).
+  /// Длинные слоты показываются во все дни пересечения.
   Future<List<Map<String, dynamic>>> getOrderItemsForCalendar(String dateStr) async {
     final db = await database;
     return await db.rawQuery('''
       SELECT order_items.id as item_id, order_items.order_id, order_items.name as work_name,
-             order_items.start_time, order_items.end_time, order_items.workshop,
+             coalesce(nullif(trim(order_items.start_time), ''), orders.start_time) as start_time,
+             coalesce(nullif(trim(order_items.end_time), ''), orders.end_time) as end_time,
+             order_items.workshop,
              order_items.is_done, order_items.parent_id,
              clients.name as client_name, cars.make_model, cars.plate
       FROM order_items
@@ -674,13 +1060,18 @@ class DatabaseHelper {
       JOIN clients ON orders.client_id = clients.id
       JOIN cars ON orders.car_id = cars.id
       WHERE orders.is_completed = 0
-        AND order_items.start_time IS NOT NULL
-        AND order_items.start_time != ''
         AND order_items.workshop IS NOT NULL
-        AND order_items.workshop != ''
-        AND substr(replace(order_items.start_time, 'T', ' '), 1, 10) = ?
-      ORDER BY order_items.start_time ASC
-    ''', [dateStr]);
+        AND trim(order_items.workshop) != ''
+        AND coalesce(nullif(trim(order_items.start_time), ''), orders.start_time) IS NOT NULL
+        AND trim(coalesce(nullif(trim(order_items.start_time), ''), orders.start_time)) != ''
+        AND substr(replace(coalesce(nullif(trim(order_items.start_time), ''), orders.start_time), 'T', ' '), 1, 10) <= ?
+        AND substr(replace(
+              coalesce(
+                nullif(trim(coalesce(nullif(trim(order_items.end_time), ''), orders.end_time)), ''),
+                coalesce(nullif(trim(order_items.start_time), ''), orders.start_time)
+              ), 'T', ' '), 1, 10) >= ?
+      ORDER BY start_time ASC
+    ''', [dateStr, dateStr]);
   }
 
   Future<int> addClient(String name, String phone, {int isVip = 0}) async {
@@ -705,21 +1096,23 @@ class DatabaseHelper {
   }
 
   Future<int> addOrder(int clientId, int carId, double price, String notes, 
-      {String status = "Принят в работу", String dueDate = "", String startTime = ""}) async {
+      {String? status, String dueDate = "", String startTime = ""}) async {
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
+    final resolved = status ?? resolveInitialOrderStatus(startTime);
     return await db.insert('orders', {
-      'client_id': clientId, 'car_id': carId, 'status': status, 'price': price, 
+      'client_id': clientId, 'car_id': carId, 'status': resolved, 'price': price, 
       'notes': notes, 'created_at': now, 'due_date': dueDate, 'start_time': startTime
     });
   }
 
   /// Создаёт заказ и сразу строки order_items, затем синхронизирует notes/price.
+  /// [status] null → автоматически: будущее start_time → «Предварительная запись».
   Future<int> addOrderWithItems(
     int clientId,
     int carId,
     List<Map<String, dynamic>> items, {
-    String status = "Принят в работу",
+    String? status,
     String dueDate = "",
     String startTime = "",
     String endTime = "",
@@ -729,10 +1122,11 @@ class DatabaseHelper {
     final now = DateTime.now().toIso8601String().substring(0, 16);
     String notes = items.map((i) => i['name'] as String).join(", ");
     double price = items.fold(0.0, (sum, i) => sum + ((i['price'] as num?)?.toDouble() ?? 0));
+    final resolvedStatus = status ?? resolveInitialOrderStatus(startTime);
     int orderId = await db.insert('orders', {
       'client_id': clientId,
       'car_id': carId,
-      'status': status,
+      'status': resolvedStatus,
       'price': price,
       'notes': notes,
       'created_at': now,
@@ -747,6 +1141,7 @@ class DatabaseHelper {
       final ws = (item['workshop'] as String?) ??
           workshopForService(category: cat, name: name);
       final price = (item['price'] as num?)?.toDouble() ?? 0;
+      // Копируем график заказа на позиции — иначе «Детальное время» в календаре пустое.
       await addOrderItem(
         orderId,
         name,
@@ -754,6 +1149,8 @@ class DatabaseHelper {
         sync: false,
         workshop: ws,
         category: cat,
+        startTime: startTime.isNotEmpty ? startTime : null,
+        endTime: endTime.isNotEmpty ? endTime : null,
       );
     }
     await syncOrderFromItems(orderId);
@@ -833,10 +1230,38 @@ class DatabaseHelper {
     await db.delete('promocodes', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// 10 цифр номера без кода страны (7/8).
+  static String phoneDigits10(String phone) {
+    var digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('7')) digits = digits.substring(1);
+    if (digits.startsWith('8') && digits.length >= 10) digits = digits.substring(1);
+    if (digits.length > 10) digits = digits.substring(0, 10);
+    return digits;
+  }
+
+  /// Совпадение по `+7…` или по 10 цифрам (разные форматы в БД / mobile-ввод).
   Future<Map<String, dynamic>?> getClientByPhone(String phone) async {
     final db = await database;
-    List<Map> res = await db.query('clients', where: 'phone = ?', whereArgs: [phone]);
-    return res.isNotEmpty ? Map<String, dynamic>.from(res.first) : null;
+    final digits = phoneDigits10(phone);
+    final canon = digits.isEmpty ? phone.trim() : '+7$digits';
+
+    var res = await db.query('clients', where: 'phone = ?', whereArgs: [canon]);
+    if (res.isNotEmpty) return Map<String, dynamic>.from(res.first);
+
+    final raw = phone.trim();
+    if (raw.isNotEmpty && raw != canon) {
+      res = await db.query('clients', where: 'phone = ?', whereArgs: [raw]);
+      if (res.isNotEmpty) return Map<String, dynamic>.from(res.first);
+    }
+
+    if (digits.length < 10) return null;
+    final all = await db.query('clients');
+    for (final row in all) {
+      if (phoneDigits10(row['phone']?.toString() ?? '') == digits) {
+        return Map<String, dynamic>.from(row);
+      }
+    }
+    return null;
   }
 
   Future<int?> getCarId(int clientId, String plate) async {
@@ -848,6 +1273,17 @@ class DatabaseHelper {
   /// Причины, почему нельзя поставить «Выдан». Пустой список = можно.
   Future<List<String>> validateIssueOrder(int orderId) async {
     final db = await database;
+    // Подтянуть шапки пакетов по зонам (старые заказы могли «висеть» незакрытыми).
+    final packageHeaders = await db.query(
+      'order_items',
+      columns: ['id'],
+      where: "order_id = ? AND parent_id IS NULL AND name IN ('Оклейка', 'Тонировка')",
+      whereArgs: [orderId],
+    );
+    for (final h in packageHeaders) {
+      await syncZonePackageHeaderDone((h['id'] as num).toInt());
+    }
+
     final rows = await db.query(
       'orders',
       columns: ['price', 'paid_amount'],
@@ -866,13 +1302,52 @@ class DatabaseHelper {
       reasons.add('Долг: $debtStr ₽');
     }
 
-    final openWorks = await db.rawQuery(
-      'SELECT COUNT(*) as c FROM order_items WHERE order_id = ? AND is_done = 0',
-      [orderId],
+    // Как в UI: шапки пакетов «Оклейка»/«Тонировка» не работы — смотрим зоны.
+    // Шапка часто остаётся is_done=0, даже когда все зоны отмечены.
+    final openWorks = await db.query(
+      'order_items',
+      columns: ['id', 'name', 'workshop', 'parent_id', 'is_done'],
+      where: 'order_id = ? AND COALESCE(is_done, 0) = 0',
+      whereArgs: [orderId],
+      orderBy: 'id',
     );
-    final openCount = (openWorks.first['c'] as num?)?.toInt() ?? 0;
-    if (openCount > 0) {
-      reasons.add('Не выполнены работы: $openCount');
+    final incomplete = openWorks.where((w) {
+      final name = w['name']?.toString();
+      if (isZonePackageHeader(name) && w['parent_id'] == null) return false;
+      return true;
+    }).toList();
+    if (incomplete.isNotEmpty) {
+      final labels = incomplete.map((w) {
+        final name = (w['name'] as String?)?.trim();
+        final ws = (w['workshop'] as String?)?.trim();
+        final base = (name == null || name.isEmpty) ? 'Без названия' : name;
+        if (ws != null && ws.isNotEmpty) return '$base ($ws)';
+        return base;
+      }).toList();
+      reasons.add(
+        'Не выполнены работы (${labels.length}):\n'
+        '${labels.map((n) => '— $n').join('\n')}',
+      );
+    }
+
+    // Чек-лист выдачи обязателен целиком.
+    const handoverLabels = <String, String>{
+      'handover_notified': 'Клиент уведомлён о готовности',
+      'handover_works': 'Работы проверены (QC)',
+      'handover_inspect': 'Авто осмотрено с клиентом',
+      'handover_payment': 'Оплата проверена / закрыта',
+      'handover_keys': 'Ключи и документы переданы',
+    };
+    final handover = await getOrderHandover(orderId);
+    final missingHandover = handoverLabels.entries
+        .where((e) => (handover[e.key] as num?)?.toInt() != 1)
+        .map((e) => e.value)
+        .toList();
+    if (missingHandover.isNotEmpty) {
+      reasons.add(
+        'Чек-лист выдачи не заполнен (${missingHandover.length}):\n'
+        '${missingHandover.map((n) => '— $n').join('\n')}',
+      );
     }
 
     return reasons;
@@ -913,16 +1388,83 @@ class DatabaseHelper {
   // --- РАБОТЫ ЗАКАЗА (ORDER ITEMS) ---
   Future<List<Map<String, dynamic>>> getOrderItems(int orderId) async {
     final db = await database;
+    await _reattachOrphanZoneLines(db, orderId);
+    final headers = await db.query(
+      'order_items',
+      columns: ['id'],
+      where: "order_id = ? AND parent_id IS NULL AND name IN ('Оклейка', 'Тонировка')",
+      whereArgs: [orderId],
+    );
+    for (final h in headers) {
+      await syncZonePackageHeaderDone((h['id'] as num).toInt());
+    }
     return await db.query('order_items', where: 'order_id = ?', whereArgs: [orderId]);
   }
 
-  /// Id шапки пакета оклейки (создаёт при отсутствии).
-  Future<int> ensureWrapPackage(int orderId) async {
+  /// Сиротские зоны тонировки/оклейки без parent_id → в пакет.
+  Future<void> _reattachOrphanZoneLines(Database db, int orderId) async {
+    final items = await db.query('order_items', where: 'order_id = ?', whereArgs: [orderId]);
+    Future<void> attach(String kind, bool Function(Map<String, dynamic>) isLine) async {
+      final orphans = items.where((i) {
+        if (!isLine(i)) return false;
+        return i['parent_id'] == null && !isZonePackageHeader(i['name']?.toString());
+      }).toList();
+      if (orphans.isEmpty) return;
+      final headerName = zonePackageHeaderName(kind);
+      Map<String, dynamic>? header;
+      for (final i in items) {
+        if ((i['name']?.toString() ?? '') == headerName && i['parent_id'] == null) {
+          header = i;
+          break;
+        }
+      }
+      final orphanSum = orphans.fold<double>(
+        0,
+        (s, i) => s + ((i['price'] as num?)?.toDouble() ?? 0),
+      );
+      int headerId;
+      if (header != null) {
+        headerId = (header['id'] as num).toInt();
+        final existing = (header['price'] as num?)?.toDouble() ?? 0;
+        if (orphanSum > 0 && existing == 0) {
+          await db.update('order_items', {'price': orphanSum}, where: 'id = ?', whereArgs: [headerId]);
+        }
+      } else {
+        headerId = await db.insert('order_items', {
+          'order_id': orderId,
+          'name': headerName,
+          'price': orphanSum,
+          'master_ids': '',
+          'is_done': 0,
+          'workshop': zonePackageWorkshop(kind),
+          'parent_id': null,
+          'comment': '',
+        });
+      }
+      for (final child in orphans) {
+        await db.update(
+          'order_items',
+          {'parent_id': headerId, 'price': 0, 'workshop': zonePackageWorkshop(kind)},
+          where: 'id = ?',
+          whereArgs: [(child['id'] as num).toInt()],
+        );
+      }
+      await syncZonePackageHeaderDone(headerId);
+    }
+
+    await attach('wrap', (i) => isWrapPackageLine(name: i['name']?.toString()));
+    await attach('tint', (i) => isTintPackageLine(name: i['name']?.toString()));
+  }
+
+  /// Id шапки зонального пакета (создаёт при отсутствии). [kind]: wrap | tint
+  Future<int> ensureZonePackage(int orderId, String kind) async {
     final db = await database;
+    final headerName = zonePackageHeaderName(kind);
+    final workshop = zonePackageWorkshop(kind);
     final existing = await db.query(
       'order_items',
       where: "order_id = ? AND name = ? AND parent_id IS NULL",
-      whereArgs: [orderId, 'Оклейка'],
+      whereArgs: [orderId, headerName],
       limit: 1,
     );
     if (existing.isNotEmpty) {
@@ -930,13 +1472,75 @@ class DatabaseHelper {
     }
     return await db.insert('order_items', {
       'order_id': orderId,
-      'name': 'Оклейка',
+      'name': headerName,
       'price': 0,
       'master_ids': '',
       'is_done': 0,
-      'workshop': 'Оклейка',
+      'workshop': workshop,
       'parent_id': null,
+      'comment': '',
     });
+  }
+
+  Future<int> ensureWrapPackage(int orderId) => ensureZonePackage(orderId, 'wrap');
+
+  Future<int> ensureTintPackage(int orderId) => ensureZonePackage(orderId, 'tint');
+
+  /// Синхронизирует состав пакета: зоны (имена) + сумма на шапке. Лишние зоны удаляет.
+  Future<void> syncZonePackage({
+    required int orderId,
+    required String kind,
+    required List<String> zoneNames,
+    required double packagePrice,
+  }) async {
+    final db = await database;
+    final headerId = await ensureZonePackage(orderId, kind);
+    final workshop = zonePackageWorkshop(kind);
+
+    await db.update(
+      'order_items',
+      {'price': packagePrice, 'workshop': workshop},
+      where: 'id = ?',
+      whereArgs: [headerId],
+    );
+
+    final existing = await db.query(
+      'order_items',
+      where: 'parent_id = ?',
+      whereArgs: [headerId],
+    );
+    final byName = <String, Map<String, dynamic>>{};
+    for (final row in existing) {
+      byName[(row['name'] ?? '').toString()] = row;
+    }
+
+    final wanted = zoneNames.map((n) => n.trim()).where((n) => n.isNotEmpty).toSet();
+
+    for (final name in wanted) {
+      if (byName.containsKey(name)) continue;
+      await db.insert('order_items', {
+        'order_id': orderId,
+        'name': name,
+        'price': 0,
+        'master_ids': '',
+        'is_done': 0,
+        'workshop': workshop,
+        'parent_id': headerId,
+        'comment': '',
+      });
+    }
+
+    for (final entry in byName.entries) {
+      if (wanted.contains(entry.key)) continue;
+      await db.delete('order_items', where: 'id = ?', whereArgs: [entry.value['id']]);
+    }
+
+    // Пустой состав — удаляем шапку.
+    if (wanted.isEmpty) {
+      await db.delete('order_items', where: 'id = ?', whereArgs: [headerId]);
+    }
+
+    await syncOrderFromItems(orderId);
   }
 
   Future<int> addOrderItem(
@@ -946,13 +1550,18 @@ class DatabaseHelper {
     bool sync = true,
     String? workshop,
     String? category,
+    String? startTime,
+    String? endTime,
   }) async {
     final db = await database;
     final ws = workshop ?? workshopForService(category: category, name: name);
 
-    // Позиции оклейки из прайса → состав пакета (цена только на шапке).
-    if (isWrapPackageLine(category: category, name: name)) {
-      final parentId = await ensureWrapPackage(orderId);
+    // Зоны оклейки/тонировки → состав пакета (цена только на шапке).
+    final asWrap = isWrapPackageLine(category: category, name: name);
+    final asTint = isTintPackageLine(category: category, name: name);
+    if (asWrap || asTint) {
+      final kind = asTint ? 'tint' : 'wrap';
+      final parentId = await ensureZonePackage(orderId, kind);
       final headerRows = await db.query(
         'order_items',
         columns: ['start_time', 'end_time', 'master_ids'],
@@ -961,17 +1570,52 @@ class DatabaseHelper {
         limit: 1,
       );
       final header = headerRows.isNotEmpty ? headerRows.first : null;
+      // Не дублируем уже существующую зону с тем же именем.
+      final dup = await db.query(
+        'order_items',
+        columns: ['id'],
+        where: 'parent_id = ? AND name = ?',
+        whereArgs: [parentId, name],
+        limit: 1,
+      );
+      if (dup.isNotEmpty) {
+        if (sync) await syncOrderFromItems(orderId);
+        return (dup.first['id'] as num).toInt();
+      }
       final id = await db.insert('order_items', {
         'order_id': orderId,
         'name': name,
         'price': 0,
         'master_ids': header?['master_ids'] ?? '',
         'is_done': 0,
-        'workshop': ws ?? 'Оклейка',
+        'workshop': ws ?? zonePackageWorkshop(kind),
         'parent_id': parentId,
-        'start_time': header?['start_time'],
-        'end_time': header?['end_time'],
+        'start_time': header?['start_time'] ?? startTime,
+        'end_time': header?['end_time'] ?? endTime,
+        'comment': '',
       });
+      // Если передали цену при добавлении зоны (калькулятор) — копим на шапку только
+      // когда у шапки ещё 0; иначе цену пакета задают явно через syncZonePackage.
+      if (price > 0) {
+        final hPrice = await db.query(
+          'order_items',
+          columns: ['price'],
+          where: 'id = ?',
+          whereArgs: [parentId],
+          limit: 1,
+        );
+        final cur = hPrice.isEmpty ? 0.0 : ((hPrice.first['price'] as num?)?.toDouble() ?? 0);
+        if (cur <= 0) {
+          await db.update('order_items', {'price': price}, where: 'id = ?', whereArgs: [parentId]);
+        } else {
+          await db.update(
+            'order_items',
+            {'price': cur + price},
+            where: 'id = ?',
+            whereArgs: [parentId],
+          );
+        }
+      }
       if (sync) await syncOrderFromItems(orderId);
       return id;
     }
@@ -984,9 +1628,22 @@ class DatabaseHelper {
       'is_done': 0,
       'workshop': ws,
       'parent_id': null,
+      'comment': '',
+      if (startTime != null && startTime.isNotEmpty) 'start_time': startTime,
+      if (endTime != null && endTime.isNotEmpty) 'end_time': endTime,
     });
     if (sync) await syncOrderFromItems(orderId);
     return id;
+  }
+
+  Future<void> updateOrderItemComment(int itemId, String comment) async {
+    final db = await database;
+    await db.update(
+      'order_items',
+      {'comment': comment},
+      where: 'id = ?',
+      whereArgs: [itemId],
+    );
   }
 
   Future<void> updateOrderItemPrice(int itemId, double price) async {
@@ -1011,7 +1668,7 @@ class DatabaseHelper {
     final db = await database;
     final rows = await db.query(
       'order_items',
-      columns: ['name', 'is_done'],
+      columns: ['name', 'is_done', 'parent_id'],
       where: 'id = ?',
       whereArgs: [itemId],
     );
@@ -1021,6 +1678,44 @@ class DatabaseHelper {
     if (isDone && !wasDone && rows.isNotEmpty) {
       await deductRecipeForService(rows.first['name']?.toString() ?? '');
     }
+    // Зона пакета → подтянуть is_done шапки (иначе «Выдан» может блокироваться).
+    if (rows.isNotEmpty) {
+      final parentId = (rows.first['parent_id'] as num?)?.toInt();
+      if (parentId != null) {
+        await syncZonePackageHeaderDone(parentId);
+      }
+    }
+  }
+
+  /// Шапка пакета выполнена ⇔ все зоны выполнены.
+  Future<void> syncZonePackageHeaderDone(int headerId) async {
+    final db = await database;
+    final headerRows = await db.query(
+      'order_items',
+      columns: ['name', 'parent_id'],
+      where: 'id = ?',
+      whereArgs: [headerId],
+      limit: 1,
+    );
+    if (headerRows.isEmpty) return;
+    final header = headerRows.first;
+    if (header['parent_id'] != null) return;
+    if (!isZonePackageHeader(header['name']?.toString())) return;
+
+    final children = await db.query(
+      'order_items',
+      columns: ['is_done'],
+      where: 'parent_id = ?',
+      whereArgs: [headerId],
+    );
+    if (children.isEmpty) return;
+    final allDone = children.every((c) => ((c['is_done'] as num?)?.toInt() ?? 0) == 1);
+    await db.update(
+      'order_items',
+      {'is_done': allDone ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [headerId],
+    );
   }
 
   Future<void> deleteOrderItem(int itemId) async {
@@ -1037,7 +1732,7 @@ class DatabaseHelper {
     final name = row['name']?.toString();
     final parentId = (row['parent_id'] as num?)?.toInt();
 
-    if (isWrapPackageHeader(name)) {
+    if (isZonePackageHeader(name)) {
       // Удаляем шапку вместе со всем составом.
       await db.delete('order_items', where: 'parent_id = ?', whereArgs: [itemId]);
       await db.delete('order_items', where: 'id = ?', whereArgs: [itemId]);
@@ -1166,6 +1861,227 @@ class DatabaseHelper {
     return await db.query('order_events', where: 'order_id = ?', whereArgs: [orderId], orderBy: 'id DESC');
   }
 
+  Future<void> _ensureDefectTables(DatabaseExecutor db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS order_defects (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      workshop TEXT DEFAULT '',
+      description TEXT DEFAULT '',
+      created_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS order_defect_photos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      defect_id INTEGER NOT NULL,
+      photo_b64 TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )''');
+  }
+
+  Future<int> addOrderDefect({
+    required int orderId,
+    String workshop = '',
+    String description = '',
+    required List<String> photosB64,
+  }) async {
+    final db = await database;
+    await _ensureDefectTables(db);
+    final now = DateTime.now().toIso8601String();
+    // Без одной большой транзакции по LAN: фото уходят отдельными insert
+    // (RemoteDatabase.transaction — просто последовательные вызовы).
+    final id = await db.insert('order_defects', {
+      'order_id': orderId,
+      'workshop': workshop.trim(),
+      'description': description.trim(),
+      'created_at': now,
+    });
+    for (final photo in photosB64.where((p) => p.isNotEmpty)) {
+      await db.insert('order_defect_photos', {
+        'defect_id': id,
+        'photo_b64': photo,
+        'created_at': now,
+      });
+    }
+    final where = workshop.trim().isEmpty ? '' : ' · цех «${workshop.trim()}»';
+    final details = description.trim().isEmpty ? 'без описания' : description.trim();
+    final photoNote = photosB64.isEmpty ? '' : ' (${photosB64.length} фото)';
+    await addOrderEvent(orderId, 'Дефект$where: $details$photoNote');
+    bumpDataRevision();
+    return id;
+  }
+
+  Future<List<Map<String, dynamic>>> getOrderDefects(int orderId) async {
+    final db = await database;
+    await _ensureDefectTables(db);
+    final defects = await db.query(
+      'order_defects',
+      where: 'order_id = ?',
+      whereArgs: [orderId],
+      orderBy: 'id DESC',
+    );
+    final result = <Map<String, dynamic>>[];
+    for (final defect in defects) {
+      final row = Map<String, dynamic>.from(defect);
+      row['photos'] = await getDefectPhotos((row['id'] as num).toInt());
+      result.add(row);
+    }
+    return result;
+  }
+
+  Future<List<Map<String, dynamic>>> getDefectPhotos(int defectId) async {
+    final db = await database;
+    return db.query(
+      'order_defect_photos',
+      where: 'defect_id = ?',
+      whereArgs: [defectId],
+      orderBy: 'id ASC',
+    );
+  }
+
+  Future<void> deleteOrderDefect(int defectId) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('order_defect_photos', where: 'defect_id = ?', whereArgs: [defectId]);
+      await txn.delete('order_defects', where: 'id = ?', whereArgs: [defectId]);
+    });
+    bumpDataRevision();
+  }
+
+  Future<Map<String, dynamic>> getOrderHandover(int orderId) async {
+    final db = await database;
+    final rows = await db.query(
+      'orders',
+      columns: const [
+        'handover_ready', 'handover_works', 'handover_payment',
+        'handover_keys', 'handover_inspect', 'handover_notified',
+      ],
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
+    return rows.isEmpty ? <String, dynamic>{} : Map<String, dynamic>.from(rows.first);
+  }
+
+  Future<void> saveOrderHandover(int orderId, Map<String, dynamic> values) async {
+    final allowed = {
+      'handover_ready', 'handover_works', 'handover_payment',
+      'handover_keys', 'handover_inspect', 'handover_notified',
+    };
+    final data = Map<String, dynamic>.fromEntries(
+      values.entries.where((entry) => allowed.contains(entry.key)),
+    );
+    if (data.isEmpty) return;
+    final db = await database;
+    await db.update('orders', data, where: 'id = ?', whereArgs: [orderId]);
+    bumpDataRevision();
+  }
+
+  Future<List<Map<String, dynamic>>> listWrapFilms() async {
+    final db = await database;
+    return db.query('wrap_films', orderBy: 'name COLLATE NOCASE');
+  }
+
+  Future<int> addWrapFilm(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) throw ArgumentError.value(name, 'name', 'Название плёнки не может быть пустым');
+    final db = await database;
+    final id = await db.insert(
+      'wrap_films',
+      {'name': trimmed},
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    if (id != 0) {
+      bumpDataRevision();
+      return id;
+    }
+    final existing = await db.query('wrap_films', columns: ['id'], where: 'name = ?', whereArgs: [trimmed]);
+    return (existing.first['id'] as num).toInt();
+  }
+
+  Future<List<Map<String, dynamic>>> getOrderWrapFilms(int orderId) async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT order_wrap_films.*, wrap_films.name AS film_name
+      FROM order_wrap_films
+      JOIN wrap_films ON wrap_films.id = order_wrap_films.film_id
+      WHERE order_wrap_films.order_id = ?
+      ORDER BY order_wrap_films.id ASC
+    ''', [orderId]);
+  }
+
+  Future<void> setOrderWrapFilms(int orderId, List<Map<String, dynamic>> films) async {
+    final db = await database;
+    // Без txn: на LAN-клиенте транзакция — просто цепочка HTTP; так надёжнее на телефоне.
+    await db.delete('order_wrap_films', where: 'order_id = ?', whereArgs: [orderId]);
+    for (final film in films) {
+      final rawId = film['filmId'] ?? film['film_id'];
+      final id = (rawId is num) ? rawId.toInt() : int.tryParse('$rawId');
+      if (id == null) continue;
+      final metersRaw = film['meters'];
+      final meters = metersRaw is num
+          ? metersRaw.toDouble()
+          : double.tryParse('$metersRaw'.replaceAll(',', '.')) ?? 0;
+      await db.insert('order_wrap_films', {
+        'order_id': orderId,
+        'film_id': id,
+        'meters': meters,
+      });
+    }
+    bumpDataRevision();
+  }
+
+  Future<List<Map<String, dynamic>>> getOrdersByPlate(String plate) async {
+    final db = await database;
+    final normalized = plate.trim();
+    if (normalized.isEmpty) return [];
+    return db.rawQuery('''
+      SELECT orders.*, clients.name AS client_name, cars.make_model, cars.plate
+      FROM orders
+      JOIN cars ON cars.id = orders.car_id
+      JOIN clients ON clients.id = orders.client_id
+      WHERE upper(replace(cars.plate, ' ', '')) = upper(replace(?, ' ', ''))
+      ORDER BY coalesce(nullif(orders.start_time, ''), orders.created_at) DESC, orders.id DESC
+      LIMIT 20
+    ''', [normalized]);
+  }
+
+  Future<List<Map<String, dynamic>>> findOverlappingOrders({
+    required String startTime,
+    required String endTime,
+    int? excludeOrderId,
+  }) async {
+    final db = await database;
+    if (startTime.trim().isEmpty || endTime.trim().isEmpty) return [];
+    final exclusion = excludeOrderId == null ? '' : ' AND orders.id != ?';
+    final args = <Object>[endTime.replaceFirst('T', ' '), startTime.replaceFirst('T', ' ')];
+    if (excludeOrderId != null) args.add(excludeOrderId);
+    return db.rawQuery('''
+      SELECT orders.*, clients.name AS client_name, cars.make_model, cars.plate
+      FROM orders
+      JOIN clients ON clients.id = orders.client_id
+      JOIN cars ON cars.id = orders.car_id
+      WHERE trim(coalesce(orders.start_time, '')) != ''
+        AND trim(coalesce(orders.end_time, '')) != ''
+        AND replace(orders.start_time, 'T', ' ') < ?
+        AND replace(orders.end_time, 'T', ' ') > ?
+        $exclusion
+      ORDER BY orders.start_time ASC
+    ''', args);
+  }
+
+  Future<List<Map<String, dynamic>>> getMasterDayStats(String dayYyyyMmDd) async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT m.id, m.name, COUNT(DISTINCT o.id) AS orders_count
+      FROM masters m
+      LEFT JOIN orders o ON (
+        o.status IN ('Мойка', 'Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование', 'Кузовные работы', 'Выдан')
+        AND substr(replace(coalesce(nullif(o.end_time, ''), o.start_time), 'T', ' '), 1, 10) = ?
+        AND instr(',' || replace(coalesce(o.master_ids, ''), ' ', '') || ',', ',' || m.id || ',') > 0
+      )
+      GROUP BY m.id, m.name
+      ORDER BY orders_count DESC, m.name COLLATE NOCASE
+    ''', [dayYyyyMmDd]);
+  }
+
   Future<void> addTaskToOrder(int orderId, String taskName, double price) async {
     final db = await database;
     List<Map> res = await db.query('orders', columns: ['notes', 'task_prices'], where: 'id = ?', whereArgs: [orderId]);
@@ -1178,18 +2094,108 @@ class DatabaseHelper {
     }
   }
 
-  Future<void> addPayment(int orderId, double amount, String method, {int? shiftId}) async {
+  Future<void> addPayment(int orderId, double amount, String method, {int? shiftId, int? registerId}) async {
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     final sid = shiftId ?? (await getCurrentShift())?['id'] as int?;
+    final rid = registerId ?? await resolveRegisterIdForMethod(method);
     await db.insert('payments', {
       'order_id': orderId,
       'amount': amount,
       'method': method,
       'created_at': now,
       'shift_id': sid,
+      'register_id': rid,
     });
     await db.rawQuery('UPDATE orders SET paid_amount = paid_amount + ? WHERE id = ?', [amount, orderId]);
+  }
+
+  Future<List<Map<String, dynamic>>> getOrderPayments(int orderId) async {
+    final db = await database;
+    return db.query(
+      'payments',
+      where: 'order_id = ?',
+      whereArgs: [orderId],
+      orderBy: 'id DESC',
+    );
+  }
+
+  /// Отмена оплаты: удаляет платёж и уменьшает paid_amount (не ниже 0).
+  /// Возвращает данные платежа или null, если не найден.
+  Future<Map<String, dynamic>?> voidPayment(int paymentId) async {
+    final db = await database;
+    final rows = await db.query('payments', where: 'id = ?', whereArgs: [paymentId], limit: 1);
+    if (rows.isEmpty) return null;
+    final pay = Map<String, dynamic>.from(rows.first);
+    final orderId = (pay['order_id'] as num).toInt();
+    final amount = (pay['amount'] as num?)?.toDouble() ?? 0;
+    await db.delete('payments', where: 'id = ?', whereArgs: [paymentId]);
+    final orderRows = await db.query(
+      'orders',
+      columns: ['paid_amount'],
+      where: 'id = ?',
+      whereArgs: [orderId],
+      limit: 1,
+    );
+    if (orderRows.isNotEmpty) {
+      final paid = (orderRows.first['paid_amount'] as num?)?.toDouble() ?? 0;
+      final next = paid - amount;
+      await db.update(
+        'orders',
+        {'paid_amount': next < 0 ? 0.0 : next},
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+    }
+    bumpDataRevision();
+    return pay;
+  }
+
+  /// Правка оплаты: сумма / метод / касса + пересчёт paid_amount заказа.
+  Future<bool> updatePayment(
+    int paymentId, {
+    required double amount,
+    required String method,
+    int? registerId,
+  }) async {
+    if (amount <= 0) return false;
+    final db = await database;
+    final rows = await db.query('payments', where: 'id = ?', whereArgs: [paymentId], limit: 1);
+    if (rows.isEmpty) return false;
+    final pay = rows.first;
+    final orderId = (pay['order_id'] as num).toInt();
+    final oldAmount = (pay['amount'] as num?)?.toDouble() ?? 0;
+    final rid = registerId ?? await resolveRegisterIdForMethod(method);
+    await db.update(
+      'payments',
+      {
+        'amount': amount,
+        'method': method,
+        'register_id': rid,
+      },
+      where: 'id = ?',
+      whereArgs: [paymentId],
+    );
+    final orderRows = await db.query(
+      'orders',
+      columns: ['paid_amount'],
+      where: 'id = ?',
+      whereArgs: [orderId],
+      limit: 1,
+    );
+    if (orderRows.isNotEmpty) {
+      final paid = (orderRows.first['paid_amount'] as num?)?.toDouble() ?? 0;
+      var next = paid - oldAmount + amount;
+      if (next < 0) next = 0;
+      await db.update(
+        'orders',
+        {'paid_amount': next},
+        where: 'id = ?',
+        whereArgs: [orderId],
+      );
+    }
+    bumpDataRevision();
+    return true;
   }
 
   // --- КЛИЕНТЫ И АВТО ---
@@ -1411,32 +2417,179 @@ class DatabaseHelper {
     return rows.isEmpty ? null : rows.first;
   }
 
-  Future<int> openCashShift(double openingCash, {String note = ''}) async {
+  Future<List<Map<String, dynamic>>> getCashRegisters({bool activeOnly = true}) async {
+    final db = await database;
+    return await db.query(
+      'cash_registers',
+      where: activeOnly ? 'is_active = 1' : null,
+      orderBy: 'sort_order ASC, id ASC',
+    );
+  }
+
+  Future<int> addCashRegister(String name, String moneyType, {int sortOrder = 100}) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String().substring(0, 16);
+    final id = await db.insert('cash_registers', {
+      'name': name.trim(),
+      'money_type': moneyType,
+      'is_active': 1,
+      'sort_order': sortOrder,
+      'created_at': now,
+    });
+    // Если смена открыта — сразу заводим нулевой остаток.
+    final shift = await getCurrentShift();
+    if (shift != null) {
+      await db.insert(
+        'cash_shift_balances',
+        {
+          'shift_id': (shift['id'] as num).toInt(),
+          'register_id': id,
+          'opening': 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+    return id;
+  }
+
+  Future<void> setCashRegisterActive(int registerId, bool active) async {
+    final db = await database;
+    await db.update(
+      'cash_registers',
+      {'is_active': active ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [registerId],
+    );
+  }
+
+  Future<int?> resolveRegisterIdForMethod(String method) async {
+    final db = await database;
+    final rows = await db.query(
+      'cash_registers',
+      where: 'is_active = 1 AND money_type = ?',
+      whereArgs: [method],
+      orderBy: 'sort_order ASC, id ASC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return (rows.first['id'] as num).toInt();
+  }
+
+  /// Открыть смену. [openings] — registerId → стартовый остаток.
+  Future<int> openCashShift(double openingCash, {String note = '', Map<int, double>? openings}) async {
     final existing = await getCurrentShift();
     if (existing != null) return (existing['id'] as num).toInt();
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
-    return await db.insert('cash_shifts', {
+    final registers = await getCashRegisters();
+    var cashOpening = openingCash;
+    if (openings != null) {
+      for (final r in registers) {
+        if (r['money_type']?.toString() == CashMethods.cash) {
+          final rid = (r['id'] as num).toInt();
+          if (openings.containsKey(rid)) {
+            cashOpening = openings[rid]!;
+            break;
+          }
+        }
+      }
+    }
+    final shiftId = await db.insert('cash_shifts', {
       'opened_at': now,
-      'opening_cash': openingCash,
+      'opening_cash': cashOpening,
       'note': note,
       'status': 'open',
     });
+    for (final r in registers) {
+      final rid = (r['id'] as num).toInt();
+      final open = openings?[rid] ??
+          (r['money_type']?.toString() == CashMethods.cash ? cashOpening : 0.0);
+      await db.insert('cash_shift_balances', {
+        'shift_id': shiftId,
+        'register_id': rid,
+        'opening': open,
+      });
+    }
+    return shiftId;
   }
 
-  /// Ожидаемый нал в ящике: opening + нал приходы − нал расходы (включая инкассацию).
+  /// Ожидаемый остаток по кассе: opening + оплаты + приходы − расходы.
+  Future<double> getRegisterExpected(int shiftId, int registerId) async {
+    final db = await database;
+    final bal = await db.query(
+      'cash_shift_balances',
+      where: 'shift_id = ? AND register_id = ?',
+      whereArgs: [shiftId, registerId],
+      limit: 1,
+    );
+    final opening = bal.isEmpty ? 0.0 : ((bal.first['opening'] as num?)?.toDouble() ?? 0);
+
+    final payRows = await db.rawQuery('''
+      SELECT COALESCE(SUM(amount), 0) as total FROM payments
+      WHERE shift_id = ? AND register_id = ?
+    ''', [shiftId, registerId]);
+    final payments = (payRows.first['total'] as num?)?.toDouble() ?? 0;
+
+    final flowRows = await db.rawQuery('''
+      SELECT
+        COALESCE(SUM(CASE WHEN type = 'Приход' THEN amount ELSE 0 END), 0) as income,
+        COALESCE(SUM(CASE WHEN type = 'Расход' THEN amount ELSE 0 END), 0) as expense
+      FROM cash_flow
+      WHERE shift_id = ? AND register_id = ?
+    ''', [shiftId, registerId]);
+    final income = (flowRows.first['income'] as num?)?.toDouble() ?? 0;
+    final expense = (flowRows.first['expense'] as num?)?.toDouble() ?? 0;
+
+    return opening + payments + income - expense;
+  }
+
+  /// Карточки касс для открытой смены: name, money_type, opening, expected.
+  Future<List<Map<String, dynamic>>> getShiftRegisterSnapshots(int shiftId) async {
+    final registers = await getCashRegisters();
+    final out = <Map<String, dynamic>>[];
+    for (final r in registers) {
+      final rid = (r['id'] as num).toInt();
+      final expected = await getRegisterExpected(shiftId, rid);
+      final db = await database;
+      final bal = await db.query(
+        'cash_shift_balances',
+        where: 'shift_id = ? AND register_id = ?',
+        whereArgs: [shiftId, rid],
+        limit: 1,
+      );
+      final opening = bal.isEmpty ? 0.0 : ((bal.first['opening'] as num?)?.toDouble() ?? 0);
+      out.add({
+        ...r,
+        'opening': opening,
+        'expected': expected,
+      });
+    }
+    return out;
+  }
+
+  /// Ожидаемый нал в ящике (касса с типом «Наличные», иначе legacy-формула).
   Future<double> getShiftExpectedCash(int shiftId) async {
+    final snaps = await getShiftRegisterSnapshots(shiftId);
+    double cashTotal = 0;
+    var foundCash = false;
+    for (final s in snaps) {
+      if (s['money_type']?.toString() == CashMethods.cash) {
+        cashTotal += (s['expected'] as num?)?.toDouble() ?? 0;
+        foundCash = true;
+      }
+    }
+    if (foundCash) return cashTotal;
+
+    // Fallback без касс
     final db = await database;
     final shiftRows = await db.query('cash_shifts', where: 'id = ?', whereArgs: [shiftId]);
     if (shiftRows.isEmpty) return 0;
     final opening = (shiftRows.first['opening_cash'] as num?)?.toDouble() ?? 0;
-
     final payRows = await db.rawQuery('''
       SELECT COALESCE(SUM(amount), 0) as total FROM payments
       WHERE shift_id = ? AND method = 'Наличные'
     ''', [shiftId]);
     final cashPayments = (payRows.first['total'] as num?)?.toDouble() ?? 0;
-
     final flowRows = await db.rawQuery('''
       SELECT
         COALESCE(SUM(CASE WHEN type = 'Приход' THEN amount ELSE 0 END), 0) as income,
@@ -1446,22 +2599,51 @@ class DatabaseHelper {
     ''', [shiftId]);
     final income = (flowRows.first['income'] as num?)?.toDouble() ?? 0;
     final expense = (flowRows.first['expense'] as num?)?.toDouble() ?? 0;
-
     return opening + cashPayments + income - expense;
   }
 
-  Future<void> closeCashShift(int shiftId, double factCash, {String note = ''}) async {
+  /// [facts] — registerId → фактический остаток при закрытии.
+  Future<void> closeCashShift(
+    int shiftId,
+    double factCash, {
+    String note = '',
+    Map<int, double>? facts,
+  }) async {
     final db = await database;
-    final expected = await getShiftExpectedCash(shiftId);
+    final snaps = await getShiftRegisterSnapshots(shiftId);
     final now = DateTime.now().toIso8601String().substring(0, 16);
+
+    double totalExpected = 0;
+    double totalFact = 0;
+    for (final s in snaps) {
+      final rid = (s['id'] as num).toInt();
+      final expected = (s['expected'] as num?)?.toDouble() ?? 0;
+      final fact = facts?[rid] ??
+          (s['money_type']?.toString() == CashMethods.cash ? factCash : expected);
+      totalExpected += expected;
+      totalFact += fact;
+      await db.update(
+        'cash_shift_balances',
+        {
+          'expected': expected,
+          'fact': fact,
+          'difference': fact - expected,
+        },
+        where: 'shift_id = ? AND register_id = ?',
+        whereArgs: [shiftId, rid],
+      );
+    }
+
+    final cashExpected = await getShiftExpectedCash(shiftId);
     await db.update(
       'cash_shifts',
       {
         'closed_at': now,
-        'closing_cash': factCash,
-        'expected_cash': expected,
-        'fact_cash': factCash,
-        'difference': factCash - expected,
+        'closing_cash': facts == null ? factCash : totalFact,
+        'expected_cash': facts == null ? cashExpected : totalExpected,
+        'fact_cash': facts == null ? factCash : totalFact,
+        'difference': (facts == null ? factCash : totalFact) -
+            (facts == null ? cashExpected : totalExpected),
         'note': note,
         'status': 'closed',
       },
@@ -1482,6 +2664,7 @@ class DatabaseHelper {
     String category = 'Прочее',
     String method = 'Наличные',
     int? shiftId,
+    int? registerId,
     String counterparty = '',
     int? masterId,
     int? inventoryId,
@@ -1493,6 +2676,7 @@ class DatabaseHelper {
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     final sid = shiftId ?? (await getCurrentShift())?['id'] as int?;
+    final rid = registerId ?? await resolveRegisterIdForMethod(method);
     final id = await db.insert('cash_flow', {
       'type': type,
       'amount': amount,
@@ -1501,6 +2685,7 @@ class DatabaseHelper {
       'category': category,
       'method': method,
       'shift_id': sid,
+      'register_id': rid,
       'counterparty': counterparty,
       'master_id': masterId,
       'inventory_id': inventoryId,
@@ -1513,7 +2698,94 @@ class DatabaseHelper {
     if (inventoryId != null && inventoryQty > 0 && type == 'Расход') {
       await adjustInventoryQuantity(inventoryId, inventoryQty);
     }
+    bumpDataRevision();
     return id;
+  }
+
+  Future<Map<String, dynamic>?> getCashFlowById(int id) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT cash_flow.*, masters.name as master_name, inventory.name as inventory_name
+      FROM cash_flow
+      LEFT JOIN masters ON masters.id = cash_flow.master_id
+      LEFT JOIN inventory ON inventory.id = cash_flow.inventory_id
+      WHERE cash_flow.id = ?
+      LIMIT 1
+    ''', [id]);
+    if (rows.isEmpty) return null;
+    return Map<String, dynamic>.from(rows.first);
+  }
+
+  Future<bool> updateCashFlow(
+    int id, {
+    required String type,
+    required double amount,
+    required String description,
+    String category = 'Прочее',
+    String method = 'Наличные',
+    int? registerId,
+    String counterparty = '',
+    int? masterId,
+    int? inventoryId,
+    double inventoryQty = 0,
+    String templateKey = '',
+    String note = '',
+  }) async {
+    final db = await database;
+    final existing = await db.query('cash_flow', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (existing.isEmpty) return false;
+    final old = existing.first;
+    final oldType = old['type']?.toString() ?? '';
+    final oldInvId = (old['inventory_id'] as num?)?.toInt();
+    final oldQty = (old['inventory_qty'] as num?)?.toDouble() ?? 0;
+
+    // Откат старого влияния на склад
+    if (oldInvId != null && oldQty > 0 && oldType == 'Расход') {
+      await adjustInventoryQuantity(oldInvId, -oldQty);
+    }
+
+    final rid = registerId ?? await resolveRegisterIdForMethod(method);
+    await db.update(
+      'cash_flow',
+      {
+        'type': type,
+        'amount': amount,
+        'description': description,
+        'category': category,
+        'method': method,
+        'register_id': rid,
+        'counterparty': counterparty,
+        'master_id': masterId,
+        'inventory_id': inventoryId,
+        'inventory_qty': inventoryQty,
+        'template_key': templateKey,
+        'note': note,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    if (inventoryId != null && inventoryQty > 0 && type == 'Расход') {
+      await adjustInventoryQuantity(inventoryId, inventoryQty);
+    }
+    bumpDataRevision();
+    return true;
+  }
+
+  Future<bool> deleteCashFlow(int id) async {
+    final db = await database;
+    final existing = await db.query('cash_flow', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (existing.isEmpty) return false;
+    final old = existing.first;
+    final oldType = old['type']?.toString() ?? '';
+    final oldInvId = (old['inventory_id'] as num?)?.toInt();
+    final oldQty = (old['inventory_qty'] as num?)?.toDouble() ?? 0;
+    if (oldInvId != null && oldQty > 0 && oldType == 'Расход') {
+      await adjustInventoryQuantity(oldInvId, -oldQty);
+    }
+    await db.delete('cash_flow', where: 'id = ?', whereArgs: [id]);
+    bumpDataRevision();
+    return true;
   }
 
   Future<List<Map<String, dynamic>>> getCashFlow(String startDate, String endDate) async {
@@ -1555,6 +2827,7 @@ class DatabaseHelper {
         COALESCE(payments.method, '') as method,
         ('Оплата заказа #' || orders.id || ' (' || clients.name || ')') as title,
         payments.shift_id as shift_id,
+        payments.register_id as register_id,
         orders.id as order_id,
         NULL as master_id,
         NULL as inventory_id,
@@ -1577,6 +2850,7 @@ class DatabaseHelper {
         COALESCE(cash_flow.method, '') as method,
         COALESCE(cash_flow.description, '') as title,
         cash_flow.shift_id as shift_id,
+        cash_flow.register_id as register_id,
         cash_flow.order_id as order_id,
         cash_flow.master_id as master_id,
         cash_flow.inventory_id as inventory_id,
@@ -1863,12 +3137,13 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getClientCarsForDropdown(String phone) async {
+    final client = await getClientByPhone(phone);
+    if (client == null) return [];
     final db = await database;
     return await db.rawQuery('''
       SELECT cars.id, cars.make_model, cars.plate, cars.vin, cars.category FROM cars 
-      JOIN clients ON cars.client_id = clients.id 
-      WHERE clients.phone = ? ORDER BY cars.id DESC
-    ''', [phone]);
+      WHERE cars.client_id = ? ORDER BY cars.id DESC
+    ''', [client['id']]);
   }
 
   Future<List<Map<String, dynamic>>> getServicesStats() async {
@@ -1946,5 +3221,52 @@ class DatabaseHelper {
   Future<void> deleteBugReport(int id) async {
     final db = await database;
     await db.delete('bug_reports', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- НАСТРОЙКИ / ДИАГНОСТИКА ---
+  Future<String?> getAppSetting(String key) async {
+    final db = await database;
+    final rows = await db.query('app_settings', where: 'key = ?', whereArgs: [key], limit: 1);
+    if (rows.isEmpty) return null;
+    final v = rows.first['value']?.toString();
+    if (v == null || v.isEmpty) return null;
+    return v;
+  }
+
+  Future<void> setAppSetting(String key, String value) async {
+    final db = await database;
+    await db.insert(
+      'app_settings',
+      {'key': key, 'value': value},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<void> addAppErrorLog({
+    required String level,
+    required String source,
+    required String message,
+    String? stack,
+  }) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String().substring(0, 19);
+    await db.insert('app_error_log', {
+      'level': level,
+      'source': source,
+      'message': message.length > 4000 ? message.substring(0, 4000) : message,
+      'stack': (stack ?? '').length > 8000 ? stack!.substring(0, 8000) : (stack ?? ''),
+      'created_at': now,
+    });
+    // Храним не больше ~500 последних
+    await db.rawDelete('''
+      DELETE FROM app_error_log WHERE id NOT IN (
+        SELECT id FROM app_error_log ORDER BY id DESC LIMIT 500
+      )
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> getAppErrorLogs({int limit = 50}) async {
+    final db = await database;
+    return await db.query('app_error_log', orderBy: 'id DESC', limit: limit);
   }
 }

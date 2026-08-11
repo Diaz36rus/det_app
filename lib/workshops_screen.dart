@@ -3,9 +3,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'database.dart';
+import 'db_refresh_mixin.dart';
 import 'issue_guard.dart';
 import 'master_picker.dart';
+import 'order_defects_sheet.dart';
 import 'order_details_dialog.dart';
+import 'responsive.dart';
 import 'works_progress_bar.dart';
 
 class WorkshopsScreen extends StatefulWidget {
@@ -16,7 +19,10 @@ class WorkshopsScreen extends StatefulWidget {
   State<WorkshopsScreen> createState() => _WorkshopsScreenState();
 }
 
-class _WorkshopsScreenState extends State<WorkshopsScreen> {
+class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin {
+  @override
+  void onDatabaseChanged() => _loadOrders(widget.selectedWorkshop);
+
   List<Map<String, dynamic>> _orders = [];
   List<Map<String, dynamic>> _masters = [];
   /// orderId → имена мастеров цеха
@@ -37,6 +43,18 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> {
     _loadOrders(widget.selectedWorkshop);
   }
 
+  Future<void> _markWorkshopDone(Map<String, dynamic> order) async {
+    final workshop = widget.selectedWorkshop;
+    final orderId = order['id'] as int;
+    await DatabaseHelper().setWorkshopTaskCompleted(orderId, 1);
+    await DatabaseHelper().addOrderEvent(orderId, 'Цех «$workshop»: готово');
+    if (!mounted) return;
+    final client = order['client_name']?.toString() ?? '';
+    final car = "${order['make_model'] ?? ''} · ${order['plate'] ?? ''}".trim();
+    showAppToast(context, "$client\n$car\nЦех «$workshop»: готово");
+    _loadOrders(workshop);
+  }
+
   Future<void> _openMoveDialog(Map<String, dynamic> order) async {
     String? newStatus = await showDialog<String>(
       context: context,
@@ -44,7 +62,7 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> {
         backgroundColor: AppColors.surface,
         title: Text("Куда переводим заказ?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
         content: SizedBox(
-          width: 300,
+          width: AppResponsive.dialogWidth(context, desktop: 300),
           child: ListView(
             shrinkWrap: true,
             children: STATUSES.map((s) {
@@ -57,7 +75,7 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> {
                     fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
-                onTap: () => Navigator.pop(context, s),
+                onTap: isCurrent ? null : () => Navigator.pop(context, s),
               );
             }).toList(),
           ),
@@ -65,40 +83,24 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> {
       ),
     );
 
-    if (newStatus != null) {
-      final workshop = widget.selectedWorkshop;
-      final moved = newStatus != order['status'];
-      final eventText = moved
-          ? 'Цех «$workshop»: готово → $newStatus'
-          : 'Цех «$workshop»: готово';
+    if (newStatus == null || newStatus == order['status']) return;
 
-      if (!mounted) return;
-      final ok = await tryUpdateOrderStatus(
-        context,
-        order['id'] as int,
-        newStatus,
-      );
-      if (!ok) return;
+    final workshop = widget.selectedWorkshop;
+    if (!mounted) return;
+    // «Выдан» блокируется в validateIssueOrder, если чек-лист неполный.
+    final ok = await tryUpdateOrderStatus(context, order['id'] as int, newStatus);
+    if (!ok) return;
 
-      await DatabaseHelper().addOrderEvent(order['id'], eventText);
+    await DatabaseHelper().addOrderEvent(order['id'], 'Цех «$workshop» → $newStatus');
+    await DatabaseHelper().setWorkshopTaskCompleted(order['id'] as int, 0);
 
-      if (!moved) {
-        await DatabaseHelper().setWorkshopTaskCompleted(order['id'] as int, 1);
-      } else {
-        await DatabaseHelper().setWorkshopTaskCompleted(order['id'] as int, 0);
-      }
-
-      if (mounted) {
-        final client = order['client_name']?.toString() ?? '';
-        final car = "${order['make_model'] ?? ''} · ${order['plate'] ?? ''}".trim();
-        final toast = moved
-            ? "$client\n$car\nЦех «$workshop» → $newStatus"
-            : "$client\n$car\nЦех «$workshop»: готово";
-        showAppToast(context, toast);
-      }
-
-      _loadOrders(widget.selectedWorkshop);
+    if (mounted) {
+      final client = order['client_name']?.toString() ?? '';
+      final car = "${order['make_model'] ?? ''} · ${order['plate'] ?? ''}".trim();
+      showAppToast(context, "$client\n$car\nЦех «$workshop» → $newStatus");
     }
+
+    _loadOrders(widget.selectedWorkshop);
   }
 
   Future<void> _loadOrders(String workshop) async {
@@ -153,6 +155,15 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> {
         : 'Цех «$workshop»: назначены $names';
     await DatabaseHelper().addOrderEvent(orderId, event);
     if (mounted) _loadOrders(workshop);
+  }
+
+  Future<void> _openDefects(Map<String, dynamic> order) async {
+    await OrderDefectsSheet.open(
+      context,
+      orderId: (order['id'] as num).toInt(),
+      workshop: widget.selectedWorkshop,
+    );
+    if (mounted) _loadOrders(widget.selectedWorkshop);
   }
 
   Widget _buildWorkshopCard(Map<String, dynamic> o) {
@@ -285,15 +296,44 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> {
                     const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerRight,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: isDone ? AppColors.surface : AppColors.primary,
-                          foregroundColor: isDone ? AppColors.textMuted : Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                        ),
-                        onPressed: () => _openMoveDialog(o),
-                        child: Text(isDone ? "Перевести" : "Готово", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-                      ),
+                      child: isDone
+                          ? ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.surface,
+                                foregroundColor: AppColors.textMuted,
+                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                              ),
+                              onPressed: () => _openMoveDialog(o),
+                              child: Text("Перевести", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                TextButton(
+                                  onPressed: () => _openMoveDialog(o),
+                                  child: Text(
+                                    "Перевести",
+                                    style: GoogleFonts.manrope(color: AppColors.textDim, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                TextButton.icon(
+                                  onPressed: () => _openDefects(o),
+                                  icon: const Icon(Icons.report_problem_outlined, size: 18),
+                                  label: Text("Дефекты", style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+                                ),
+                                const SizedBox(width: 4),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.primary,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                                  ),
+                                  onPressed: () => _markWorkshopDone(o),
+                                  child: Text("Готово", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                                ),
+                              ],
+                            ),
                     ),
                   ],
                 ),
@@ -307,46 +347,53 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mobile = AppResponsive.isMobile(context);
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
-            child: Row(
-              children: [
-                Text("Цех", style: AppTheme.pageTitle),
-                const SizedBox(width: 12),
-                Text(
-                  widget.selectedWorkshop,
-                  style: GoogleFonts.manrope(
-                    color: AppColors.primary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
+          if (!mobile)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+              child: Row(
+                children: [
+                  Text("Цех", style: AppTheme.pageTitle),
+                  const SizedBox(width: 12),
+                  Text(
+                    widget.selectedWorkshop,
+                    style: GoogleFonts.manrope(
+                      color: AppColors.primary,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-                const Spacer(),
-                Text(
-                  "${_orders.length}",
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-              ],
+                  const Spacer(),
+                  Text(
+                    "${_orders.length}",
+                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1),
+          if (!mobile) const Divider(height: 1),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
                 : _orders.isEmpty
                     ? Center(
-                        child: Text(
-                          "Нет заказов в этом цехе",
-                          style: GoogleFonts.manrope(color: AppColors.textDim),
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            "В цехе «${widget.selectedWorkshop}» сейчас пусто.\n"
+                            "Заказы появятся, когда их переведут в этот статус с доски.",
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.manrope(color: AppColors.textDim, height: 1.4),
+                          ),
                         ),
                       )
                     : ListView.builder(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                        padding: EdgeInsets.fromLTRB(mobile ? 12 : 20, 16, mobile ? 12 : 20, 20),
                         itemCount: _orders.length,
                         itemBuilder: (context, index) => _buildWorkshopCard(_orders[index]),
                       ),

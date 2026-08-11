@@ -1,12 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:intl/intl.dart';
+import 'app_datetime.dart';
+import 'app_diagnostics.dart';
 import 'app_theme.dart';
 import 'database.dart';
+import 'responsive.dart';
 
 /// Форма новой ошибки.
 class BugReportDialog extends StatefulWidget {
-  const BugReportDialog({super.key});
+  final String? initialPlace;
+  final String? initialSituation;
+  final String? initialDetails;
+  /// По умолчанию прикладываем диагностический лог.
+  final bool attachDiagLog;
+
+  const BugReportDialog({
+    super.key,
+    this.initialPlace,
+    this.initialSituation,
+    this.initialDetails,
+    this.attachDiagLog = true,
+  });
 
   @override
   State<BugReportDialog> createState() => _BugReportDialogState();
@@ -17,7 +31,17 @@ class _BugReportDialogState extends State<BugReportDialog> {
   final _sitCtrl = TextEditingController();
   final _detailsCtrl = TextEditingController();
   bool _saving = false;
+  bool _attachLog = true;
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _placeCtrl.text = widget.initialPlace ?? '';
+    _sitCtrl.text = widget.initialSituation ?? '';
+    _detailsCtrl.text = widget.initialDetails ?? '';
+    _attachLog = widget.attachDiagLog;
+  }
 
   @override
   void dispose() {
@@ -28,7 +52,16 @@ class _BugReportDialogState extends State<BugReportDialog> {
   }
 
   Future<void> _saveReport() async {
-    if (_detailsCtrl.text.trim().isEmpty) {
+    var details = _detailsCtrl.text.trim();
+    if (details.isEmpty && !_attachLog) {
+      setState(() => _error = 'Опишите ошибку');
+      return;
+    }
+    if (_attachLog) {
+      final log = AppDiagnostics.instance.formatLogForBugReport(limit: 40);
+      details = details.isEmpty ? log : '$details\n\n$log';
+    }
+    if (details.trim().isEmpty) {
       setState(() => _error = 'Опишите ошибку');
       return;
     }
@@ -37,10 +70,12 @@ class _BugReportDialogState extends State<BugReportDialog> {
       _error = null;
     });
     await DatabaseHelper().addBugReport(
-      place: _placeCtrl.text.trim(),
+      place: _placeCtrl.text.trim().isEmpty ? 'Без места' : _placeCtrl.text.trim(),
       situation: _sitCtrl.text.trim(),
-      details: _detailsCtrl.text.trim(),
+      details: details,
     );
+    if (!mounted) return;
+    await AppDiagnostics.instance.acknowledgeLocalErrors();
     if (!mounted) return;
     Navigator.pop(context, true);
   }
@@ -54,30 +89,48 @@ class _BugReportDialogState extends State<BugReportDialog> {
         style: GoogleFonts.manrope(fontWeight: FontWeight.w700, color: AppColors.danger),
       ),
       content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _placeCtrl,
-              decoration: const InputDecoration(labelText: "Место (экран, кнопка)", isDense: true),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _sitCtrl,
-              decoration: const InputDecoration(labelText: "Ситуация (что делали)", isDense: true),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _detailsCtrl,
-              decoration: const InputDecoration(labelText: "Конкретика ошибки", isDense: true),
-              maxLines: 4,
-            ),
-            if (_error != null) ...[
+        width: AppResponsive.dialogWidth(context, desktop: 420),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _placeCtrl,
+                decoration: const InputDecoration(labelText: "Место (экран, кнопка)", isDense: true),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _sitCtrl,
+                decoration: const InputDecoration(labelText: "Ситуация (что делали)", isDense: true),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _detailsCtrl,
+                decoration: const InputDecoration(labelText: "Конкретика ошибки", isDense: true),
+                maxLines: 4,
+              ),
               const SizedBox(height: 8),
-              Text(_error!, style: GoogleFonts.manrope(color: AppColors.danger, fontSize: 13)),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                value: _attachLog,
+                activeColor: AppColors.primary,
+                title: Text(
+                  'Приложить лог ошибок / связи',
+                  style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  'Чтобы вечером дома был стек и статус',
+                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+                ),
+                onChanged: (v) => setState(() => _attachLog = v ?? true),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 8),
+                Text(_error!, style: GoogleFonts.manrope(color: AppColors.danger, fontSize: 13)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -125,12 +178,7 @@ class _BugReportsListDialogState extends State<BugReportsListDialog> {
     return _items.where((r) => r['status']?.toString() == _filter).toList();
   }
 
-  String _fmt(String? raw) {
-    if (raw == null || raw.isEmpty) return '';
-    final dt = DateTime.tryParse(raw.contains(' ') ? raw.replaceFirst(' ', 'T') : raw);
-    if (dt == null) return raw;
-    return DateFormat('dd.MM.yyyy HH:mm').format(dt);
-  }
+  String _fmt(String? raw) => AppDateTime.format(raw);
 
   Future<void> _editFix(Map<String, dynamic> row) async {
     final id = (row['id'] as num).toInt();
@@ -144,7 +192,7 @@ class _BugReportsListDialogState extends State<BugReportsListDialog> {
           backgroundColor: AppColors.surface,
           title: Text('Правка #$id', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
           content: SizedBox(
-            width: 400,
+            width: AppResponsive.dialogWidth(ctx, desktop: 400),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,

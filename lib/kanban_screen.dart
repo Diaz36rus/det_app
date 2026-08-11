@@ -4,8 +4,10 @@ import 'package:intl/intl.dart';
 import 'dart:async';
 import 'app_theme.dart';
 import 'database.dart';
+import 'db_refresh_mixin.dart';
 import 'issue_guard.dart';
 import 'order_details_dialog.dart';
+import 'responsive.dart';
 import 'tour_keys.dart';
 import 'works_progress_bar.dart';
 
@@ -16,7 +18,10 @@ class KanbanScreen extends StatefulWidget {
   State<KanbanScreen> createState() => _KanbanScreenState();
 }
 
-class _KanbanScreenState extends State<KanbanScreen> {
+class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
+  @override
+  void onDatabaseChanged() => _loadOrders();
+
   List<Map<String, dynamic>> _orders = [];
   bool _isLoading = true;
   String _currentDateTime = "";
@@ -36,7 +41,7 @@ class _KanbanScreenState extends State<KanbanScreen> {
     "Выдан": AppColors.success,
   };
 
-  String _selectedStatusFilter = "Все цеха";
+  String _selectedStatusFilter = "Все статусы";
 
   @override
   void initState() {
@@ -195,184 +200,248 @@ class _KanbanScreenState extends State<KanbanScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+      return KeyedSubtree(
+        key: TourKeys.kanbanArea,
+        child: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      );
     }
 
+    final mobile = AppResponsive.isMobile(context);
+    final colWidth = mobile ? (MediaQuery.sizeOf(context).width * 0.78).clamp(240.0, 300.0) : 280.0;
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: KeyedSubtree(
         key: TourKeys.kanbanArea,
         child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface2,
-                    borderRadius: BorderRadius.circular(AppTheme.radius),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _selectedStatusFilter,
-                      dropdownColor: AppColors.surface,
-                      borderRadius: BorderRadius.circular(AppTheme.radius),
-                      style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
-                      icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted),
-                      items: ["Все цеха", ...STATUSES.where((s) => s != "Выдан")].map((status) {
-                        return DropdownMenuItem<String>(value: status, child: Text(status));
-                      }).toList(),
-                      onChanged: (val) {
-                        setState(() => _selectedStatusFilter = val!);
-                      },
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  _currentDateTime,
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 14, fontWeight: FontWeight.w500),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: Scrollbar(
-              controller: _kanbanController,
-              trackVisibility: true,
-              thumbVisibility: true,
-              child: ListView.builder(
-                controller: _kanbanController,
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                itemCount: STATUSES.length,
-                itemBuilder: (context, index) {
-                  final status = STATUSES[index];
-                  if (status == "Выдан") return const SizedBox.shrink();
-                  if (_selectedStatusFilter != "Все цеха" && status != _selectedStatusFilter) {
-                    return const SizedBox.shrink();
-                  }
-
-                  final colOrders = _orders.where((o) => o['status'] == status).toList();
-                  final accent = _statusColors[status] ?? AppColors.primary;
-
-                  return DragTarget<Map<String, dynamic>>(
-                    onAcceptWithDetails: (details) async {
-                      final order = details.data;
-                      if (order['status'] != status) {
-                        final ok = await tryUpdateOrderStatus(
-                          context,
-                          order['id'] as int,
-                          status,
-                        );
-                        if (!ok) {
-                          if (mounted) setState(() {});
-                          return;
-                        }
-                        await DatabaseHelper().addOrderEvent(order['id'], "Статус изменен на: $status");
-                        _loadOrders();
-                      }
-                    },
-                    builder: (context, candidateData, rejectedData) {
-                      final hovering = candidateData.isNotEmpty;
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        width: 280,
-                        margin: const EdgeInsets.only(right: 12),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: hovering ? AppColors.primarySoft.withOpacity(0.45) : AppColors.surface,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: hovering ? AppColors.primary.withOpacity(0.55) : AppColors.border,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, mobile ? 12 : 20, mobile ? 12 : 24, 12),
+              child: mobile
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface2,
+                            borderRadius: BorderRadius.circular(AppTheme.radius),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              isExpanded: true,
+                              value: _selectedStatusFilter,
+                              dropdownColor: AppColors.surface,
+                              borderRadius: BorderRadius.circular(AppTheme.radius),
+                              style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
+                              icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted),
+                              items: ["Все статусы", ...STATUSES.where((s) => s != "Выдан")].map((status) {
+                                return DropdownMenuItem<String>(
+                                  value: status,
+                                  child: Text(status, overflow: TextOverflow.ellipsis),
+                                );
+                              }).toList(),
+                              onChanged: (val) {
+                                setState(() => _selectedStatusFilter = val!);
+                              },
+                            ),
                           ),
                         ),
-                        child: Column(
-                          children: [
-                            Row(
-                              children: [
-                                Container(
-                                  width: 8,
-                                  height: 8,
-                                  decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    status,
-                                    style: GoogleFonts.manrope(
-                                      color: AppColors.text,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 14,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.bg,
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(color: AppColors.border),
-                                  ),
-                                  child: Text(
-                                    "${colOrders.length}",
-                                    style: GoogleFonts.manrope(
-                                      color: AppColors.textMuted,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                        const SizedBox(height: 6),
+                        Text(
+                          _currentDateTime,
+                          textAlign: TextAlign.right,
+                          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface2,
+                              borderRadius: BorderRadius.circular(AppTheme.radius),
+                              border: Border.all(color: AppColors.border),
                             ),
-                            const SizedBox(height: 12),
-                            Expanded(
-                              child: ListView.builder(
-                                itemCount: colOrders.length,
-                                itemBuilder: (context, i) {
-                                  final o = colOrders[i];
-                                  return Draggable<Map<String, dynamic>>(
-                                    data: o,
-                                    feedback: Material(
-                                      color: Colors.transparent,
-                                      elevation: 8,
-                                      child: Opacity(
-                                        opacity: 0.92,
-                                        child: _buildOrderCard(o, status, isFeedback: true),
-                                      ),
-                                    ),
-                                    childWhenDragging: Opacity(
-                                      opacity: 0.25,
-                                      child: _buildOrderCard(o, status),
-                                    ),
-                                    child: GestureDetector(
-                                      onTap: () async {
-                                        final shouldRefresh = await OrderDetailsDialog.open(context, o);
-                                        if (shouldRefresh == true) _loadOrders();
-                                      },
-                                      child: _buildOrderCard(o, status),
-                                    ),
-                                  );
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _selectedStatusFilter,
+                                dropdownColor: AppColors.surface,
+                                borderRadius: BorderRadius.circular(AppTheme.radius),
+                                style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
+                                icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted),
+                                items: ["Все статусы", ...STATUSES.where((s) => s != "Выдан")].map((status) {
+                                  return DropdownMenuItem<String>(value: status, child: Text(status));
+                                }).toList(),
+                                onChanged: (val) {
+                                  setState(() => _selectedStatusFilter = val!);
                                 },
                               ),
                             ),
-                          ],
+                          ),
                         ),
-                      );
-                    },
-                  );
-                },
+                        const SizedBox(width: 12),
+                        Text(
+                          _currentDateTime,
+                          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: RefreshIndicator(
+                color: AppColors.primary,
+                onRefresh: _loadOrders,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: SizedBox(
+                        height: constraints.maxHeight,
+                        child: Scrollbar(
+                          controller: _kanbanController,
+                          trackVisibility: true,
+                          thumbVisibility: true,
+                          child: ListView.builder(
+                            controller: _kanbanController,
+                            scrollDirection: Axis.horizontal,
+                            padding: EdgeInsets.fromLTRB(mobile ? 10 : 16, 12, mobile ? 10 : 16, 16),
+                            itemCount: STATUSES.length,
+                            itemBuilder: (context, index) {
+                    final status = STATUSES[index];
+                    if (status == "Выдан") return const SizedBox.shrink();
+                    if (_selectedStatusFilter != "Все статусы" && status != _selectedStatusFilter) {
+                      return const SizedBox.shrink();
+                    }
+
+                    final colOrders = _orders.where((o) => o['status'] == status).toList();
+                    final accent = _statusColors[status] ?? AppColors.primary;
+
+                    return DragTarget<Map<String, dynamic>>(
+                      onAcceptWithDetails: (details) async {
+                        final order = details.data;
+                        if (order['status'] != status) {
+                          final ok = await tryUpdateOrderStatus(
+                            context,
+                            order['id'] as int,
+                            status,
+                          );
+                          if (!ok) {
+                            if (mounted) setState(() {});
+                            return;
+                          }
+                          await DatabaseHelper().addOrderEvent(order['id'], "Статус изменен на: $status");
+                          _loadOrders();
+                        }
+                      },
+                      builder: (context, candidateData, rejectedData) {
+                        final hovering = candidateData.isNotEmpty;
+                        return AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          width: colWidth,
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: hovering ? AppColors.primarySoft.withOpacity(0.45) : AppColors.surface,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: hovering ? AppColors.primary.withOpacity(0.55) : AppColors.border,
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      status,
+                                      style: GoogleFonts.manrope(
+                                        color: AppColors.text,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.bg,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(color: AppColors.border),
+                                    ),
+                                    child: Text(
+                                      "${colOrders.length}",
+                                      style: GoogleFonts.manrope(
+                                        color: AppColors.textMuted,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Expanded(
+                                child: ListView.builder(
+                                  itemCount: colOrders.length,
+                                  itemBuilder: (context, i) {
+                                    final o = colOrders[i];
+                                    return Draggable<Map<String, dynamic>>(
+                                      data: o,
+                                      feedback: Material(
+                                        color: Colors.transparent,
+                                        elevation: 8,
+                                        child: Opacity(
+                                          opacity: 0.92,
+                                          child: SizedBox(
+                                            width: colWidth - 24,
+                                            child: _buildOrderCard(o, status, isFeedback: true),
+                                          ),
+                                        ),
+                                      ),
+                                      childWhenDragging: Opacity(
+                                        opacity: 0.25,
+                                        child: _buildOrderCard(o, status),
+                                      ),
+                                      child: GestureDetector(
+                                        onTap: () async {
+                                          final shouldRefresh = await OrderDetailsDialog.open(context, o);
+                                          if (shouldRefresh == true) _loadOrders();
+                                        },
+                                        child: _buildOrderCard(o, status),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                            },
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }

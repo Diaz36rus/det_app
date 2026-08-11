@@ -1,5 +1,6 @@
 allprojects {
     repositories {
+        maven { url = uri("D:/Android/local-maven") }
         google()
         mavenCentral()
     }
@@ -9,6 +10,33 @@ rootProject.buildDir = "../build"
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
+
+// Старые Flutter-плагины (printing 7.3, path_provider 8.5…) тянут свои AGP.
+// Выравниваем classpath на AGP проекта, иначе сборка ломается на aapt2-proto/sdklib.
+subprojects { sub ->
+    sub.buildscript {
+        repositories {
+            maven { url = uri("D:/Android/local-maven") }
+            google()
+            mavenCentral()
+        }
+        configurations.classpath {
+            resolutionStrategy.eachDependency { details ->
+                if (details.requested.group == "com.android.tools.build" &&
+                    details.requested.name == "gradle") {
+                    details.useVersion("8.7.3")
+                    details.because("Align plugin AGP with app module")
+                }
+            }
+        }
+    }
+    sub.repositories {
+        maven { url = uri("D:/Android/local-maven") }
+        google()
+        mavenCentral()
+    }
+}
+
 subprojects {
     project.evaluationDependsOn(":app")
 }

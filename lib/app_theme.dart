@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 /// Цвета приложения — тёмная операционная CRM.
+/// surface / surface2 — непрозрачные: drawer, сайдбар и карточки не смешивают текст
+/// с фоном. Картинка меню — только в [MenuBackgrounds] под прозрачным контентом.
 class AppColors {
   static const bg = Color(0xFF0B0D12);
+  /// Панели / сайдбар / диалоги / drawer.
   static const surface = Color(0xFF141821);
+  /// Карточки, поля ввода, колонки.
   static const surface2 = Color(0xFF1A2030);
-  static const border = Color(0xFF2A3344);
+  static const border = Color(0xFF3A4558);
   static const primary = Color(0xFF3B82F6);
   static const primarySoft = Color(0xFF1E3A5F);
   static const success = Color(0xFF22C55E);
@@ -37,6 +41,13 @@ class AppTheme {
         color: AppColors.surface2,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: AppColors.border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x33000000),
+            blurRadius: 12,
+            offset: Offset(0, 2),
+          ),
+        ],
       );
 
   static ThemeData build() {

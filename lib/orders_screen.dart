@@ -1,17 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'app_datetime.dart';
+import 'app_menu.dart';
 import 'app_theme.dart';
 import 'database.dart';
 import 'input_masks.dart';
 import 'quick_datetime_picker.dart';
+import 'responsive.dart';
+import 'schedule_conflict.dart';
 import 'service_category_gallery.dart';
 import 'tour_keys.dart';
+import 'vin_utils.dart';
+import 'wrap_catalog.dart';
 
 class OrdersScreen extends StatefulWidget {
   final DateTime? initialDate;
   final TimeOfDay? initialTime;
+  final ValueChanged<int>? onNavigateMenu;
+  final VoidCallback? onOrderCreated;
 
-  const OrdersScreen({super.key, this.initialDate, this.initialTime});
+  const OrdersScreen({
+    super.key,
+    this.initialDate,
+    this.initialTime,
+    this.onNavigateMenu,
+    this.onOrderCreated,
+  });
 
   @override
   State<OrdersScreen> createState() => _OrdersScreenState();
@@ -37,6 +51,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Color _statusColor = AppColors.danger;
   List<Map<String, dynamic>> _clientCars = [];
   int? _selectedClientCarId;
+  String? _vinWarning;
+  List<Map<String, dynamic>> _plateHistory = [];
+  int _plateLookupGen = 0;
 
   DateTime get _startDateTime => DateTime(
         _selectedDate.year,
@@ -106,6 +123,26 @@ class _OrdersScreenState extends State<OrdersScreen> {
     }
   }
 
+  void _onVinChanged() {
+    final warning = VinUtils.validate(_vinController.text);
+    if (warning == _vinWarning) return;
+    setState(() => _vinWarning = warning);
+  }
+
+  Future<void> _onPlateChanged() async {
+    final plate = PlateMaskFormatter.normalize(_plateController.text);
+    final gen = ++_plateLookupGen;
+    if (plate.length < 6) {
+      if (_plateHistory.isNotEmpty) setState(() => _plateHistory = []);
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 280));
+    if (!mounted || gen != _plateLookupGen) return;
+    final hist = await DatabaseHelper().getOrdersByPlate(plate);
+    if (!mounted || gen != _plateLookupGen) return;
+    setState(() => _plateHistory = hist);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -115,11 +152,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
     _endDate = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
     _endTime = const TimeOfDay(hour: 18, minute: 0);
     _ensureEndAfterStart();
+    _vinController.addListener(_onVinChanged);
+    _plateController.addListener(_onPlateChanged);
     _loadServices();
   }
 
   @override
   void dispose() {
+    _vinController.removeListener(_onVinChanged);
+    _plateController.removeListener(_onPlateChanged);
     _phoneController.dispose();
     _nameController.dispose();
     _carController.dispose();
@@ -163,28 +204,95 @@ class _OrdersScreenState extends State<OrdersScreen> {
     });
   }
 
-  Future<void> _checkClient(String phone) async {
-    final normalized = PhonePlus7Formatter.normalize(phone);
-    final digitCount = normalized.replaceAll(RegExp(r'\D'), '').length;
-    if (digitCount >= 11) {
-      var client = await DatabaseHelper().getClientByPhone(normalized);
-      if (client != null) {
-        var cars = await DatabaseHelper().getClientCarsForDropdown(normalized);
-        setState(() {
-          _nameController.text = client['name'];
-          _clientCars = cars;
-          _carController.clear();
-          _plateController.clear();
-          _vinController.clear();
-          _selectedCarCategory = "1";
-          _selectedClientCarId = null;
-        });
-      } else {
-        setState(() {
-          _clientCars = [];
-          _vinController.clear();
+  void _recalcCartTotal() {
+    _total = _cart.fold(0.0, (sum, e) => sum + ((e['price'] as num?)?.toDouble() ?? 0));
+  }
+
+  /// Пакет оклейки из оверлея картинки: зоны + одна сумма.
+  void _applyWrapPackage(WrapPackageDraft draft) {
+    setState(() {
+      _cart.removeWhere((e) {
+        final name = e['name']?.toString();
+        final cat = e['category']?.toString();
+        return isWrapPackageHeader(name) ||
+            isWrapPackageLine(category: cat, name: name) ||
+            e['wrapZones'] != null;
+      });
+      if (draft.zoneNames.isNotEmpty) {
+        _cart.add({
+          'name': draft.zoneNames.length == 1
+              ? draft.zoneNames.first
+              : 'Оклейка · ${draft.zoneNames.length} поз.',
+          'price': draft.packagePrice,
+          'category': 'Оклейка (Пленка)',
+          'workshop': 'Оклейка',
+          'wrapZones': List<String>.from(draft.zoneNames),
         });
       }
+      _recalcCartTotal();
+    });
+  }
+
+  Set<String> get _wrapSelectedNames {
+    for (final e in _cart) {
+      final zones = e['wrapZones'];
+      if (zones is List) {
+        return zones.map((z) => z.toString()).toSet();
+      }
+    }
+    return {
+      for (final e in _cart)
+        if (isWrapPackageLine(
+          category: e['category']?.toString(),
+          name: e['name']?.toString(),
+        ))
+          e['name'].toString(),
+    };
+  }
+
+  double get _wrapPackagePrice {
+    for (final e in _cart) {
+      if (e['wrapZones'] is List) {
+        return (e['price'] as num?)?.toDouble() ?? 0;
+      }
+    }
+    return 0;
+  }
+
+  int _clientLookupGen = 0;
+
+  Future<void> _checkClient(String phone) async {
+    final normalized = PhonePlus7Formatter.normalize(phone);
+    final digits = DatabaseHelper.phoneDigits10(normalized);
+    if (digits.length < 10) return;
+
+    final gen = ++_clientLookupGen;
+    final client = await DatabaseHelper().getClientByPhone(normalized);
+    if (!mounted || gen != _clientLookupGen) return;
+
+    if (client != null) {
+      final cars = await DatabaseHelper().getClientCarsForDropdown(normalized);
+      if (!mounted || gen != _clientLookupGen) return;
+      setState(() {
+        // Не затираем телефон — только подтягиваем клиента.
+        if (_phoneController.text != normalized) {
+          _phoneController.value = TextEditingValue(
+            text: normalized,
+            selection: TextSelection.collapsed(offset: normalized.length),
+          );
+        }
+        _nameController.text = client['name']?.toString() ?? '';
+        _clientCars = cars;
+        _carController.clear();
+        _plateController.clear();
+        _vinController.clear();
+        _selectedCarCategory = "1";
+        _selectedClientCarId = null;
+      });
+    } else {
+      setState(() {
+        _clientCars = [];
+      });
     }
   }
 
@@ -199,6 +307,56 @@ class _OrdersScreenState extends State<OrdersScreen> {
       return;
     }
 
+    if (_cart.isEmpty) {
+      setState(() {
+        _statusMessage = "Добавьте хотя бы одну услугу в корзину";
+        _statusColor = AppColors.danger;
+      });
+      return;
+    }
+
+    final vinWarning = VinUtils.validate(_vinController.text);
+    if (vinWarning != null) {
+      setState(() {
+        _vinWarning = vinWarning;
+        _statusMessage = vinWarning;
+        _statusColor = AppColors.danger;
+      });
+      return;
+    }
+
+    if (plate.isEmpty) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Госномер не указан', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          content: Text(
+            'Создать заказ без госномера? Потом будет сложнее найти машину.',
+            style: GoogleFonts.manrope(color: AppColors.textMuted),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Создать')),
+          ],
+        ),
+      );
+      if (go != true) return;
+    }
+
+    String fmtDb(DateTime dt) =>
+        "${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} "
+        "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:00";
+    final startTimeStr = fmtDb(_startDateTime);
+    final endTimeStr = fmtDb(_endDateTime);
+
+    final okSlot = await confirmNoScheduleConflict(
+      context,
+      startTime: startTimeStr,
+      endTime: endTimeStr,
+    );
+    if (!okSlot || !mounted) return;
+
     var client = await DatabaseHelper().getClientByPhone(phone);
     int clientId;
 
@@ -209,7 +367,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
     }
 
     int? carId = _selectedClientCarId ?? await DatabaseHelper().getCarId(clientId, plate);
-    final vin = _vinController.text.trim();
+    final vin = VinUtils.normalize(_vinController.text);
     if (carId == null) {
       carId = await DatabaseHelper().addCar(
         clientId,
@@ -232,22 +390,35 @@ class _OrdersScreenState extends State<OrdersScreen> {
         "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
     String endDateStr =
         "${_endDate.year}-${_endDate.month.toString().padLeft(2, '0')}-${_endDate.day.toString().padLeft(2, '0')}";
-    final startDt = _startDateTime;
-    final endDt = _endDateTime;
-    String startTimeStr = startDt.toIso8601String();
-    String endTimeStr = endDt.toIso8601String();
+
+    // Пакет оклейки разворачиваем: зоны (price 0) + цена на первой / через накопление на шапке.
+    final orderItems = <Map<String, dynamic>>[];
+    for (final item in _cart) {
+      final zones = item['wrapZones'];
+      if (zones is List && zones.isNotEmpty) {
+        final pkgPrice = (item['price'] as num?)?.toDouble() ?? 0;
+        for (var i = 0; i < zones.length; i++) {
+          orderItems.add({
+            'name': zones[i].toString(),
+            'price': i == 0 ? pkgPrice : 0,
+            'category': 'Оклейка (Пленка)',
+            'workshop': 'Оклейка',
+          });
+        }
+      } else {
+        orderItems.add({
+          'name': item['name'],
+          'price': item['price'],
+          'category': item['category'],
+          'workshop': item['workshop'],
+        });
+      }
+    }
 
     await DatabaseHelper().addOrderWithItems(
       clientId,
       carId,
-      _cart
-          .map((item) => {
-                "name": item['name'],
-                "price": item['price'],
-                "category": item['category'],
-                "workshop": item['workshop'],
-              })
-          .toList(),
+      orderItems,
       dueDate: dueDateStr,
       startTime: startTimeStr,
       endTime: endTimeStr,
@@ -262,12 +433,35 @@ class _OrdersScreenState extends State<OrdersScreen> {
       _carController.clear();
       _plateController.clear();
       _vinController.clear();
+      _vinWarning = null;
       _priceController.text = "0";
       _cart.clear();
       _total = 0;
       _selectedClientCarId = null;
       _clientCars = [];
     });
+    widget.onOrderCreated?.call();
+
+    if (!mounted) return;
+    final next = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Заказ создан', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: Text(
+          'Что дальше?',
+          style: GoogleFonts.manrope(color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, 'stay'), child: const Text('Ещё заказ')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'calendar'), child: const Text('Календарь')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, 'kanban'), child: const Text('На доску')),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (next == 'kanban') widget.onNavigateMenu?.call(AppMenuIds.board);
+    if (next == 'calendar') widget.onNavigateMenu?.call(AppMenuIds.calendar);
   }
 
   Widget _sectionCard({required String title, required Widget child, bool expand = false}) {
@@ -351,12 +545,439 @@ class _OrdersScreenState extends State<OrdersScreen> {
   String _fmtTime(TimeOfDay t) =>
       "${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}";
 
+  Widget _phoneField() => TextField(
+        key: const ValueKey('order_client_phone'),
+        controller: _phoneController,
+        decoration: const InputDecoration(
+          labelText: "Телефон",
+          hintText: "+7XXXXXXXXXX",
+          isDense: true,
+        ),
+        keyboardType: TextInputType.phone,
+        textInputAction: TextInputAction.next,
+        autofillHints: const [AutofillHints.telephoneNumber],
+        inputFormatters: [PhonePlus7Formatter()],
+        onChanged: _checkClient,
+        onEditingComplete: () {
+          _checkClient(_phoneController.text);
+          FocusScope.of(context).nextFocus();
+        },
+      );
+
+  Widget _nameField() => TextField(
+        key: const ValueKey('order_client_name'),
+        controller: _nameController,
+        decoration: const InputDecoration(labelText: "Имя клиента", isDense: true),
+        keyboardType: TextInputType.text,
+        textCapitalization: TextCapitalization.words,
+        textInputAction: TextInputAction.next,
+      );
+
+  Widget _carField() => TextField(
+        key: const ValueKey('order_client_car'),
+        controller: _carController,
+        decoration: const InputDecoration(labelText: "Авто (марка/модель)", isDense: true),
+        keyboardType: TextInputType.text,
+        textCapitalization: TextCapitalization.words,
+        textInputAction: TextInputAction.next,
+      );
+
+  Widget _plateField() => TextField(
+        key: const ValueKey('order_client_plate'),
+        controller: _plateController,
+        decoration: const InputDecoration(
+          labelText: "Госномер",
+          hintText: "A123BC777",
+          isDense: true,
+        ),
+        keyboardType: TextInputType.text,
+        textCapitalization: TextCapitalization.characters,
+        textInputAction: TextInputAction.next,
+        inputFormatters: [PlateMaskFormatter()],
+      );
+
+  Widget _vinField() => TextField(
+        key: const ValueKey('order_client_vin'),
+        controller: _vinController,
+        decoration: InputDecoration(
+          labelText: "VIN",
+          isDense: true,
+          hintText: "17 символов (ISO)",
+          errorText: _vinWarning,
+        ),
+        keyboardType: TextInputType.text,
+        textCapitalization: TextCapitalization.characters,
+        textInputAction: TextInputAction.next,
+        maxLength: VinUtils.requiredLength,
+        buildCounter: (_, {required currentLength, required isFocused, maxLength}) => null,
+      );
+
+  Widget _classField() => DropdownButtonFormField<String>(
+        value: _selectedCarCategory,
+        decoration: const InputDecoration(labelText: "Класс", isDense: true),
+        dropdownColor: AppColors.surface2,
+        items: ['1', '2', '3', '4'].map((v) => DropdownMenuItem(value: v, child: Text("$v кл."))).toList(),
+        onChanged: (val) {
+          if (val != null) setState(() => _selectedCarCategory = val);
+        },
+      );
+
+  Widget _clientCarsDropdown() => DropdownButtonFormField<int>(
+        value: _selectedClientCarId,
+        decoration: const InputDecoration(labelText: "Авто клиента", isDense: true),
+        dropdownColor: AppColors.surface2,
+        items: _clientCars.map((car) {
+          return DropdownMenuItem<int>(
+            value: car['id'] as int,
+            child: Text(
+              "${car['make_model']} | ${car['plate']}${((car['vin'] ?? '') as String).isNotEmpty ? ' | VIN ${car['vin']}' : ''}",
+              style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }).toList(),
+        onChanged: (val) {
+          if (val == null) return;
+          var selectedCar = _clientCars.firstWhere((c) => c['id'] == val);
+          setState(() {
+            _selectedClientCarId = val;
+            _carController.text = selectedCar['make_model'] ?? "";
+            _plateController.text = PlateMaskFormatter.normalize(selectedCar['plate']?.toString() ?? "");
+            _vinController.text = selectedCar['vin']?.toString() ?? "";
+            _selectedCarCategory = selectedCar['category'] ?? "1";
+          });
+        },
+      );
+
+  Widget _clientSection({required bool mobile}) {
+    return KeyedSubtree(
+      key: TourKeys.orderClient,
+      child: _sectionCard(
+        title: "Клиент и авто",
+        child: Column(
+          children: [
+            if (mobile) ...[
+              _phoneField(),
+              const SizedBox(height: 10),
+              _nameField(),
+            ] else
+              Row(
+                children: [
+                  Expanded(child: _phoneField()),
+                  const SizedBox(width: 10),
+                  Expanded(child: _nameField()),
+                ],
+              ),
+            if (_clientCars.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _clientCarsDropdown(),
+            ],
+            const SizedBox(height: 10),
+            if (mobile) ...[
+              _carField(),
+              const SizedBox(height: 10),
+              _plateField(),
+            ] else
+              Row(
+                children: [
+                  Expanded(child: _carField()),
+                  const SizedBox(width: 10),
+                  Expanded(child: _plateField()),
+                ],
+              ),
+            const SizedBox(height: 10),
+            // VIN / Класс — те же 50/50 колонки, что Авто / Госномер
+            if (mobile) ...[
+              _vinField(),
+              const SizedBox(height: 10),
+              _classField(),
+            ] else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: _vinField()),
+                  const SizedBox(width: 10),
+                  Expanded(child: _classField()),
+                ],
+              ),
+            if (_plateHistory.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'История по госномеру',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              ..._plateHistory.take(5).map((o) {
+                final st = o['status']?.toString() ?? '';
+                final whenRaw = (o['start_time']?.toString().isNotEmpty == true)
+                    ? o['start_time']
+                    : o['created_at'];
+                final when = AppDateTime.format(whenRaw);
+                final client = o['client_name']?.toString() ?? '';
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    '#${o['id']} · $st · $when${client.isEmpty ? '' : ' · $client'}',
+                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
+              }),
+              if (_plateHistory.length > 5)
+                Text(
+                  'ещё ${_plateHistory.length - 5}…',
+                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 11),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _scheduleColumn({
+    required String title,
+    required Widget dateChip,
+    required Widget timeChip,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.manrope(
+            color: AppColors.textMuted,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.5,
+          ),
+        ),
+        const SizedBox(height: 6),
+        dateChip,
+        const SizedBox(height: 8),
+        timeChip,
+      ],
+    );
+  }
+
+  Widget _scheduleSection({required bool mobile}) {
+    final reception = _scheduleColumn(
+      title: 'ПРИЁМ',
+      dateChip: _dateTimeChip(
+        icon: Icons.calendar_today_outlined,
+        label: "Дата",
+        value: _fmtDate(_selectedDate),
+        accent: AppColors.primary,
+        onTap: _pickDate,
+      ),
+      timeChip: _dateTimeChip(
+        icon: Icons.access_time,
+        label: "Время",
+        value: _fmtTime(_selectedTime),
+        accent: AppColors.success,
+        onTap: _pickTime,
+      ),
+    );
+    final delivery = _scheduleColumn(
+      title: 'ВЫДАЧА',
+      dateChip: _dateTimeChip(
+        icon: Icons.event_available_outlined,
+        label: "Дата",
+        value: _fmtDate(_endDate),
+        accent: const Color(0xFFF59E0B),
+        onTap: _pickEndDate,
+      ),
+      timeChip: _dateTimeChip(
+        icon: Icons.schedule,
+        label: "Время",
+        value: _fmtTime(_endTime),
+        accent: AppColors.danger,
+        onTap: _pickEndTime,
+      ),
+    );
+
+    return KeyedSubtree(
+      key: TourKeys.orderSchedule,
+      child: mobile
+          ? Column(
+              children: [
+                reception,
+                const SizedBox(height: 12),
+                delivery,
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: reception),
+                const SizedBox(width: 12),
+                Expanded(child: delivery),
+              ],
+            ),
+    );
+  }
+
+  Widget _cartBlock() {
+    return KeyedSubtree(
+      key: TourKeys.orderCart,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _sectionCard(
+            title: "Корзина · $_total ₽",
+            expand: false,
+            child: SizedBox(
+              height: 96,
+              child: _cart.isEmpty
+                  ? Center(
+                      child: Text(
+                        "Выберите услуги на картинках выше",
+                        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+                      ),
+                    )
+                  : ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _cart.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final item = _cart[index];
+                        final zones = item['wrapZones'];
+                        final isWrapPkg = zones is List && zones.isNotEmpty;
+                        final title = isWrapPkg
+                            ? 'Оклейка · ${zones.length} поз.'
+                            : (item['name']?.toString() ?? '');
+                        return Container(
+                          constraints: BoxConstraints(maxWidth: isWrapPkg ? 280 : 220),
+                          padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                          decoration: BoxDecoration(
+                            color: AppColors.surface,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppColors.border),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.manrope(
+                                        color: AppColors.text,
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      "${item['price']} ₽",
+                                      style: GoogleFonts.manrope(
+                                        color: AppColors.success,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: "Убрать",
+                                icon: const Icon(Icons.close, size: 18, color: AppColors.textDim),
+                                onPressed: () => _removeFromCart(index),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _cart.isEmpty ? null : _saveOrder,
+              child: Text(
+                "Создать заказ",
+                style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _gallery() {
+    return ServiceCategoryGallery(
+      services: _services,
+      carCategory: _selectedCarCategory,
+      selectedNames: _cart
+          .where((e) => e['wrapZones'] == null)
+          .map((e) => e['name']?.toString() ?? '')
+          .where((n) => n.isNotEmpty)
+          .toSet(),
+      onToggle: _toggleCart,
+      onWrapPackage: _applyWrapPackage,
+      wrapSelectedNames: _wrapSelectedNames,
+      wrapPackagePrice: _wrapPackagePrice,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final mobile = AppResponsive.isMobile(context);
+    final pad = mobile ? const EdgeInsets.fromLTRB(12, 12, 12, 16) : const EdgeInsets.fromLTRB(24, 24, 24, 20);
+
+    if (mobile) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        resizeToAvoidBottomInset: true,
+        body: ListView(
+          padding: pad,
+          children: [
+            if (_statusMessage.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  _statusMessage,
+                  style: GoogleFonts.manrope(color: _statusColor, fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+              ),
+            _clientSection(mobile: true),
+            const SizedBox(height: 12),
+            _scheduleSection(mobile: true),
+            const SizedBox(height: 12),
+            KeyedSubtree(
+              key: TourKeys.orderGallery,
+              child: _sectionCard(
+                title: "Категории услуг",
+                child: SizedBox(height: 280, child: _gallery()),
+              ),
+            ),
+            const SizedBox(height: 12),
+            _cartBlock(),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: AppColors.bg,
+      backgroundColor: Colors.transparent,
       body: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+        padding: pad,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -367,176 +988,14 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 if (_statusMessage.isNotEmpty)
                   Text(
                     _statusMessage,
-                    style: GoogleFonts.manrope(
-                      color: _statusColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: GoogleFonts.manrope(color: _statusColor, fontSize: 14, fontWeight: FontWeight.w700),
                   ),
               ],
             ),
             const SizedBox(height: 16),
-            KeyedSubtree(
-              key: TourKeys.orderClient,
-              child: _sectionCard(
-              title: "Клиент и авто",
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _phoneController,
-                          decoration: const InputDecoration(
-                            labelText: "Телефон",
-                            hintText: "+7XXXXXXXXXX",
-                            isDense: true,
-                          ),
-                          keyboardType: TextInputType.phone,
-                          inputFormatters: [PhonePlus7Formatter()],
-                          onChanged: _checkClient,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(labelText: "Имя клиента", isDense: true),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (_clientCars.isNotEmpty) ...[
-                    const SizedBox(height: 10),
-                    DropdownButtonFormField<int>(
-                      value: _selectedClientCarId,
-                      decoration: const InputDecoration(labelText: "Авто клиента", isDense: true),
-                      dropdownColor: AppColors.surface2,
-                      items: _clientCars.map((car) {
-                        return DropdownMenuItem<int>(
-                          value: car['id'] as int,
-                          child: Text(
-                            "${car['make_model']} | ${car['plate']}${((car['vin'] ?? '') as String).isNotEmpty ? ' | VIN ${car['vin']}' : ''}",
-                            style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        if (val == null) return;
-                        var selectedCar = _clientCars.firstWhere((c) => c['id'] == val);
-                        setState(() {
-                          _selectedClientCarId = val;
-                          _carController.text = selectedCar['make_model'] ?? "";
-                          _plateController.text =
-                              PlateMaskFormatter.normalize(selectedCar['plate']?.toString() ?? "");
-                          _vinController.text = selectedCar['vin']?.toString() ?? "";
-                          _selectedCarCategory = selectedCar['category'] ?? "1";
-                        });
-                      },
-                    ),
-                  ],
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _carController,
-                          decoration: const InputDecoration(labelText: "Авто (марка/модель)", isDense: true),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: _plateController,
-                          decoration: const InputDecoration(
-                            labelText: "Госномер",
-                            hintText: "A123BC777",
-                            isDense: true,
-                          ),
-                          textCapitalization: TextCapitalization.characters,
-                          inputFormatters: [PlateMaskFormatter()],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: TextField(
-                          controller: _vinController,
-                          decoration: const InputDecoration(labelText: "VIN", isDense: true),
-                          textCapitalization: TextCapitalization.characters,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedCarCategory,
-                          decoration: const InputDecoration(labelText: "Класс", isDense: true),
-                          dropdownColor: AppColors.surface2,
-                          items: ['1', '2', '3', '4']
-                              .map((v) => DropdownMenuItem(value: v, child: Text("$v кл.")))
-                              .toList(),
-                          onChanged: (val) {
-                            if (val != null) setState(() => _selectedCarCategory = val);
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            ),
+            _clientSection(mobile: false),
             const SizedBox(height: 12),
-            KeyedSubtree(
-              key: TourKeys.orderSchedule,
-              child: Row(
-              children: [
-                Expanded(
-                  child: _dateTimeChip(
-                    icon: Icons.calendar_today_outlined,
-                    label: "Приём · дата",
-                    value: _fmtDate(_selectedDate),
-                    accent: AppColors.primary,
-                    onTap: _pickDate,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _dateTimeChip(
-                    icon: Icons.access_time,
-                    label: "Приём · время",
-                    value: _fmtTime(_selectedTime),
-                    accent: AppColors.success,
-                    onTap: _pickTime,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _dateTimeChip(
-                    icon: Icons.event_available_outlined,
-                    label: "Выдача · дата",
-                    value: _fmtDate(_endDate),
-                    accent: const Color(0xFFF59E0B),
-                    onTap: _pickEndDate,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _dateTimeChip(
-                    icon: Icons.schedule,
-                    label: "Выдача · время",
-                    value: _fmtTime(_endTime),
-                    accent: AppColors.danger,
-                    onTap: _pickEndTime,
-                  ),
-                ),
-              ],
-            ),
-            ),
+            _scheduleSection(mobile: false),
             const SizedBox(height: 12),
             Expanded(
               child: Column(
@@ -546,103 +1005,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
                     child: KeyedSubtree(
                       key: TourKeys.orderGallery,
                       child: _sectionCard(
-                      title: "Категории услуг",
-                      expand: true,
-                      child: ServiceCategoryGallery(
-                        services: _services,
-                        carCategory: _selectedCarCategory,
-                        selectedNames: _cart
-                            .map((e) => e['name']?.toString() ?? '')
-                            .where((n) => n.isNotEmpty)
-                            .toSet(),
-                        onToggle: _toggleCart,
+                        title: "Категории услуг",
+                        expand: true,
+                        child: _gallery(),
                       ),
-                    ),
                     ),
                   ),
                   const SizedBox(height: 10),
-                  KeyedSubtree(
-                    key: TourKeys.orderCart,
-                    child: _sectionCard(
-                    title: "Корзина · $_total ₽",
-                    expand: false,
-                    child: SizedBox(
-                      height: 96,
-                      child: _cart.isEmpty
-                          ? Center(
-                              child: Text(
-                                "Выберите услуги на картинках выше",
-                                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
-                              ),
-                            )
-                          : ListView.separated(
-                              scrollDirection: Axis.horizontal,
-                              itemCount: _cart.length,
-                              separatorBuilder: (_, __) => const SizedBox(width: 8),
-                              itemBuilder: (context, index) {
-                                final item = _cart[index];
-                                return Container(
-                                  constraints: const BoxConstraints(maxWidth: 220),
-                                  padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-                                  decoration: BoxDecoration(
-                                    color: AppColors.surface,
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(color: AppColors.border),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Flexible(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          mainAxisAlignment: MainAxisAlignment.center,
-                                          children: [
-                                            Text(
-                                              item['name']?.toString() ?? '',
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: GoogleFonts.manrope(
-                                                color: AppColors.text,
-                                                fontWeight: FontWeight.w600,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                            Text(
-                                              "${item['price']} ₽",
-                                              style: GoogleFonts.manrope(
-                                                color: AppColors.success,
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      IconButton(
-                                        tooltip: "Убрать",
-                                        icon: const Icon(Icons.close, size: 18, color: AppColors.textDim),
-                                        onPressed: () => _removeFromCart(index),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                    ),
-                  ),
-                  ),
+                  _cartBlock(),
                 ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            Align(
-              alignment: Alignment.centerRight,
-              child: ElevatedButton(
-                onPressed: _saveOrder,
-                child: Text(
-                  "Создать заказ",
-                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                ),
               ),
             ),
           ],

@@ -1,29 +1,59 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'app_datetime.dart';
 import 'app_theme.dart';
+import 'app_toast.dart';
+import 'cash_catalog.dart';
 import 'database.dart';
 import 'issue_guard.dart';
 import 'master_picker.dart';
+import 'order_defects_sheet.dart';
+import 'order_wrap_films_panel.dart';
 import 'quick_datetime_picker.dart';
+import 'responsive.dart';
+import 'schedule_conflict.dart';
 import 'service_category_browser.dart';
 import 'tour_keys.dart';
 import 'work_order_pdf.dart';
 import 'works_progress_bar.dart';
+import 'zone_package_dialog.dart';
 
 class OrderDetailsDialog extends StatefulWidget {
   final Map<String, dynamic> order;
   /// Если задан — упрощённый режим карточки для цеха.
   final String? workshop;
+  /// На телефоне открывается как fullscreen route.
+  final bool fullscreen;
 
-  const OrderDetailsDialog({super.key, required this.order, this.workshop});
+  const OrderDetailsDialog({
+    super.key,
+    required this.order,
+    this.workshop,
+    this.fullscreen = false,
+  });
 
-  /// Единая точка открытия: анимация внутри окна (заметно на Windows).
+  /// Единая точка открытия: mobile → fullscreen, desktop → dialog.
   static Future<bool?> open(
     BuildContext context,
     Map<String, dynamic> order, {
     String? workshop,
   }) {
+    if (AppResponsive.isMobile(context)) {
+      return Navigator.of(context, rootNavigator: true).push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => OrderDetailsDialog(
+            order: order,
+            workshop: workshop,
+            fullscreen: true,
+          ),
+        ),
+      );
+    }
     return showGeneralDialog<bool>(
       context: context,
       useRootNavigator: true,
@@ -109,17 +139,22 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   late TextEditingController _priceController;
   late TextEditingController _autoPayController; // долг по услугам (авто, только чтение)
   late TextEditingController _payAmountController; // ручная сумма «оплатить сейчас»
+  late TextEditingController _paymentMethodController; // отображение метода (как у соседних TextField)
   late TextEditingController _discountPercentController;
   late TextEditingController _discountFixedController;
   late TextEditingController _promoController;
   late TextEditingController _clientNotesController; // Комментарий от клиента
   late TextEditingController _visibleNotesController; // Комментарий для клиента
-  late TextEditingController _masterCommentController; // Комментарий для мастера
-  String _selectedWorkshopForComment = STATUSES.first; // Выбранный цех для комментария
-  String _paymentMethod = "Не указан";
-  
+  String _paymentMethod = CashMethods.cash;
+  final GlobalKey _paymentMethodFieldKey = GlobalKey();
+  final GlobalKey _paymentRegisterFieldKey = GlobalKey();
+  late TextEditingController _paymentRegisterController;
+  List<Map<String, dynamic>> _cashRegisters = [];
+  int? _selectedRegisterId;
+
   List<Map<String, dynamic>> _masters = [];
   List<Map<String, dynamic>> _events = [];
+  List<Map<String, dynamic>> _payments = [];
   int? _selectedMasterId;
   List<Map<String, dynamic>> _clientCars = []; // Список авто клиента
   int? _selectedCarId; // Выбранное авто
@@ -132,10 +167,16 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   String? _orderEndTime;
   String? _techWashStart;
   String? _techWashEnd;
+  Map<String, dynamic> _handover = {};
+  int _lastLiveRev = -1;
+  bool _liveRefreshBusy = false;
+  bool _handoverExpanded = false;
 
   @override
   void initState() {
     super.initState();
+    _lastLiveRev = DatabaseHelper.dataRevision.value;
+    DatabaseHelper.dataRevision.addListener(_onLiveDataRevision);
     _enterCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
     final curved = CurvedAnimation(
       parent: _enterCtrl,
@@ -161,6 +202,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     _priceController = TextEditingController(text: widget.order['price'].toString());
     _autoPayController = TextEditingController();
     _payAmountController = TextEditingController();
+    final rawMethod = widget.order['payment_method']?.toString() ?? CashMethods.cash;
+    _paymentMethod = rawMethod == 'Не указан' || rawMethod.isEmpty ? CashMethods.cash : rawMethod;
+    _paymentMethodController = TextEditingController(text: _paymentMethod);
+    _paymentRegisterController = TextEditingController();
     _discountPercentController = TextEditingController(
       text: _discountPercent == 0 ? "" : _formatMoney(_discountPercent),
     );
@@ -170,24 +215,59 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     _promoController = TextEditingController(text: _promoCode);
     _clientNotesController = TextEditingController(text: widget.order['client_notes'] ?? "");
     _visibleNotesController = TextEditingController(text: widget.order['client_visible_notes'] ?? "");
-    _masterCommentController = TextEditingController(text: widget.order['master_notes'] ?? "");
     _loadData();
   }
 
   @override
   void dispose() {
+    DatabaseHelper.dataRevision.removeListener(_onLiveDataRevision);
     _enterCtrl.dispose();
     _commentController.dispose();
     _priceController.dispose();
     _autoPayController.dispose();
     _payAmountController.dispose();
+    _paymentMethodController.dispose();
+    _paymentRegisterController.dispose();
     _discountPercentController.dispose();
     _discountFixedController.dispose();
     _promoController.dispose();
     _clientNotesController.dispose();
     _visibleNotesController.dispose();
-    _masterCommentController.dispose();
     super.dispose();
+  }
+
+  void _onLiveDataRevision() {
+    final rev = DatabaseHelper.dataRevision.value;
+    if (rev == _lastLiveRev) return;
+    _lastLiveRev = rev;
+    unawaited(_refreshLiveFromDb());
+  }
+
+  /// Лента / чеклист / дефект-события с телефона без полного _loadData.
+  Future<void> _refreshLiveFromDb() async {
+    if (_liveRefreshBusy || !mounted) return;
+    _liveRefreshBusy = true;
+    try {
+      final orderId = widget.order['id'];
+      final events = await DatabaseHelper().getOrderEvents(orderId);
+      final handover = await DatabaseHelper().getOrderHandover(orderId as int);
+      if (!mounted) return;
+      setState(() {
+        _events = events;
+        _handover = handover;
+      });
+    } finally {
+      _liveRefreshBusy = false;
+    }
+  }
+
+  Future<void> _openDefectsSheet({String? workshop}) async {
+    await OrderDefectsSheet.open(
+      context,
+      orderId: widget.order['id'] as int,
+      workshop: workshop ?? widget.workshop ?? '',
+    );
+    if (mounted) await _refreshLiveFromDb();
   }
 
   Future<void> _loadData() async {
@@ -206,7 +286,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     
     // Загружаем услуги
     _services = await DatabaseHelper().getAllServices();
-    
+    _cashRegisters = await DatabaseHelper().getCashRegisters();
+    _handover = await DatabaseHelper().getOrderHandover(widget.order['id'] as int);
+    _payments = await DatabaseHelper().getOrderPayments(widget.order['id'] as int);
+    _syncRegisterForMethod(_paymentMethod, preferKeep: false);
+
     // Загружаем работы из order_items
     final dbItems = await DatabaseHelper().getOrderItems(widget.order['id']);
     _selectedWorks = dbItems.map((item) => Map<String, dynamic>.from(item)).toList();
@@ -258,7 +342,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     } else {
       await _recalcOrderTotal(writeDb: true);
     }
-    _paymentMethod = widget.order['payment_method'] ?? "Не указан";
+    final rawMethod = widget.order['payment_method']?.toString() ?? CashMethods.cash;
+    _paymentMethod = rawMethod == 'Не указан' || rawMethod.isEmpty ? CashMethods.cash : rawMethod;
+    _paymentMethodController.text = _paymentMethod;
+    _syncRegisterForMethod(_paymentMethod, preferKeep: false);
     if (!mounted) return;
     _enterCtrl.value = 0;
     setState(() => _isLoading = false);
@@ -271,17 +358,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   // --- ФУНКЦИИ РАБОТЫ С УСЛУГАМИ ---
   final _customWorkName = TextEditingController();
   final _customWorkPrice = TextEditingController();
-    // Безопасное форматирование времени (защита от старого формата "09:00")
-  /// Для ленты и логов: 31.07 14:30
-  String _formatDT(String? dtStr, String defaultText) {
-    if (dtStr == null || dtStr.isEmpty) return defaultText;
-    try {
-      String n = dtStr.replaceFirst('T', ' ').split('.').first.trim();
-      return DateFormat('dd.MM  HH:mm').format(DateTime.parse(n.contains(' ') ? n.replaceFirst(' ', 'T') : n));
-    } catch (e) {
-      return dtStr;
-    }
-  }
+
+  String _formatDT(String? dtStr, String defaultText) =>
+      AppDateTime.formatShort(dtStr, fallback: defaultText);
 
   /// Кнопка даты/времени — фон в гамме AppColors, акцент только рамкой.
   Widget _timeBadge({
@@ -416,7 +495,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
               backgroundColor: AppColors.surface,
               title: Text("Промокоды", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
               content: SizedBox(
-                width: 420,
+                width: AppResponsive.dialogWidth(context, desktop: 420),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -530,8 +609,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
       workshop: workshop,
     );
     final wsNote = workshop != null ? " → цех $workshop" : "";
-    final priceNote = isWrapPackageLine(category: category, name: name)
-        ? "в пакет оклейки"
+    final priceNote = isZonePackageLine(category: category, name: name)
+        ? (isTintPackageLine(category: category, name: name) ? "в пакет тонировки" : "в пакет оклейки")
         : "$price руб";
     await DatabaseHelper().addOrderEvent(
       widget.order['id'],
@@ -578,7 +657,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     try {
       await DatabaseHelper().addOrderEvent(
         widget.order['id'],
-        "Цех «${widget.workshop}»: $text",
+        "От цеха «${widget.workshop}»: $text",
       );
       _commentController.clear();
       FocusManager.instance.primaryFocus?.unfocus();
@@ -632,39 +711,47 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     return t;
   }
 
-  String _formatEventTime(dynamic raw) {
-    if (raw == null) return '';
-    final s = raw.toString().trim();
-    if (s.isEmpty) return '';
-    try {
-      final n = s.replaceFirst('T', ' ').split('.').first.trim();
-      final dt = DateTime.parse(n.contains(' ') ? n.replaceFirst(' ', 'T') : n);
-      return DateFormat('dd.MM.yyyy HH:mm').format(dt);
-    } catch (_) {
-      if (s.length >= 16 && s[4] == '-' && s[7] == '-') {
-        // 2026-08-02 12:30 или 2026-08-02T12:30
-        final date = s.substring(0, 10).split('-');
-        final time = s.substring(11, 16);
-        if (date.length == 3) return '${date[2]}.${date[1]}.${date[0]} $time';
-      }
-      return s;
-    }
-  }
+  String _formatEventTime(dynamic raw) => AppDateTime.format(raw);
 
   /// Разбор текста события для чистого UI + цвет цеха.
-  ({String? workshop, String body, Color accent}) _parseTimelineEvent(String raw) {
+  /// [direction]: forShop | fromShop | null.
+  ({String? workshop, String body, Color accent, String? direction}) _parseTimelineEvent(String raw) {
     final t = raw.trim();
 
-    final fromShop = RegExp(r'^Комментарий от цеха «([^»]+)»:\s*(.*)$').firstMatch(t);
-    if (fromShop != null) {
-      final w = fromShop.group(1)!;
+    final fromShopExplicit = RegExp(r'^От цеха «([^»]+)»:\s*(.*)$').firstMatch(t);
+    if (fromShopExplicit != null) {
+      final w = fromShopExplicit.group(1)!;
       return (
         workshop: w,
-        body: fromShop.group(2)!.trim(),
+        body: fromShopExplicit.group(2)!.trim(),
         accent: _workshopColors[w] ?? AppColors.primary,
+        direction: 'fromShop',
       );
     }
 
+    final fromShopLegacy = RegExp(r'^Комментарий от цеха «([^»]+)»:\s*(.*)$').firstMatch(t);
+    if (fromShopLegacy != null) {
+      final w = fromShopLegacy.group(1)!;
+      return (
+        workshop: w,
+        body: fromShopLegacy.group(2)!.trim(),
+        accent: _workshopColors[w] ?? AppColors.primary,
+        direction: 'fromShop',
+      );
+    }
+
+    final forShop = RegExp(r'^Для цеха «([^»]+)»:\s*(.*)$').firstMatch(t);
+    if (forShop != null) {
+      final w = forShop.group(1)!;
+      return (
+        workshop: w,
+        body: forShop.group(2)!.trim(),
+        accent: _workshopColors[w] ?? AppColors.primary,
+        direction: 'forShop',
+      );
+    }
+
+    // Старый формат из цеха: Цех «Мойка»: …
     final shopLine = RegExp(r'^Цех «([^»]+)»:\s*(.*)$').firstMatch(t);
     if (shopLine != null) {
       final w = shopLine.group(1)!;
@@ -672,12 +759,18 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
         workshop: w,
         body: shopLine.group(2)!.trim(),
         accent: _workshopColors[w] ?? AppColors.primary,
+        direction: 'fromShop',
       );
     }
 
     final plain = RegExp(r'^Комментарий:\s*(.*)$').firstMatch(t);
     if (plain != null) {
-      return (workshop: null, body: plain.group(1)!.trim(), accent: AppColors.textMuted);
+      return (
+        workshop: null,
+        body: plain.group(1)!.trim(),
+        accent: AppColors.textMuted,
+        direction: null,
+      );
     }
 
     // Статус изменен на: Мойка
@@ -688,6 +781,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
         workshop: name,
         body: 'Статус → $name',
         accent: _workshopColors[name] ?? AppColors.primary,
+        direction: null,
       );
     }
 
@@ -700,11 +794,12 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
               .replaceFirst(RegExp(r'^Комментарий\s*'), '')
               .trim(),
           accent: _workshopColors[w] ?? AppColors.textMuted,
+          direction: null,
         );
       }
     }
 
-    return (workshop: null, body: t, accent: AppColors.textMuted);
+    return (workshop: null, body: t, accent: AppColors.textMuted, direction: null);
   }
 
   Widget _buildPlainTimelineEvent(Map<String, dynamic> ev) {
@@ -712,6 +807,52 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     final parsed = _parseTimelineEvent(raw);
     final time = _formatEventTime(ev['created_at']);
     final accent = parsed.accent;
+    final isShopNote = parsed.direction == 'forShop' || parsed.direction == 'fromShop';
+
+    if (isShopNote && parsed.workshop != null) {
+      final isFor = parsed.direction == 'forShop';
+      final dirLabel = isFor ? 'Для' : 'От';
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: '$dirLabel · ${parsed.workshop}',
+                    style: GoogleFonts.manrope(
+                      color: accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      height: 1.3,
+                    ),
+                  ),
+                  TextSpan(
+                    text: '\n${parsed.body}',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.text,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (time.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                time,
+                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
     final line = parsed.workshop != null
         ? "${parsed.workshop}: ${parsed.body}"
         : parsed.body;
@@ -903,43 +1044,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     await _reloadWorksFromDb(); // deleteOrderItem уже sync; мог удалиться и пакет
   }
 
-  Future<void> _editWrapPackagePrice(Map<String, dynamic> header) async {
-    final current = (header['price'] as num?)?.toDouble() ?? 0;
-    final ctrl = TextEditingController(text: current == 0 ? '' : _formatMoney(current));
-    final result = await showDialog<double>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("Сумма пакета оклейки", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(labelText: "Сумма, ₽", isDense: true),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Отмена")),
-          ElevatedButton(
-            onPressed: () {
-              final v = double.tryParse(ctrl.text.replaceAll(',', '.').trim()) ?? 0;
-              Navigator.pop(ctx, v);
-            },
-            child: const Text("Сохранить"),
-          ),
-        ],
-      ),
-    );
-    ctrl.dispose();
-    if (result == null) return;
-    await DatabaseHelper().updateOrderItemPrice((header['id'] as num).toInt(), result);
-    await DatabaseHelper().addOrderEvent(
-      widget.order['id'],
-      "Сумма пакета оклейки: ${_formatMoney(result)} ₽",
-    );
-    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-    await _reloadWorksFromDb();
-  }
-
   void _addCustomWork() {
     showDialog(
       context: context,
@@ -976,7 +1080,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     );
   }
 
-  void _addPayment() async {
+  Future<void> _addPayment() async {
     // Справа — ручная сумма; если пусто — берём авто-долг слева
     final manual = _payAmountController.text.trim().replaceAll(',', '.');
     double amount;
@@ -987,15 +1091,245 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     }
     if (amount <= 0) return;
 
-    await DatabaseHelper().addPayment(widget.order['id'], amount, _paymentMethod);
+    if (_paymentMethod == 'Не указан' || !CashMethods.all.contains(_paymentMethod)) {
+      if (!mounted) return;
+      showAppToast(context, 'Выберите способ оплаты');
+      return;
+    }
+    if (_cashRegisters.isNotEmpty && _selectedRegisterId == null) {
+      if (!mounted) return;
+      showAppToast(context, 'Выберите кассу для оплаты');
+      return;
+    }
+
+    if (!mounted) return;
+    final confirmPay = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Провести оплату?', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: Text(
+          'Сумма: ${_formatMoney(amount)} ₽\nСпособ: $_paymentMethod\n\n'
+          'Если ошиблись — оплату потом можно отменить в списке ниже.',
+          style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Провести'),
+          ),
+        ],
+      ),
+    );
+    if (confirmPay != true || !mounted) return;
+
+    final shift = await DatabaseHelper().getCurrentShift();
+    if (shift == null) {
+      if (!mounted) return;
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Смена не открыта', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          content: Text(
+            'Оплата не попадёт в текущую смену. Всё равно провести?',
+            style: GoogleFonts.manrope(color: AppColors.textMuted),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Провести')),
+          ],
+        ),
+      );
+      if (go != true) return;
+    }
+
+    var registerId = _selectedRegisterId;
+    if (registerId == null) {
+      registerId = await DatabaseHelper().resolveRegisterIdForMethod(_paymentMethod);
+      _selectedRegisterId = registerId;
+    }
+    String? registerName = _registerNameById(registerId);
+    if (registerName == null && registerId != null) {
+      _cashRegisters = await DatabaseHelper().getCashRegisters();
+      registerName = _registerNameById(registerId);
+      _syncRegisterLabel();
+    }
+
+    await DatabaseHelper().addPayment(
+      widget.order['id'],
+      amount,
+      _paymentMethod,
+      shiftId: shift != null ? (shift['id'] as num).toInt() : null,
+      registerId: registerId,
+    );
     await DatabaseHelper().updateOrderPaymentMethod(widget.order['id'], _paymentMethod);
-    await DatabaseHelper().addOrderEvent(widget.order['id'], "Внесена оплата: $amount руб ($_paymentMethod)");
+    final regNote = registerName != null ? ' → $registerName' : '';
+    await DatabaseHelper().addOrderEvent(
+      widget.order['id'],
+      "Внесена оплата: $amount руб ($_paymentMethod)$regNote",
+    );
 
     _paidAmount += amount;
     _payAmountController.clear();
     _syncAutoPayField();
+    _payments = await DatabaseHelper().getOrderPayments(widget.order['id'] as int);
     _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (!mounted) return;
     setState(() {});
+    showAppToast(
+      context,
+      registerName != null
+          ? 'Оплата ${_formatMoney(amount)} ₽ · зачислено в «$registerName»'
+          : 'Оплата ${_formatMoney(amount)} ₽ ($_paymentMethod)',
+    );
+  }
+
+  Future<void> _voidPayment(Map<String, dynamic> pay) async {
+    final id = (pay['id'] as num?)?.toInt();
+    if (id == null) return;
+    final amount = (pay['amount'] as num?)?.toDouble() ?? 0;
+    final method = pay['method']?.toString() ?? '';
+    if (!mounted) return;
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Отменить оплату?', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: Text(
+          'Сумма ${_formatMoney(amount)} ₽ ($method) будет снята с заказа и из кассы/отчётов.',
+          style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Нет')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Отменить оплату'),
+          ),
+        ],
+      ),
+    );
+    if (go != true || !mounted) return;
+
+    final voided = await DatabaseHelper().voidPayment(id);
+    if (voided == null) {
+      if (mounted) showAppToast(context, 'Платёж уже удалён');
+      return;
+    }
+    await DatabaseHelper().addOrderEvent(
+      widget.order['id'],
+      'Отменена оплата: ${_formatMoney(amount)} ₽ ($method)',
+    );
+    _paidAmount = (_paidAmount - amount).clamp(0.0, double.infinity);
+    _syncAutoPayField();
+    _payments = await DatabaseHelper().getOrderPayments(widget.order['id'] as int);
+    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (!mounted) return;
+    setState(() {});
+    showAppToast(context, 'Оплата ${_formatMoney(amount)} ₽ отменена');
+  }
+
+  ButtonStyle get _payButtonStyle => ElevatedButton.styleFrom(
+        backgroundColor: AppColors.success,
+        foregroundColor: Colors.white,
+      );
+
+  Widget _paymentsList({bool compact = false}) {
+    if (_payments.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: EdgeInsets.only(top: compact ? 8 : 10, bottom: compact ? 4 : 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Проведённые оплаты',
+            style: GoogleFonts.manrope(
+              color: AppColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          for (final p in _payments)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(10, 6, 4, 6),
+                decoration: BoxDecoration(
+                  color: AppColors.surface2,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${_formatMoney((p['amount'] as num?)?.toDouble() ?? 0)} ₽ · '
+                        '${p['method'] ?? ''} · ${AppDateTime.format(p['created_at'])}',
+                        style: GoogleFonts.manrope(color: AppColors.text, fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _voidPayment(p),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.danger,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text('Отменить'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String? _registerNameById(int? id) {
+    if (id == null) return null;
+    for (final r in _cashRegisters) {
+      if ((r['id'] as num).toInt() == id) return r['name']?.toString();
+    }
+    return null;
+  }
+
+  void _syncRegisterLabel() {
+    final name = _registerNameById(_selectedRegisterId);
+    _paymentRegisterController.text = name ?? (_cashRegisters.isEmpty ? 'Нет касс' : 'Выберите кассу');
+  }
+
+  /// Подбирает кассу под метод оплаты (money_type). [preferKeep] — не менять, если текущая подходит.
+  void _syncRegisterForMethod(String method, {bool preferKeep = true}) {
+    if (_cashRegisters.isEmpty) {
+      _selectedRegisterId = null;
+      _syncRegisterLabel();
+      return;
+    }
+    if (preferKeep && _selectedRegisterId != null) {
+      for (final r in _cashRegisters) {
+        if ((r['id'] as num).toInt() == _selectedRegisterId &&
+            r['money_type']?.toString() == method) {
+          _syncRegisterLabel();
+          return;
+        }
+      }
+    }
+    Map<String, dynamic>? match;
+    for (final r in _cashRegisters) {
+      if (r['money_type']?.toString() == method) {
+        match = r;
+        break;
+      }
+    }
+    _selectedRegisterId = ((match ?? _cashRegisters.first)['id'] as num).toInt();
+    _syncRegisterLabel();
   }
 
   Future<void> _closeDialog() async {
@@ -1395,14 +1729,373 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
               ),
             ],
           ),
+          _workCommentField(w),
         ],
       ),
     );
   }
 
-  Widget _buildHeader() {
+  bool get _isMobileLayout => widget.fullscreen || AppResponsive.isMobile(context);
+
+  static const _adminRoles = {'Администратор', 'Приемщик'};
+
+  bool _isAdminRole(String? role) => _adminRoles.contains(role?.trim() ?? '');
+
+  /// Сотрудники для поля «Администратор» (+ текущий, если роль устарела).
+  List<Map<String, dynamic>> get _adminsForDropdown {
+    final list = _masters.where((m) => _isAdminRole(m['role']?.toString())).toList();
+    if (_selectedMasterId != null &&
+        !list.any((m) => m['id'] == _selectedMasterId)) {
+      final cur = _masters.where((m) => m['id'] == _selectedMasterId).toList();
+      if (cur.isNotEmpty) list.insert(0, cur.first);
+    }
+    return list;
+  }
+
+  int? get _safeMasterDropdownValue {
+    if (_selectedMasterId == null) return null;
+    final ok = _adminsForDropdown.any((m) => m['id'] == _selectedMasterId);
+    return ok ? _selectedMasterId : null;
+  }
+
+  int? get _safeCarDropdownValue {
+    if (_selectedCarId == null) return null;
+    final ok = _clientCars.any((c) => c['id'] == _selectedCarId);
+    return ok ? _selectedCarId : null;
+  }
+
+  bool _handoverValue(String key) => (_handover[key] as num?)?.toInt() == 1;
+
+  bool get _handoverComplete => _handoverItems.keys.every(_handoverValue);
+
+  Future<void> _setHandoverValue(String key, bool checked) async {
+    final wasReady = _handoverValue('handover_ready');
+    final next = Map<String, dynamic>.from(_handover)..[key] = checked ? 1 : 0;
+    final complete = _handoverItems.keys.every((item) => (next[item] as num?)?.toInt() == 1);
+    next['handover_ready'] = complete ? 1 : 0;
+    await DatabaseHelper().saveOrderHandover(widget.order['id'] as int, next);
+    if (!wasReady && complete) {
+      await DatabaseHelper().addOrderEvent(widget.order['id'], 'Чек-лист выдачи: готово');
+      _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    }
+    if (mounted) setState(() => _handover = next);
+  }
+
+  Future<bool> _ensureHandoverCompleteForIssue() async {
+    if (_handoverComplete) return true;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Чек-лист выдачи не завершён', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: Text(
+          'Чтобы перевести заказ в «Выдан», отметьте все пункты чек-листа выдачи.',
+          style: GoogleFonts.manrope(color: AppColors.textMuted),
+        ),
+        actions: [
+          ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Понятно')),
+        ],
+      ),
+    );
+    return false;
+  }
+
+  /// Порядок = реальный сценарий выдачи (до визита → QC → осмотр → оплата → ключи).
+  static const _handoverItems = <String, String>{
+    'handover_notified': 'Клиент уведомлён о готовности',
+    'handover_works': 'Работы проверены (QC)',
+    'handover_inspect': 'Авто осмотрено с клиентом',
+    'handover_payment': 'Оплата проверена / закрыта',
+    'handover_keys': 'Ключи и документы переданы',
+  };
+
+  int get _handoverDoneCount =>
+      _handoverItems.keys.where(_handoverValue).length;
+
+  /// Компактная кнопка; по нажатию раскрывается чек-лист выдачи.
+  Widget _buildHandoverChecklist() {
+    final done = _handoverDoneCount;
+    final total = _handoverItems.length;
+    final complete = _handoverComplete;
+    final borderColor = complete ? AppColors.success.withOpacity(0.55) : AppColors.border;
+    final accent = complete ? AppColors.success : AppColors.primary;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppTheme.radius),
+              onTap: () => setState(() => _handoverExpanded = !_handoverExpanded),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                child: Row(
+                  children: [
+                    Icon(
+                      complete ? Icons.verified_outlined : Icons.checklist_rtl,
+                      size: 20,
+                      color: accent,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Чек-лист выдачи',
+                            style: GoogleFonts.manrope(
+                              color: AppColors.text,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            complete ? 'Готово к выдаче' : 'Отмечено $done из $total',
+                            style: GoogleFonts.manrope(
+                              color: complete ? AppColors.success : AppColors.textMuted,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: accent.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '$done/$total',
+                        style: GoogleFonts.manrope(
+                          color: accent,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(
+                      _handoverExpanded ? Icons.expand_less : Icons.expand_more,
+                      color: AppColors.textMuted,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_handoverExpanded) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+              child: Column(
+                children: _handoverItems.entries
+                    .map(
+                      (entry) => CheckboxListTile(
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        activeColor: AppColors.primary,
+                        title: Text(
+                          entry.value,
+                          style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
+                        ),
+                        value: _handoverValue(entry.key),
+                        onChanged: (value) => _setHandoverValue(entry.key, value ?? false),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _statusDropdown() {
+    final statusValue = STATUSES.contains(_status) ? _status : STATUSES.first;
+    return DropdownButtonFormField<String>(
+      value: statusValue,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: "Статус", isDense: true),
+      dropdownColor: AppColors.surface,
+      items: STATUSES
+          .map((s) => DropdownMenuItem(
+                value: s,
+                child: Text(s, overflow: TextOverflow.ellipsis),
+              ))
+          .toList(),
+      onChanged: (val) async {
+        if (val == null || val == _status) return;
+        final previous = _status;
+        if (val == 'Выдан' && !await _ensureHandoverCompleteForIssue()) return;
+        if (!mounted) return;
+        setState(() => _status = val);
+        final ok = await tryUpdateOrderStatus(
+          context,
+          widget.order['id'] as int,
+          val,
+        );
+        if (!mounted) return;
+        if (!ok) {
+          setState(() => _status = previous);
+          return;
+        }
+        await DatabaseHelper().addOrderEvent(widget.order['id'], "Статус изменен на: $val");
+        _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  Widget _adminDropdown() {
+    final admins = _adminsForDropdown;
+    return DropdownButtonFormField<int>(
+      value: _safeMasterDropdownValue,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: "Администратор", isDense: true),
+      dropdownColor: AppColors.surface,
+      items: [
+        const DropdownMenuItem<int>(
+          value: null,
+          child: Text("Не назначен", overflow: TextOverflow.ellipsis),
+        ),
+        ...admins.map((m) {
+          final role = m['role']?.toString() ?? '';
+          final name = m['name']?.toString() ?? '';
+          final label = _isAdminRole(role) ? name : '$name ($role)';
+          return DropdownMenuItem<int>(
+            value: m['id'] as int?,
+            child: Text(label, overflow: TextOverflow.ellipsis),
+          );
+        }),
+      ],
+      onChanged: (val) async {
+        if (val == _selectedMasterId) return;
+        setState(() => _selectedMasterId = val);
+        await DatabaseHelper().updateOrderMaster(widget.order['id'], val);
+        String masterName = "Не назначен";
+        if (val != null) {
+          final foundMaster = _masters.where((m) => m['id'] == val).toList();
+          if (foundMaster.isNotEmpty) masterName = foundMaster.first['name'];
+        }
+        await DatabaseHelper().addOrderEvent(widget.order['id'], "Назначен администратор: $masterName");
+        _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  /// Коммент под работой → БД + сразу в ленту («для цеха»).
+  /// Возвращает true, если событие попало в ленту.
+  Future<bool> _saveWorkComment(int itemId, String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+
+    final idx = _selectedWorks.indexWhere((w) => (w['id'] as num?)?.toInt() == itemId);
+    final w = idx >= 0 ? _selectedWorks[idx] : null;
+    var ws = w?['workshop']?.toString() ?? '';
+    if (ws.isEmpty) {
+      ws = workshopForService(name: w?['name']?.toString()) ?? 'Цех';
+    }
+    final workName = w?['name']?.toString() ?? '';
+    final body = workName.isEmpty ? trimmed : '$trimmed · $workName';
+
+    try {
+      await DatabaseHelper().updateOrderItemComment(itemId, trimmed);
+    } catch (e) {
+      debugPrint('updateOrderItemComment: $e');
+      // Колонка/синк могли сбоить — ленту всё равно пишем.
+    }
+
+    try {
+      await DatabaseHelper().addOrderEvent(
+        widget.order['id'],
+        "Для цеха «$ws»: $body",
+      );
+      _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+      if (idx >= 0) {
+        _selectedWorks[idx]['comment'] = trimmed;
+      }
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Отправлено в ленту'), duration: Duration(seconds: 1)),
+        );
+      }
+      return true;
+    } catch (e) {
+      debugPrint('addOrderEvent work comment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось отправить: $e')),
+        );
+      }
+      return false;
+    }
+  }
+
+  Widget _workCommentField(Map<String, dynamic> w) {
+    final id = (w['id'] as num?)?.toInt();
+    if (id == null) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 12, 12),
+      padding: const EdgeInsets.only(top: 8),
+      child: _WorkItemCommentField(
+        key: ValueKey('work_for_shop_$id'),
+        itemId: id,
+        initial: w['comment']?.toString() ?? '',
+        onSend: _saveWorkComment,
+      ),
+    );
+  }
+
+  Widget _carDropdown() {
+    return DropdownButtonFormField<int>(
+      value: _safeCarDropdownValue,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: "Автомобиль", isDense: true),
+      dropdownColor: AppColors.surface,
+      items: _clientCars.map((car) {
+        final vin = (car['vin'] ?? '').toString();
+        final label = vin.isEmpty
+            ? "${car['make_model']} | ${car['plate']}"
+            : "${car['make_model']} | ${car['plate']} | VIN $vin";
+        return DropdownMenuItem<int>(
+          value: car['id'] as int,
+          child: Text(label, overflow: TextOverflow.ellipsis),
+        );
+      }).toList(),
+      onChanged: (val) async {
+        if (val == null) return;
+        setState(() => _selectedCarId = val);
+        await DatabaseHelper().reassignOrderCar(widget.order['id'], val);
+        final selectedCar = _clientCars.firstWhere((c) => c['id'] == val);
+        await DatabaseHelper().addOrderEvent(
+          widget.order['id'],
+          "Изменено авто на: ${selectedCar['make_model']} | ${selectedCar['plate']}",
+        );
+        _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  Widget _buildHeader() {
+    final mobile = _isMobileLayout;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(mobile ? 12 : 20, 14, mobile ? 8 : 16, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1413,8 +2106,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                   "Заказ #${widget.order['id']}  ·  ${widget.order['client_name']}",
                   style: GoogleFonts.manrope(
                     color: AppColors.text,
-                    fontSize: 22,
+                    fontSize: mobile ? 18 : 22,
                     fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1425,105 +2119,60 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                 icon: const Icon(Icons.print_outlined, color: AppColors.primary),
               ),
               IconButton(
+                tooltip: 'Дефекты',
+                onPressed: () async {
+                  await _openDefectsSheet();
+                },
+                icon: const Icon(Icons.report_problem_outlined, color: AppColors.danger),
+              ),
+              IconButton(
+                tooltip: 'Закрыть',
                 onPressed: _closeDialog,
                 icon: const Icon(Icons.close, color: AppColors.textMuted),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: _status,
-                  decoration: const InputDecoration(labelText: "Статус", isDense: true),
-                  dropdownColor: AppColors.surface,
-                  items: STATUSES.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                  onChanged: (val) async {
-                    if (val == null || val == _status) return;
-                    final previous = _status;
-                    setState(() => _status = val);
-                    final ok = await tryUpdateOrderStatus(
-                      context,
-                      widget.order['id'] as int,
-                      val,
-                    );
-                    if (!mounted) return;
-                    if (!ok) {
-                      setState(() => _status = previous);
-                      return;
-                    }
-                    await DatabaseHelper().addOrderEvent(widget.order['id'], "Статус изменен на: $val");
-                    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-                    if (mounted) setState(() {});
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<int>(
-                  value: _selectedMasterId,
-                  decoration: const InputDecoration(labelText: "Администратор", isDense: true),
-                  dropdownColor: AppColors.surface,
-                  items: [
-                    const DropdownMenuItem<int>(value: null, child: Text("Не назначен")),
-                    ..._masters.map((m) => DropdownMenuItem<int>(value: m['id'], child: Text(m['name']))),
-                  ],
-                  onChanged: (val) async {
-                    if (val == _selectedMasterId) return;
-                    setState(() => _selectedMasterId = val);
-                    await DatabaseHelper().updateOrderMaster(widget.order['id'], val);
-                    String masterName = "Не назначен";
-                    if (val != null) {
-                      var foundMaster = _masters.where((m) => m['id'] == val).toList();
-                      if (foundMaster.isNotEmpty) masterName = foundMaster.first['name'];
-                    }
-                    await DatabaseHelper().addOrderEvent(widget.order['id'], "Назначен администратор: $masterName");
-                    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-                    setState(() {});
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: DropdownButtonFormField<int>(
-                  value: _selectedCarId,
-                  decoration: const InputDecoration(labelText: "Автомобиль", isDense: true),
-                  dropdownColor: AppColors.surface,
-                  items: _clientCars.map((car) {
-                    final vin = (car['vin'] ?? '').toString();
-                    return DropdownMenuItem<int>(
-                      value: car['id'] as int,
-                      child: Text(
-                        vin.isEmpty
-                            ? "${car['make_model']} | ${car['plate']}"
-                            : "${car['make_model']} | ${car['plate']} | VIN $vin",
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (val) async {
-                    if (val != null) {
-                      setState(() => _selectedCarId = val);
-                      await DatabaseHelper().reassignOrderCar(widget.order['id'], val);
-                      var selectedCar = _clientCars.firstWhere((c) => c['id'] == val);
-                      await DatabaseHelper().addOrderEvent(
-                        widget.order['id'],
-                        "Изменено авто на: ${selectedCar['make_model']} | ${selectedCar['plate']}",
-                      );
-                      _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-                      setState(() {});
-                    }
-                  },
-                ),
-              ),
-            ],
-          ),
+          const SizedBox(height: 12),
+          if (mobile) ...[
+            _statusDropdown(),
+            const SizedBox(height: 10),
+            _adminDropdown(),
+            const SizedBox(height: 10),
+            _carDropdown(),
+            const SizedBox(height: 10),
+            KeyedSubtree(key: TourKeys.orderDetailsSchedule, child: _buildScheduleRow()),
+          ] else ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: _statusDropdown()),
+                const SizedBox(width: 12),
+                Expanded(child: _adminDropdown()),
+                const SizedBox(width: 12),
+                Expanded(child: _carDropdown()),
+              ],
+            ),
+            const SizedBox(height: 10),
+            KeyedSubtree(key: TourKeys.orderDetailsSchedule, child: _buildScheduleRow()),
+          ],
+          _buildHandoverChecklist(),
+          // В полном заказе — только просмотр/правка; основное заполнение — в цехе Оклейка.
+          if (!_isWorkshopMode &&
+              _selectedWorks.any((work) => work['workshop']?.toString() == 'Оклейка')) ...[
+            const SizedBox(height: 12),
+            OrderWrapFilmsPanel(
+              orderId: widget.order['id'] as int,
+              collapsible: true,
+              initiallyExpanded: false,
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildWorksColumn() {
+  Widget _buildWorksColumn({bool fill = true, bool showTitle = true}) {
+    final list = _buildWorksListView(shrinkWrap: !fill);
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface2,
@@ -1533,17 +2182,20 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
         children: [
-          Text(
-            "Работы",
-            style: GoogleFonts.manrope(
-              color: AppColors.text,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.2,
+          if (showTitle) ...[
+            Text(
+              "Работы",
+              style: GoogleFonts.manrope(
+                color: AppColors.text,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.2,
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
+            const SizedBox(height: 10),
+          ],
           WorksProgressBar.fromItems(_selectedWorks),
           const SizedBox(height: 12),
           if (!_isWorkshopMode) ...[
@@ -1570,6 +2222,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                     services: _services,
                     carCategory: _currentCarCategory,
                     onAdd: _addWork,
+                    onConfigurePackage: _openZonePackageFromCategory,
                   ),
                 ),
               ],
@@ -1584,20 +2237,24 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
             ),
             const SizedBox(height: 4),
           ],
-          Expanded(child: _buildWorksListView()),
+          if (fill) Expanded(child: list) else list,
         ],
       ),
     );
   }
 
-  Map<String, dynamic>? _wrapPackageHeader() {
+  Map<String, dynamic>? _zonePackageHeader(String headerName) {
     for (final w in _selectedWorks) {
-      if (isWrapPackageHeader(w['name']?.toString()) && w['parent_id'] == null) {
+      if ((w['name']?.toString() ?? '') == headerName && w['parent_id'] == null) {
         return w;
       }
     }
     return null;
   }
+
+  Map<String, dynamic>? _wrapPackageHeader() => _zonePackageHeader('Оклейка');
+
+  Map<String, dynamic>? _tintPackageHeader() => _zonePackageHeader('Тонировка');
 
   List<Map<String, dynamic>> _wrapPackageChildren(int headerId) {
     return _selectedWorks
@@ -1607,12 +2264,65 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
 
   List<Map<String, dynamic>> _standaloneWorks() {
     return _selectedWorks.where((w) {
-      if (isWrapPackageHeader(w['name']?.toString()) && w['parent_id'] == null) {
+      if (isZonePackageHeader(w['name']?.toString()) && w['parent_id'] == null) {
         return false;
       }
       if (w['parent_id'] != null) return false;
       return true;
     }).toList();
+  }
+
+  Future<void> _openZonePackageFromCategory(String category) async {
+    final kind = zonePackageKindForCategory(category);
+    if (kind == null) return;
+    await _openZonePackageEditor(kind);
+  }
+
+  Future<void> _openZonePackageEditor(String kind) async {
+    final headerName = zonePackageHeaderName(kind);
+    final category = zonePackageCategory(kind);
+    final catalog = _services
+        .where((s) => (s['category'] ?? '').toString() == category)
+        .toList();
+    final header = _zonePackageHeader(headerName);
+    final children = header != null
+        ? _wrapPackageChildren((header['id'] as num).toInt())
+        : <Map<String, dynamic>>[];
+    final selected = children.map((c) => (c['name'] ?? '').toString()).toSet();
+    final price = (header?['price'] as num?)?.toDouble() ?? 0;
+
+    final result = await ZonePackageDialog.open(
+      context,
+      kind: kind,
+      catalogZones: catalog,
+      initiallySelected: selected,
+      initialPrice: price,
+    );
+    if (result == null || !mounted) return;
+
+    try {
+      await DatabaseHelper().syncZonePackage(
+        orderId: widget.order['id'] as int,
+        kind: kind,
+        zoneNames: result.zoneNames,
+        packagePrice: result.packagePrice,
+      );
+      final label = headerName;
+      final event = result.zoneNames.isEmpty
+          ? "Пакет «$label» удалён"
+          : "Пакет «$label»: ${result.zoneNames.length} зон, ${_formatMoney(result.packagePrice)} ₽";
+      await DatabaseHelper().addOrderEvent(widget.order['id'], event);
+      if (!mounted) return;
+      _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+      await _reloadWorksFromDb();
+      if (mounted) _priceListController.collapse();
+    } catch (e, st) {
+      debugPrint('_openZonePackageEditor: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить пакет: $e'), backgroundColor: AppColors.danger),
+      );
+    }
   }
 
   Future<void> _toggleWrapPackageDone(
@@ -1621,10 +2331,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     bool done,
   ) async {
     final headerId = (header['id'] as num).toInt();
+    final label = header['name']?.toString() ?? 'Пакет';
     await DatabaseHelper().updateWrapPackageDone(headerId, done);
     final log = done
-        ? "Пакет оклейки выполнен (${children.length} поз.)"
-        : "Снята отметка выполнения пакета оклейки";
+        ? "Пакет «$label» выполнен (${children.length} поз.)"
+        : "Снята отметка выполнения пакета «$label»";
     await DatabaseHelper().addOrderEvent(widget.order['id'], log);
     _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
     await _reloadWorksFromDb();
@@ -1744,28 +2455,64 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     }
   }
 
-  Widget _buildWrapPackageCompositionRow(Map<String, dynamic> child) {
+  Widget _buildWrapPackageCompositionRow(
+    Map<String, dynamic> child, {
+    bool workshopView = false,
+    bool canToggleZones = true,
+  }) {
+    final isDone = (child['is_done'] as num?)?.toInt() == 1;
+    final label = (child['name']?.toString() ?? '')
+        .replaceFirst(RegExp(r'^(Оклейка|Тонировка)\s*·\s*'), '');
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
-      padding: const EdgeInsets.only(left: 10, right: 2),
+      padding: const EdgeInsets.fromLTRB(4, 0, 2, 6),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(
+          color: isDone ? AppColors.success.withOpacity(0.4) : AppColors.border,
+        ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: Text(
-              "${child['name']}",
-              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13),
-              overflow: TextOverflow.ellipsis,
-            ),
+          Row(
+            children: [
+              Checkbox(
+                value: isDone,
+                activeColor: AppColors.success,
+                side: BorderSide(color: canToggleZones ? AppColors.border : AppColors.textDim),
+                onChanged: !canToggleZones
+                    ? null
+                    : (val) async {
+                        final id = (child['id'] as num).toInt();
+                        final idx = _selectedWorks.indexWhere((w) => (w['id'] as num?)?.toInt() == id);
+                        if (idx >= 0) await _toggleWorkDone(idx, val == true);
+                      },
+              ),
+              Expanded(
+                child: Text(
+                  label.isEmpty ? "${child['name']}" : label,
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textMuted,
+                    fontSize: 13,
+                    decoration: isDone ? TextDecoration.lineThrough : null,
+                    decorationColor: AppColors.textDim,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (!workshopView)
+                IconButton(
+                  tooltip: "Убрать из пакета",
+                  icon: const Icon(Icons.close, color: AppColors.danger, size: 18),
+                  onPressed: () => _removeWork(child),
+                ),
+            ],
           ),
-          IconButton(
-            tooltip: "Убрать из пакета",
-            icon: const Icon(Icons.close, color: AppColors.danger, size: 18),
-            onPressed: () => _removeWork(child),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 8),
+            child: _workCommentField(child),
           ),
         ],
       ),
@@ -1774,20 +2521,24 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
 
   Widget _buildWrapPackageBlock(
     Map<String, dynamic> header,
-    List<Map<String, dynamic>> children,
-  ) {
+    List<Map<String, dynamic>> children, {
+    bool workshopView = false,
+  }) {
     final price = (header['price'] as num?)?.toDouble() ?? 0;
     final doneCount = children.where((c) => (c['is_done'] as num?)?.toInt() == 1).length;
     final allDone = children.isNotEmpty && doneCount == children.length;
     final someDone = doneCount > 0 && !allDone;
     final masters = _masterNamesFor(header);
     final hasMasters = masters.isNotEmpty;
+    final packageName = header['name']?.toString() ?? 'Пакет';
+    final kind = isTintPackageHeader(packageName) ? 'tint' : 'wrap';
+    final canToggle = !workshopView || widget.workshop == 'Оклейка';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       decoration: BoxDecoration(
-        color: allDone ? AppColors.surface2 : AppColors.surface2,
+        color: AppColors.surface2,
         borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(
           color: allDone ? AppColors.success.withOpacity(0.45) : AppColors.border,
@@ -1802,10 +2553,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                 tristate: true,
                 value: allDone ? true : (someDone ? null : false),
                 activeColor: AppColors.success,
-                side: const BorderSide(color: AppColors.border),
-                // tristate сам циклит false→true→null; игнорируем val и просто
-                // переключаем: не всё выполнено → отметить всё, иначе снять.
-                onChanged: children.isEmpty
+                side: BorderSide(color: canToggle ? AppColors.border : AppColors.textDim),
+                onChanged: !canToggle || children.isEmpty
                     ? null
                     : (_) => _toggleWrapPackageDone(header, children, !allDone),
               ),
@@ -1814,7 +2563,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      "Оклейка · ${children.length} поз.",
+                      "$packageName · ${children.length} поз.",
                       style: GoogleFonts.manrope(
                         color: AppColors.text,
                         fontSize: 14,
@@ -1845,84 +2594,102 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                   ],
                 ),
               ),
-              TextButton(
-                onPressed: () => _editWrapPackagePrice(header),
-                child: Text(
-                  "${_formatMoney(price)} ₽",
-                  style: GoogleFonts.manrope(
-                    color: AppColors.success,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
+              if (!workshopView) ...[
+                Flexible(
+                  child: TextButton(
+                    onPressed: () => _openZonePackageEditor(kind),
+                    child: Text(
+                      "${_formatMoney(price)} ₽",
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.success,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-              IconButton(
-                icon: Icon(
-                  hasMasters ? Icons.groups : Icons.person_add_alt_1,
-                  color: hasMasters ? AppColors.primary : AppColors.textDim,
-                  size: 20,
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.edit_outlined, color: AppColors.primary, size: 20),
+                  tooltip: "Зоны и сумма",
+                  onPressed: () => _openZonePackageEditor(kind),
                 ),
-                tooltip: "Мастера пакета",
-                onPressed: () => _pickMastersForWrapPackage(header),
-              ),
-              IconButton(
-                tooltip: "Удалить пакет",
-                icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
-                onPressed: () => _removeWork(header),
-              ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: Icon(
+                    hasMasters ? Icons.groups : Icons.person_add_alt_1,
+                    color: hasMasters ? AppColors.primary : AppColors.textDim,
+                    size: 20,
+                  ),
+                  tooltip: "Мастера пакета",
+                  onPressed: () => _pickMastersForWrapPackage(header),
+                ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: "Удалить пакет",
+                  icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
+                  onPressed: () => _removeWork(header),
+                ),
+              ],
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: _timeBadge(
-                  value: header['start_time']?.toString(),
-                  emptyLabel: "Начало",
-                  color: AppColors.success,
-                  onTap: () async {
-                    final dt = await _pickDateTime(current: header['start_time']?.toString());
-                    if (dt == null) return;
-                    await _saveWrapPackageSchedule(
-                      header: header,
-                      start: dt,
-                      logText: "Пакет оклейки: начало ${_formatDT(dt, dt)}",
-                    );
-                  },
+          if (!workshopView) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: _timeBadge(
+                    value: header['start_time']?.toString(),
+                    emptyLabel: "Начало",
+                    color: AppColors.success,
+                    onTap: () async {
+                      final dt = await _pickDateTime(current: header['start_time']?.toString());
+                      if (dt == null) return;
+                      await _saveWrapPackageSchedule(
+                        header: header,
+                        start: dt,
+                        logText: "Пакет оклейки: начало ${_formatDT(dt, dt)}",
+                      );
+                    },
+                  ),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _timeBadge(
-                  value: header['end_time']?.toString(),
-                  emptyLabel: "Конец",
-                  color: AppColors.danger,
-                  onTap: () async {
-                    final dt = await _pickDateTime(
-                      current: header['end_time']?.toString() ?? header['start_time']?.toString(),
-                    );
-                    if (dt == null) return;
-                    await _saveWrapPackageSchedule(
-                      header: header,
-                      end: dt,
-                      logText: "Пакет оклейки: конец ${_formatDT(dt, dt)}",
-                    );
-                  },
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _timeBadge(
+                    value: header['end_time']?.toString(),
+                    emptyLabel: "Конец",
+                    color: AppColors.danger,
+                    onTap: () async {
+                      final dt = await _pickDateTime(
+                        current: header['end_time']?.toString() ?? header['start_time']?.toString(),
+                      );
+                      if (dt == null) return;
+                      await _saveWrapPackageSchedule(
+                        header: header,
+                        end: dt,
+                        logText: "Пакет оклейки: конец ${_formatDT(dt, dt)}",
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
+          _workCommentField(header),
           const SizedBox(height: 4),
           Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
+              // Всегда свёрнут: на мобилке/в цехе иначе зоны оклейки забивают экран.
+              // Не true при rebuild — live-refresh снова раскрывал бы список.
               initiallyExpanded: false,
               tilePadding: EdgeInsets.zero,
               childrenPadding: const EdgeInsets.only(top: 4),
               iconColor: AppColors.primary,
               collapsedIconColor: AppColors.textMuted,
               title: Text(
-                "Состав · выполнено $doneCount из ${children.length}",
+                "Состав · $doneCount из ${children.length} · нажмите, чтобы раскрыть",
                 style: GoogleFonts.manrope(
                   color: AppColors.textDim,
                   fontSize: 12,
@@ -1939,7 +2706,12 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                     ),
                   )
                 else
-                  for (final c in children) _buildWrapPackageCompositionRow(c),
+                  for (final c in children)
+                    _buildWrapPackageCompositionRow(
+                      c,
+                      workshopView: workshopView,
+                      canToggleZones: canToggle,
+                    ),
               ],
             ),
           ),
@@ -1948,197 +2720,338 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     );
   }
 
-  Widget _buildWorksListView() {
-    final header = _wrapPackageHeader();
-    final children = header != null
-        ? _wrapPackageChildren((header['id'] as num).toInt())
+  Widget _buildWorksListView({bool shrinkWrap = false}) {
+    final wrapHeader = _wrapPackageHeader();
+    final wrapChildren = wrapHeader != null
+        ? _wrapPackageChildren((wrapHeader['id'] as num).toInt())
+        : <Map<String, dynamic>>[];
+    final tintHeader = _tintPackageHeader();
+    final tintChildren = tintHeader != null
+        ? _wrapPackageChildren((tintHeader['id'] as num).toInt())
         : <Map<String, dynamic>>[];
     final standalone = _standaloneWorks();
+    final scrollPhysics = shrinkWrap ? const NeverScrollableScrollPhysics() : null;
 
     if (_isWorkshopMode) {
-      final workshopItems = <Map<String, dynamic>>[
-        ...children,
-        ...standalone,
-      ].where((w) => _resolvedWorkWorkshop(w) == widget.workshop).toList();
-
-      if (workshopItems.isEmpty) {
-        return Center(
-          child: Text(
-            "Нет работ этого цеха",
-            style: GoogleFonts.manrope(color: AppColors.textDim),
-          ),
-        );
-      }
-      return ListView(
-        children: [
-          for (final w in workshopItems) _buildWorkCard(w, hidePrice: true),
-        ],
-      );
+      return _buildWorkshopWorksList(shrinkWrap: shrinkWrap);
     }
 
-    if (header == null && standalone.isEmpty) {
-      return Center(
+    if (wrapHeader == null && tintHeader == null && standalone.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
         child: Text(
           "Нет услуг в заказе",
+          textAlign: TextAlign.center,
           style: GoogleFonts.manrope(color: AppColors.textDim),
         ),
       );
     }
 
     return ListView(
+      shrinkWrap: shrinkWrap,
+      physics: scrollPhysics,
       children: [
-        if (header != null) _buildWrapPackageBlock(header, children),
+        if (wrapHeader != null) _buildWrapPackageBlock(wrapHeader, wrapChildren),
+        if (tintHeader != null) _buildWrapPackageBlock(tintHeader, tintChildren),
         for (final w in standalone) _buildWorkCard(w),
       ],
     );
   }
 
-  Widget _buildScheduleColumn() {
-    return Column(
-      children: [
-        _section(
-          title: "ГРАФИК ЗАКАЗА",
-          child: Column(
+  String get _techWashChipLabel {
+    if (!_isTechWash) return '+ Тех. мойка';
+    final a = _formatDT(_techWashStart, '');
+    final b = _formatDT(_techWashEnd, '');
+    if (a.isNotEmpty && b.isNotEmpty) return 'Тех. мойка · $a – $b';
+    if (a.isNotEmpty) return 'Тех. мойка · с $a';
+    if (b.isNotEmpty) return 'Тех. мойка · до $b';
+    return 'Тех. мойка · без времени';
+  }
+
+  Future<void> _openTechWashDialog() async {
+    var enabled = _isTechWash;
+    String? start = _techWashStart;
+    String? end = _techWashEnd;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocal) {
+            return AlertDialog(
+              backgroundColor: AppColors.surface,
+              title: Text(
+                'Техническая мойка',
+                style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+              ),
+              content: SizedBox(
+                width: AppResponsive.dialogWidth(ctx, desktop: 360),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        'В календарь мойки',
+                        style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
+                      ),
+                      value: enabled,
+                      activeColor: AppColors.primary,
+                      onChanged: (v) => setLocal(() => enabled = v),
+                    ),
+                    if (enabled) ...[
+                      const SizedBox(height: 8),
+                      _timeBadge(
+                        value: start,
+                        emptyLabel: 'Время ОТ',
+                        color: AppColors.primary,
+                        onTap: () async {
+                          final dt = await _pickDateTime(current: start);
+                          if (dt != null) setLocal(() => start = dt);
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      _timeBadge(
+                        value: end,
+                        emptyLabel: 'Время ДО',
+                        color: AppColors.danger,
+                        onTap: () async {
+                          final dt = await _pickDateTime(current: end ?? start);
+                          if (dt != null) setLocal(() => end = dt);
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+                ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Готово')),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (ok != true || !mounted) return;
+
+    if (!enabled) {
+      setState(() {
+        _isTechWash = false;
+        _techWashStart = null;
+        _techWashEnd = null;
+      });
+      await DatabaseHelper().setTechWash(widget.order['id'], null, null);
+      await DatabaseHelper().addOrderEvent(widget.order['id'], 'Техническая мойка отменена');
+    } else {
+      final prevStart = _techWashStart;
+      final prevEnd = _techWashEnd;
+      setState(() {
+        _isTechWash = true;
+        _techWashStart = start;
+        _techWashEnd = end;
+      });
+      await DatabaseHelper().setTechWash(widget.order['id'], start, end);
+      if (start != null && start != prevStart) {
+        await DatabaseHelper().addOrderEvent(
+          widget.order['id'],
+          'Тех. мойка: начало ${_formatDT(start, '')}',
+        );
+      }
+      if (end != null && end != prevEnd) {
+        await DatabaseHelper().addOrderEvent(
+          widget.order['id'],
+          'Тех. мойка: конец ${_formatDT(end, '')}',
+        );
+      }
+      if (prevStart == null && prevEnd == null && start == null && end == null) {
+        await DatabaseHelper().addOrderEvent(widget.order['id'], 'Техническая мойка включена');
+      }
+    }
+    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (mounted) setState(() {});
+  }
+
+  Widget _techWashButton({bool compact = false}) {
+    final active = _isTechWash;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _openTechWashDialog,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: compact ? null : double.infinity,
+          height: compact ? 44 : null,
+          padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 0 : 12),
+          decoration: BoxDecoration(
+            color: active ? AppColors.primary.withOpacity(0.12) : AppColors.surface2,
+            borderRadius: BorderRadius.circular(AppTheme.radius),
+            border: Border.all(
+              color: active ? AppColors.primary.withOpacity(0.55) : AppColors.border,
+            ),
+          ),
+          alignment: Alignment.centerLeft,
+          child: Row(
             children: [
-              _timeBadge(
-                value: _orderStartTime,
-                emptyLabel: "Начало",
-                color: AppColors.success,
-                onTap: () async {
-                  String? dt = await _pickDateTime(current: _orderStartTime);
-                  if (dt != null) {
-                    setState(() => _orderStartTime = dt);
-                    final parsed = DateTime.parse(dt.replaceFirst(' ', 'T'));
-                    await DatabaseHelper().updateOrderSchedule(
-                      widget.order['id'],
-                      DateFormat('yyyy-MM-dd').format(parsed),
-                      _orderStartTime!,
-                      _orderEndTime ?? "",
-                      "",
-                    );
-                    await DatabaseHelper().addOrderEvent(widget.order['id'], "Начало работ: ${_formatDT(dt, dt)}");
-                    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-                    setState(() {});
-                  }
-                },
+              Icon(
+                active ? Icons.local_car_wash : Icons.local_car_wash_outlined,
+                size: 18,
+                color: active ? AppColors.primary : AppColors.textMuted,
               ),
-              const SizedBox(height: 10),
-              _timeBadge(
-                value: _orderEndTime,
-                emptyLabel: "Конец",
-                color: AppColors.danger,
-                onTap: () async {
-                  String? dt = await _pickDateTime(current: _orderEndTime ?? _orderStartTime);
-                  if (dt != null) {
-                    setState(() => _orderEndTime = dt);
-                    String due = "";
-                    if (_orderStartTime != null && _orderStartTime!.isNotEmpty) {
-                      due = DateFormat('yyyy-MM-dd').format(DateTime.parse(_orderStartTime!.replaceFirst(' ', 'T')));
-                    }
-                    await DatabaseHelper().updateOrderSchedule(
-                      widget.order['id'],
-                      due,
-                      _orderStartTime ?? "",
-                      _orderEndTime!,
-                      "",
-                    );
-                    await DatabaseHelper().addOrderEvent(widget.order['id'], "Окончание работ: ${_formatDT(dt, dt)}");
-                    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-                    setState(() {});
-                  }
-                },
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _techWashChipLabel,
+                  style: GoogleFonts.manrope(
+                    color: active ? AppColors.text : AppColors.textMuted,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+              if (!compact)
+                Icon(Icons.chevron_right, size: 18, color: AppColors.textDim),
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface2,
-              borderRadius: BorderRadius.circular(AppTheme.radius),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                initiallyExpanded: false,
-                title: Text(
-                  "Техническая мойка",
-                  style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
-                ),
-                iconColor: AppColors.primary,
-                collapsedIconColor: AppColors.textMuted,
-                children: [
-                  SwitchListTile(
-                    title: Text(
-                      "Добавить в календарь мойки",
-                      style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
-                    ),
-                    value: _isTechWash,
-                    activeColor: AppColors.primary,
-                    onChanged: (val) async {
-                      setState(() => _isTechWash = val);
-                      if (!val) {
-                        _techWashStart = null;
-                        _techWashEnd = null;
-                        await DatabaseHelper().setTechWash(widget.order['id'], null, null);
-                        await DatabaseHelper().addOrderEvent(widget.order['id'], "Техническая мойка отменена");
-                        _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-                        setState(() {});
-                      }
-                    },
-                  ),
-                  if (_isTechWash)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                      child: Column(
-                        children: [
-                          _timeBadge(
-                            value: _techWashStart,
-                            emptyLabel: "Время ОТ",
-                            color: AppColors.primary,
-                            onTap: () async {
-                              String? dt = await _pickDateTime(current: _techWashStart);
-                              if (dt != null) {
-                                setState(() => _techWashStart = dt);
-                                await DatabaseHelper().setTechWash(widget.order['id'], _techWashStart, _techWashEnd);
-                                await DatabaseHelper().addOrderEvent(widget.order['id'], "Тех. мойка: начало ${_formatDT(dt, dt)}");
-                                _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-                                setState(() {});
-                              }
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          _timeBadge(
-                            value: _techWashEnd,
-                            emptyLabel: "Время ДО",
-                            color: AppColors.danger,
-                            onTap: () async {
-                              String? dt = await _pickDateTime(current: _techWashEnd ?? _techWashStart);
-                              if (dt != null) {
-                                setState(() => _techWashEnd = dt);
-                                await DatabaseHelper().setTechWash(widget.order['id'], _techWashStart, _techWashEnd);
-                                await DatabaseHelper().addOrderEvent(widget.order['id'], "Тех. мойка: конец ${_formatDT(dt, dt)}");
-                                _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-                                setState(() {});
-                              }
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
+      ),
+    );
+  }
+
+  Future<void> _setOrderStartTime() async {
+    final dt = await _pickDateTime(current: _orderStartTime);
+    if (dt == null) return;
+    final end = _orderEndTime ?? '';
+    if (end.isNotEmpty) {
+      final ok = await confirmNoScheduleConflict(
+        context,
+        startTime: dt,
+        endTime: end,
+        excludeOrderId: widget.order['id'] as int?,
+      );
+      if (!ok || !mounted) return;
+    }
+    setState(() => _orderStartTime = dt);
+    final parsed = DateTime.parse(dt.replaceFirst(' ', 'T'));
+    await DatabaseHelper().updateOrderSchedule(
+      widget.order['id'],
+      DateFormat('yyyy-MM-dd').format(parsed),
+      _orderStartTime!,
+      _orderEndTime ?? "",
+      "",
+    );
+    await DatabaseHelper().addOrderEvent(widget.order['id'], "Начало работ: ${_formatDT(dt, dt)}");
+    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _setOrderEndTime() async {
+    final dt = await _pickDateTime(current: _orderEndTime ?? _orderStartTime);
+    if (dt == null) return;
+    final start = _orderStartTime ?? '';
+    if (start.isNotEmpty) {
+      final ok = await confirmNoScheduleConflict(
+        context,
+        startTime: start,
+        endTime: dt,
+        excludeOrderId: widget.order['id'] as int?,
+      );
+      if (!ok || !mounted) return;
+    }
+    setState(() => _orderEndTime = dt);
+    String due = "";
+    if (_orderStartTime != null && _orderStartTime!.isNotEmpty) {
+      due = DateFormat('yyyy-MM-dd').format(DateTime.parse(_orderStartTime!.replaceFirst(' ', 'T')));
+    }
+    await DatabaseHelper().updateOrderSchedule(
+      widget.order['id'],
+      due,
+      _orderStartTime ?? "",
+      _orderEndTime!,
+      "",
+    );
+    await DatabaseHelper().addOrderEvent(widget.order['id'], "Окончание работ: ${_formatDT(dt, dt)}");
+    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (mounted) setState(() {});
+  }
+
+  /// Подпись «ГРАФИК» между статусом и полями; времена/техмойка — в одну линию.
+  Widget _buildScheduleRow() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'ГРАФИК',
+          style: GoogleFonts.manrope(
+            color: AppColors.textMuted,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.6,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: _timeBadge(
+                value: _orderStartTime,
+                emptyLabel: 'Приём',
+                color: AppColors.success,
+                onTap: _setOrderStartTime,
               ),
             ),
-          ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _timeBadge(
+                value: _orderEndTime,
+                emptyLabel: 'Выдача',
+                color: AppColors.danger,
+                onTap: _setOrderEndTime,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(child: _techWashButton(compact: true)),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildNotesColumn() {
+  Widget _buildNotesColumn({bool fill = true}) {
+    final timeline = Container(
+      height: fill ? null : 280,
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: AppColors.border),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+      child: _buildPinnedTimelineBody(
+        composer: TextField(
+          controller: _commentController,
+          textInputAction: TextInputAction.send,
+          onSubmitted: (_) => _addCommentToTimeline(),
+          style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: 'Комментарий в ленту (Enter)...',
+            hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+            isDense: true,
+            suffixIcon: IconButton(
+              tooltip: "Отправить",
+              icon: const Icon(Icons.send, size: 18, color: AppColors.primary),
+              onPressed: _addCommentToTimeline,
+            ),
+          ),
+        ),
+      ),
+    );
+
     return Column(
+      mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
       children: [
         _section(
           title: "ЗАМЕТКИ",
@@ -2197,225 +3110,462 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                value: _selectedWorkshopForComment,
-                decoration: const InputDecoration(labelText: "Цех", isDense: true),
-                dropdownColor: AppColors.surface,
-                items: STATUSES.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                onChanged: (val) => setState(() => _selectedWorkshopForComment = val!),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _masterCommentController,
-                decoration: const InputDecoration(labelText: "Комментарий от цеха", isDense: true),
-                textInputAction: TextInputAction.send,
-                onSubmitted: (val) => _submitNoteToTimeline(
-                  text: val,
-                  eventPrefix: "Цех «$_selectedWorkshopForComment»",
-                  controller: _masterCommentController,
-                  persist: (t) => DatabaseHelper().updateOrderMasterNotes(widget.order['id'], t),
-                ),
-                onChanged: (val) async {
-                  await DatabaseHelper().updateOrderMasterNotes(widget.order['id'], val);
-                },
-              ),
             ],
           ),
         ),
         const SizedBox(height: 12),
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface2,
-              borderRadius: BorderRadius.circular(AppTheme.radius),
-              border: Border.all(color: AppColors.border),
-            ),
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-            child: _buildPinnedTimelineBody(
-              composer: TextField(
-                controller: _commentController,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _addCommentToTimeline(),
-                style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Комментарий в ленту (Enter)...',
-                  hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
-                  isDense: true,
-                  suffixIcon: IconButton(
-                    tooltip: "Отправить",
-                    icon: const Icon(Icons.send, size: 18, color: AppColors.primary),
-                    onPressed: _addCommentToTimeline,
-                  ),
-                ),
-              ),
-            ),
-          ),
+        if (fill) Expanded(child: timeline) else timeline,
+      ],
+    );
+  }
+
+  Future<void> _onDiscountEditingComplete() async {
+    await _persistDiscount(
+      eventText: _discountPercent > 0 || _discountFixed > 0
+          ? "Скидка: ${_formatMoney(_discountPercent)}% + ${_formatMoney(_discountFixed)} ₽"
+          : "Скидка снята",
+    );
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  Widget _discountPercentField() {
+    return TextField(
+      controller: _discountPercentController,
+      decoration: const InputDecoration(labelText: "Скидка %", isDense: true),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      onChanged: (v) {
+        _discountPercent = double.tryParse(v.replaceAll(',', '.')) ?? 0;
+      },
+      onEditingComplete: _onDiscountEditingComplete,
+    );
+  }
+
+  Widget _discountFixedField() {
+    return TextField(
+      controller: _discountFixedController,
+      decoration: const InputDecoration(labelText: "Скидка ₽", isDense: true),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      onChanged: (v) {
+        _discountFixed = double.tryParse(v.replaceAll(',', '.')) ?? 0;
+      },
+      onEditingComplete: _onDiscountEditingComplete,
+    );
+  }
+
+  Widget _promoField() {
+    return TextField(
+      controller: _promoController,
+      decoration: const InputDecoration(labelText: "Промокод", isDense: true),
+      textCapitalization: TextCapitalization.characters,
+      onSubmitted: (_) => _applyPromoFromField(),
+    );
+  }
+
+  static const _paymentMethods = CashMethods.all;
+
+  /// Тот же TextField, что у «К оплате» / «Оплатить сейчас» — DropdownButtonFormField
+  /// на Windows рисует поле ниже из‑за своей внутренней геометрии.
+  Widget _paymentMethodDropdown({String? helperText}) {
+    return TextField(
+      key: _paymentMethodFieldKey,
+      controller: _paymentMethodController,
+      readOnly: true,
+      enableInteractiveSelection: false,
+      mouseCursor: SystemMouseCursors.click,
+      onTap: _pickPaymentMethod,
+      decoration: InputDecoration(
+        labelText: 'Метод',
+        isDense: true,
+        helperText: helperText ?? 'Нал / карта / перевод / по счету',
+        suffixIcon: const Icon(Icons.arrow_drop_down, size: 22),
+      ),
+    );
+  }
+
+  Future<void> _pickPaymentMethod() async {
+    final box = _paymentMethodFieldKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !mounted) return;
+    final origin = box.localToGlobal(Offset.zero);
+    final size = box.size;
+    // Меню под рамкой поля, без учёта helper-текста (~18–22 px).
+    final fieldBottom = origin.dy + size.height - (18);
+    final selected = await showMenu<String>(
+      context: context,
+      color: AppColors.surface,
+      position: RelativeRect.fromLTRB(
+        origin.dx,
+        fieldBottom,
+        origin.dx + size.width,
+        fieldBottom,
+      ),
+      items: _paymentMethods
+          .map((m) => PopupMenuItem<String>(value: m, child: Text(m)))
+          .toList(),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _paymentMethod = selected;
+      _paymentMethodController.text = selected;
+      _syncRegisterForMethod(selected, preferKeep: false);
+    });
+    await DatabaseHelper().updateOrderPaymentMethod(widget.order['id'], selected);
+  }
+
+  Widget _paymentRegisterDropdown({String? helperText}) {
+    return TextField(
+      key: _paymentRegisterFieldKey,
+      controller: _paymentRegisterController,
+      readOnly: true,
+      enableInteractiveSelection: false,
+      mouseCursor: SystemMouseCursors.click,
+      onTap: _cashRegisters.isEmpty ? null : _pickPaymentRegister,
+      decoration: InputDecoration(
+        labelText: 'Касса',
+        isDense: true,
+        helperText: helperText ?? 'Куда зачислить',
+        suffixIcon: const Icon(Icons.arrow_drop_down, size: 22),
+      ),
+    );
+  }
+
+  Future<void> _pickPaymentRegister() async {
+    if (_cashRegisters.isEmpty) return;
+    final box = _paymentRegisterFieldKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !mounted) return;
+    final origin = box.localToGlobal(Offset.zero);
+    final size = box.size;
+    final fieldBottom = origin.dy + size.height - 18;
+    final selected = await showMenu<int>(
+      context: context,
+      color: AppColors.surface,
+      position: RelativeRect.fromLTRB(
+        origin.dx,
+        fieldBottom,
+        origin.dx + size.width,
+        fieldBottom,
+      ),
+      items: _cashRegisters.map((r) {
+        final id = (r['id'] as num).toInt();
+        final name = r['name']?.toString() ?? 'Касса';
+        final type = r['money_type']?.toString() ?? '';
+        return PopupMenuItem<int>(
+          value: id,
+          child: Text('$name${type.isEmpty ? '' : ' · $type'}'),
+        );
+      }).toList(),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _selectedRegisterId = selected;
+      _syncRegisterLabel();
+      // Подтянуть метод оплаты под тип выбранной кассы
+      for (final r in _cashRegisters) {
+        if ((r['id'] as num).toInt() == selected) {
+          final type = r['money_type']?.toString() ?? '';
+          if (type.isNotEmpty && CashMethods.all.contains(type) && type != _paymentMethod) {
+            _paymentMethod = type;
+            _paymentMethodController.text = type;
+            DatabaseHelper().updateOrderPaymentMethod(widget.order['id'], type);
+          }
+          break;
+        }
+      }
+    });
+  }
+
+  Widget _totalsColumn({bool alignEnd = false}) {
+    final align = alignEnd ? TextAlign.right : TextAlign.left;
+    return Column(
+      crossAxisAlignment: alignEnd ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          "Итого к оплате",
+          textAlign: align,
+          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11, fontWeight: FontWeight.w600),
+        ),
+        Text(
+          "${_formatMoney(_initialPrice)} ₽",
+          textAlign: align,
+          style: GoogleFonts.manrope(color: AppColors.success, fontSize: 16, fontWeight: FontWeight.w800),
+        ),
+        Text(
+          "Оплачено: ${_formatMoney(_paidAmount)} ₽",
+          textAlign: align,
+          style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13),
+        ),
+        Text(
+          "Долг: ${_formatMoney(_debt)} ₽",
+          textAlign: align,
+          style: GoogleFonts.manrope(color: AppColors.danger, fontSize: 15, fontWeight: FontWeight.w800),
         ),
       ],
     );
   }
 
   Widget _buildFooter() {
+    final mobile = _isMobileLayout;
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
-      decoration: const BoxDecoration(
+      padding: EdgeInsets.fromLTRB(mobile ? 12 : 20, 14, mobile ? 12 : 20, 14),
+      decoration: BoxDecoration(
         color: AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              SizedBox(
-                width: 90,
-                child: TextField(
-                  controller: _discountPercentController,
-                  decoration: const InputDecoration(labelText: "Скидка %", isDense: true),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  onChanged: (v) {
-                    _discountPercent = double.tryParse(v.replaceAll(',', '.')) ?? 0;
-                  },
-                  onEditingComplete: () async {
-                    await _persistDiscount(
-                      eventText: _discountPercent > 0 || _discountFixed > 0
-                          ? "Скидка: ${_formatMoney(_discountPercent)}% + ${_formatMoney(_discountFixed)} ₽"
-                          : "Скидка снята",
-                    );
-                    FocusManager.instance.primaryFocus?.unfocus();
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 100,
-                child: TextField(
-                  controller: _discountFixedController,
-                  decoration: const InputDecoration(labelText: "Скидка ₽", isDense: true),
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  onChanged: (v) {
-                    _discountFixed = double.tryParse(v.replaceAll(',', '.')) ?? 0;
-                  },
-                  onEditingComplete: () async {
-                    await _persistDiscount(
-                      eventText: _discountPercent > 0 || _discountFixed > 0
-                          ? "Скидка: ${_formatMoney(_discountPercent)}% + ${_formatMoney(_discountFixed)} ₽"
-                          : "Скидка снята",
-                    );
-                    FocusManager.instance.primaryFocus?.unfocus();
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 130,
-                child: TextField(
-                  controller: _promoController,
-                  decoration: const InputDecoration(labelText: "Промокод", isDense: true),
-                  textCapitalization: TextCapitalization.characters,
-                  onSubmitted: (_) => _applyPromoFromField(),
-                ),
-              ),
-              const SizedBox(width: 6),
-              TextButton(
-                onPressed: _applyPromoFromField,
-                child: Text("Применить", style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
-              ),
-              TextButton(
-                onPressed: _showManagePromosDialog,
-                child: Text("Коды…", style: GoogleFonts.manrope(fontSize: 12)),
-              ),
-              const Spacer(),
-              if (_discountAmount > 0.01)
-                Text(
-                  "−${_formatMoney(_discountAmount)} ₽ от ${_formatMoney(_worksTotal)}",
-                  style: GoogleFonts.manrope(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 13),
-                ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              SizedBox(
-                width: 180,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      "Итого к оплате",
-                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11, fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      "${_formatMoney(_initialPrice)} ₽",
-                      style: GoogleFonts.manrope(color: AppColors.success, fontSize: 16, fontWeight: FontWeight.w800),
-                    ),
-                    Text(
-                      "Оплачено: ${_formatMoney(_paidAmount)} ₽",
-                      style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13),
-                    ),
-                    Text(
-                      "Долг: ${_formatMoney(_debt)} ₽",
-                      style: GoogleFonts.manrope(color: AppColors.danger, fontSize: 15, fontWeight: FontWeight.w800),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: TextField(
-                  controller: _autoPayController,
-                  readOnly: true,
-                  enableInteractiveSelection: false,
-                  decoration: const InputDecoration(
-                    labelText: "К оплате (авто)",
-                    isDense: true,
-                    helperText: "С учётом скидки",
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: TextField(
-                  controller: _payAmountController,
-                  decoration: const InputDecoration(
-                    labelText: "Оплатить сейчас",
-                    isDense: true,
-                    helperText: "Часть или другая сумма",
-                  ),
-                  keyboardType: TextInputType.number,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: DropdownButtonFormField<String>(
-                  value: _paymentMethod,
-                  decoration: const InputDecoration(labelText: "Метод", isDense: true),
-                  dropdownColor: AppColors.surface,
-                  items: ['Наличные', 'Карта', 'Перевод', 'По счету', 'Не указан']
-                      .map((m) => DropdownMenuItem(value: m, child: Text(m)))
-                      .toList(),
-                  onChanged: (val) async {
-                    if (val == null) return;
-                    setState(() => _paymentMethod = val);
-                    await DatabaseHelper().updateOrderPaymentMethod(widget.order['id'], val);
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              ElevatedButton(onPressed: _addPayment, child: const Text("Оплатить")),
-              const Spacer(),
-              TextButton(onPressed: _closeDialog, child: const Text("Отмена")),
-              const SizedBox(width: 8),
-              ElevatedButton(onPressed: _closeDialog, child: const Text("Закрыть")),
-            ],
+        border: const Border(top: BorderSide(color: AppColors.border)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.18),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
           ),
         ],
       ),
+      child: mobile ? _buildMobileFooter() : _buildDesktopFooter(),
+    );
+  }
+
+  Widget _buildMobileFooter() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _totalsColumn(),
+        if (_discountAmount > 0.01) ...[
+          const SizedBox(height: 4),
+          Text(
+            "−${_formatMoney(_discountAmount)} ₽ от ${_formatMoney(_worksTotal)}",
+            style: GoogleFonts.manrope(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+        ],
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(child: _discountPercentField()),
+            const SizedBox(width: 8),
+            Expanded(child: _discountFixedField()),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(child: _promoField()),
+            const SizedBox(width: 4),
+            TextButton(
+              onPressed: _applyPromoFromField,
+              child: Text("Применить", style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
+            ),
+            TextButton(
+              onPressed: _showManagePromosDialog,
+              child: Text("Коды…", style: GoogleFonts.manrope(fontSize: 12)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _autoPayController,
+          readOnly: true,
+          enableInteractiveSelection: false,
+          decoration: const InputDecoration(
+            labelText: "К оплате (авто)",
+            isDense: true,
+            helperText: "С учётом скидки",
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _payAmountController,
+                decoration: const InputDecoration(
+                  labelText: "Оплатить сейчас",
+                  isDense: true,
+                  helperText: "Часть или другая сумма",
+                ),
+                keyboardType: TextInputType.number,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _paymentMethodDropdown(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _paymentRegisterDropdown(),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            style: _payButtonStyle,
+            onPressed: _addPayment,
+            child: const Text("Оплатить"),
+          ),
+        ),
+        _paymentsList(compact: true),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(onPressed: _closeDialog, child: const Text("Закрыть")),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDesktopFooter() {
+    // Фиксированная ширина слота под «Применить / Коды», чтобы колонки
+    // «Скидка %» ↔ «К оплате (авто)» совпадали по вертикали.
+    const promoActionsWidth = 148.0;
+
+    Widget payFieldAuto() => TextField(
+          controller: _autoPayController,
+          readOnly: true,
+          enableInteractiveSelection: false,
+          decoration: const InputDecoration(
+            labelText: 'К оплате (авто)',
+            isDense: true,
+            helperText: 'С учётом скидки',
+          ),
+        );
+
+    Widget payFieldManual() => TextField(
+          controller: _payAmountController,
+          decoration: const InputDecoration(
+            labelText: 'Оплатить сейчас',
+            isDense: true,
+            helperText: 'Часть или другая сумма',
+          ),
+          keyboardType: TextInputType.number,
+        );
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'ОПЛАТА',
+          style: GoogleFonts.manrope(
+            color: AppColors.textMuted,
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.7,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Строка 1: скидки — 3 равные колонки
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: _discountPercentField()),
+                      const SizedBox(width: 10),
+                      Expanded(child: _discountFixedField()),
+                      const SizedBox(width: 10),
+                      Expanded(child: _promoField()),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: promoActionsWidth,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Row(
+                            children: [
+                              Flexible(
+                                child: TextButton(
+                                  onPressed: _applyPromoFromField,
+                                  style: TextButton.styleFrom(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  child: Text(
+                                    'Применить',
+                                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13),
+                                  ),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _showManagePromosDialog,
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: Text('Коды', style: GoogleFonts.manrope(fontSize: 13)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_discountAmount > 0.01) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '−${_formatMoney(_discountAmount)} ₽ от ${_formatMoney(_worksTotal)}',
+                      style: GoogleFonts.manrope(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  // Строка 2: оплата — сумма / метод / касса (+ слот как у промо)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: payFieldAuto()),
+                      const SizedBox(width: 10),
+                      Expanded(child: payFieldManual()),
+                      const SizedBox(width: 10),
+                      Expanded(child: _paymentMethodDropdown()),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: promoActionsWidth,
+                        child: _paymentRegisterDropdown(helperText: 'Касса'),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+            ),
+            const SizedBox(width: 20),
+            // Справа: суммы над кнопками действий
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _totalsColumn(alignEnd: true),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ElevatedButton(
+                      style: _payButtonStyle,
+                      onPressed: _addPayment,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        child: Text('Оплатить'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(onPressed: _closeDialog, child: const Text('Закрыть')),
+                  ],
+                ),
+                SizedBox(
+                  width: 320,
+                  child: _paymentsList(),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -2424,7 +3574,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     if (ws == null) return '';
     final idSet = <int>{};
     for (final w in _selectedWorks) {
-      if (isWrapPackageHeader(w['name']?.toString())) continue;
+      if (isZonePackageHeader(w['name']?.toString())) continue;
       if (_resolvedWorkWorkshop(w) != ws) continue;
       idSet.addAll(parseMasterIds(w['master_ids']));
     }
@@ -2437,7 +3587,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
 
     final idSet = <int>{};
     for (final w in _selectedWorks) {
-      if (isWrapPackageHeader(w['name']?.toString())) continue;
+      if (isZonePackageHeader(w['name']?.toString())) continue;
       if (_resolvedWorkWorkshop(w) != ws) continue;
       idSet.addAll(parseMasterIds(w['master_ids']));
     }
@@ -2459,7 +3609,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     final csv = picked.join(',');
     setState(() {
       for (var i = 0; i < _selectedWorks.length; i++) {
-        if (isWrapPackageHeader(_selectedWorks[i]['name']?.toString())) continue;
+        if (isZonePackageHeader(_selectedWorks[i]['name']?.toString())) continue;
         if (_resolvedWorkWorkshop(_selectedWorks[i]) != ws) continue;
         _selectedWorks[i] = {
           ..._selectedWorks[i],
@@ -2517,9 +3667,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
             ),
           ),
           IconButton(
-            tooltip: "Печать заказ-наряда",
-            onPressed: _printWorkOrder,
-            icon: const Icon(Icons.print_outlined, color: AppColors.primary),
+            tooltip: 'Дефекты',
+            onPressed: () => _openDefectsSheet(),
+            icon: const Icon(Icons.report_problem_outlined, color: AppColors.danger),
           ),
           IconButton(
             tooltip: "Закрыть",
@@ -2640,7 +3790,131 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     );
   }
 
+  /// Список работ цеха: пакеты оклейки/тонировки — блоками, без дубля шапка+зоны.
+  Widget _buildWorkshopWorksList({bool shrinkWrap = false}) {
+    final wrapHeader = _wrapPackageHeader();
+    final wrapChildren = wrapHeader != null
+        ? _wrapPackageChildren((wrapHeader['id'] as num).toInt())
+        : <Map<String, dynamic>>[];
+    final tintHeader = _tintPackageHeader();
+    final tintChildren = tintHeader != null
+        ? _wrapPackageChildren((tintHeader['id'] as num).toInt())
+        : <Map<String, dynamic>>[];
+    final packageIds = <int>{
+      if (wrapHeader != null) (wrapHeader['id'] as num).toInt(),
+      ...wrapChildren.map((c) => (c['id'] as num).toInt()),
+      if (tintHeader != null) (tintHeader['id'] as num).toInt(),
+      ...tintChildren.map((c) => (c['id'] as num).toInt()),
+    };
+    final otherIndexes = <int>[];
+    for (var i = 0; i < _selectedWorks.length; i++) {
+      final w = _selectedWorks[i];
+      final id = (w['id'] as num?)?.toInt();
+      if (id != null && packageIds.contains(id)) continue;
+      final name = w['name']?.toString();
+      // Зоны/шапки пакета не дублируем отдельными строками (в т.ч. сироты).
+      if (isZonePackageHeader(name) || isZonePackageLine(name: name)) continue;
+      otherIndexes.add(i);
+    }
+
+    if (wrapHeader == null && tintHeader == null && otherIndexes.isEmpty) {
+      return Center(
+        child: Text("Нет работ", style: GoogleFonts.manrope(color: AppColors.textDim)),
+      );
+    }
+
+    return ListView(
+      shrinkWrap: shrinkWrap,
+      physics: shrinkWrap ? const NeverScrollableScrollPhysics() : null,
+      children: [
+        if (wrapHeader != null)
+          _buildWrapPackageBlock(wrapHeader, wrapChildren, workshopView: true),
+        if (tintHeader != null)
+          _buildWrapPackageBlock(tintHeader, tintChildren, workshopView: true),
+        for (final i in otherIndexes) _buildWorkshopWorkRow(i),
+      ],
+    );
+  }
+
+  Widget _workshopInner() {
+    final isWrapShop = widget.workshop == 'Оклейка';
+    return Column(
+      children: [
+        _buildWorkshopHeader(),
+        const Divider(height: 1),
+        Expanded(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(_isMobileLayout ? 12 : 20, 14, _isMobileLayout ? 12 : 20, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildWorkshopMastersBlock(),
+                if (isWrapShop) ...[
+                  OrderWrapFilmsPanel(
+                    orderId: widget.order['id'] as int,
+                    collapsible: true,
+                    initiallyExpanded: false,
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                Text("Работы", style: AppTheme.sectionTitle),
+                const SizedBox(height: 4),
+                Text(
+                  "Галочка доступна только для цеха «${widget.workshop}»",
+                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  flex: 3,
+                  child: _buildWorkshopWorksList(),
+                ),
+                const SizedBox(height: 14),
+                Text("Лента событий", style: AppTheme.sectionTitle),
+                const SizedBox(height: 8),
+                Expanded(
+                  flex: 2,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: AppColors.surface2,
+                      borderRadius: BorderRadius.circular(AppTheme.radius),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                    child: _buildPinnedTimelineBody(
+                      composer: TextField(
+                        controller: _commentController,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _addWorkshopMasterComment(),
+                        style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: "Комментарий от цеха (Enter)…",
+                          hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+                          isDense: true,
+                          suffixIcon: IconButton(
+                            tooltip: "Отправить",
+                            icon: const Icon(Icons.send, size: 18, color: AppColors.primary),
+                            onPressed: _addWorkshopMasterComment,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildWorkshopBody() {
+    if (widget.fullscreen) {
+      return Scaffold(
+        backgroundColor: AppColors.surface,
+        body: SafeArea(child: _workshopInner()),
+      );
+    }
     return Dialog(
       backgroundColor: AppColors.surface,
       insetPadding: const EdgeInsets.symmetric(horizontal: 48, vertical: 36),
@@ -2648,76 +3922,228 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
       child: SizedBox(
         width: 720,
         height: 820,
-        child: Column(
-          children: [
-            _buildWorkshopHeader(),
-            const Divider(height: 1),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+        child: _workshopInner(),
+      ),
+    );
+  }
+
+  Widget _adminColumnsBody() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            flex: 5,
+            child: KeyedSubtree(key: TourKeys.orderDetailsWorks, child: _buildWorksColumn()),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            flex: 2,
+            child: KeyedSubtree(key: TourKeys.orderDetailsNotes, child: _buildNotesColumn()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _mobileAccordion({
+    required String title,
+    String? subtitle,
+    required Widget child,
+    bool initiallyExpanded = false,
+    Key? key,
+  }) {
+    return Container(
+      key: key,
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
+          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          iconColor: AppColors.primary,
+          collapsedIconColor: AppColors.textMuted,
+          title: Text(
+            title,
+            style: GoogleFonts.manrope(
+              color: AppColors.text,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          subtitle: subtitle == null || subtitle.isEmpty
+              ? null
+              : Text(
+                  subtitle,
+                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                  overflow: TextOverflow.ellipsis,
+                ),
+          children: [child],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobileTitleBar() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 4, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              "Заказ #${widget.order['id']}  ·  ${widget.order['client_name']}",
+              style: GoogleFonts.manrope(
+                color: AppColors.text,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          IconButton(
+            tooltip: "Печать заказ-наряда",
+            onPressed: _printWorkOrder,
+            icon: const Icon(Icons.print_outlined, color: AppColors.primary),
+          ),
+          IconButton(
+            tooltip: 'Дефекты',
+            onPressed: () => _openDefectsSheet(),
+            icon: const Icon(Icons.report_problem_outlined, color: AppColors.danger),
+          ),
+          IconButton(
+            onPressed: _closeDialog,
+            icon: const Icon(Icons.close, color: AppColors.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _adminMobileInner() {
+    final countable = _selectedWorks.where((w) {
+      if (isZonePackageHeader(w['name']?.toString()) && w['parent_id'] == null) return false;
+      return true;
+    }).toList();
+    final worksTotal = countable.length;
+    final worksDoneCount = countable.where((w) => (w['is_done'] as num?)?.toInt() == 1).length;
+    final scheduleHint = [
+      if (_orderStartTime != null && _orderStartTime!.isNotEmpty) _formatDT(_orderStartTime, ''),
+      if (_orderEndTime != null && _orderEndTime!.isNotEmpty) _formatDT(_orderEndTime, ''),
+    ].where((s) => s.isNotEmpty).join(' → ');
+
+    return Column(
+      children: [
+        _buildMobileTitleBar(),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 24),
+            children: [
+              _mobileAccordion(
+                title: "Данные",
+                subtitle: [
+                  _status,
+                  if (scheduleHint.isNotEmpty) scheduleHint,
+                ].join(' · '),
+                initiallyExpanded: true,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildWorkshopMastersBlock(),
-                    Text("Работы", style: AppTheme.sectionTitle),
-                    const SizedBox(height: 4),
-                    Text(
-                      "Галочка доступна только для цеха «${widget.workshop}»",
-                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                    ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      flex: 3,
-                      child: _selectedWorks.isEmpty
-                          ? Center(
-                              child: Text(
-                                "Нет работ",
-                                style: GoogleFonts.manrope(color: AppColors.textDim),
-                              ),
-                            )
-                          : ListView.builder(
-                              itemCount: _selectedWorks.length,
-                              itemBuilder: (context, index) => _buildWorkshopWorkRow(index),
-                            ),
-                    ),
-                    const SizedBox(height: 14),
-                    Text("Лента событий", style: AppTheme.sectionTitle),
+                    _statusDropdown(),
                     const SizedBox(height: 8),
-                    Expanded(
-                      flex: 2,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.surface2,
-                          borderRadius: BorderRadius.circular(AppTheme.radius),
-                          border: Border.all(color: AppColors.border),
-                        ),
-                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-                        child: _buildPinnedTimelineBody(
-                          composer: TextField(
-                            controller: _commentController,
-                            textInputAction: TextInputAction.send,
-                            onSubmitted: (_) => _addWorkshopMasterComment(),
-                            style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
-                            decoration: InputDecoration(
-                              hintText: "Комментарий от цеха (Enter)…",
-                              hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
-                              isDense: true,
-                              suffixIcon: IconButton(
-                                tooltip: "Отправить",
-                                icon: const Icon(Icons.send, size: 18, color: AppColors.primary),
-                                onPressed: _addWorkshopMasterComment,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+                    _adminDropdown(),
+                    const SizedBox(height: 8),
+                    _carDropdown(),
+                    const SizedBox(height: 10),
+                    KeyedSubtree(key: TourKeys.orderDetailsSchedule, child: _buildScheduleRow()),
                   ],
                 ),
               ),
-            ),
-          ],
+              _mobileAccordion(
+                key: TourKeys.orderDetailsWorks,
+                title: "Работы",
+                subtitle: worksTotal == 0
+                    ? "Нет работ"
+                    : "Выполнено $worksDoneCount из $worksTotal",
+                initiallyExpanded: true,
+                child: _buildWorksColumn(fill: false, showTitle: false),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                child: _buildHandoverChecklist(),
+              ),
+              if (_selectedWorks.any((work) => work['workshop']?.toString() == 'Оклейка'))
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                  child: OrderWrapFilmsPanel(
+                    orderId: widget.order['id'] as int,
+                    collapsible: true,
+                    initiallyExpanded: false,
+                  ),
+                ),
+              _mobileAccordion(
+                key: TourKeys.orderDetailsNotes,
+                title: "Заметки",
+                subtitle: "Диалог и лента",
+                child: _buildNotesColumn(fill: false),
+              ),
+              _mobileAccordion(
+                key: TourKeys.orderDetailsPayment,
+                title: "Оплата",
+                subtitle: "Итого ${_formatMoney(_initialPrice)} ₽ · долг ${_formatMoney(_debt)} ₽",
+                initiallyExpanded: true,
+                child: _buildMobileFooter(),
+              ),
+            ],
+          ),
         ),
+      ],
+    );
+  }
+
+  Widget _adminInner() {
+    if (_isMobileLayout) return _adminMobileInner();
+    return Column(
+      children: [
+        KeyedSubtree(key: TourKeys.orderDetailsHeader, child: _buildHeader()),
+        const Divider(height: 1),
+        Expanded(child: _adminColumnsBody()),
+        KeyedSubtree(key: TourKeys.orderDetailsPayment, child: _buildFooter()),
+      ],
+    );
+  }
+
+  Widget _buildAdminBody() {
+    final content = GestureDetector(
+      onTap: () {
+        _priceListController.collapse();
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: _adminInner(),
+    );
+
+    if (widget.fullscreen) {
+      return Scaffold(
+        backgroundColor: AppColors.surface,
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(child: content),
+      );
+    }
+
+    return Dialog(
+      backgroundColor: AppColors.surface,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SizedBox(
+        width: 1500,
+        height: 1200,
+        child: content,
       ),
     );
   }
@@ -2726,73 +4152,37 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   Widget build(BuildContext context) {
     final Widget panel;
     if (_isLoading) {
-      panel = Dialog(
-        backgroundColor: AppColors.surface,
-        child: SizedBox(
-          width: _isWorkshopMode ? 720 : 1500,
-          height: _isWorkshopMode ? 820 : 1200,
-          child: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
-        ),
-      );
+      if (widget.fullscreen) {
+        panel = const Scaffold(
+          backgroundColor: AppColors.surface,
+          body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        );
+      } else {
+        panel = Dialog(
+          backgroundColor: AppColors.surface,
+          child: SizedBox(
+            width: _isWorkshopMode ? 720 : 1500,
+            height: _isWorkshopMode ? 820 : 1200,
+            child: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+          ),
+        );
+      }
     } else if (_isWorkshopMode) {
       panel = _buildWorkshopBody();
     } else {
-      panel = GestureDetector(
-        onTap: () {
-          _priceListController.collapse();
-          FocusManager.instance.primaryFocus?.unfocus();
-        },
-        child: Dialog(
-          backgroundColor: AppColors.surface,
-          insetPadding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: SizedBox(
-            width: 1500,
-            height: 1200,
-            child: Column(
-              children: [
-                KeyedSubtree(key: TourKeys.orderDetailsHeader, child: _buildHeader()),
-                const Divider(height: 1),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(
-                          flex: 3,
-                          child: KeyedSubtree(
-                            key: TourKeys.orderDetailsWorks,
-                            child: _buildWorksColumn(),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: KeyedSubtree(
-                            key: TourKeys.orderDetailsSchedule,
-                            child: _buildScheduleColumn(),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          flex: 2,
-                          child: KeyedSubtree(
-                            key: TourKeys.orderDetailsNotes,
-                            child: _buildNotesColumn(),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                KeyedSubtree(key: TourKeys.orderDetailsPayment, child: _buildFooter()),
-              ],
-            ),
-          ),
-        ),
-      );
+      panel = _buildAdminBody();
     }
+
+    final animated = FadeTransition(
+      opacity: _fadeAnim,
+      child: SlideTransition(
+        position: _slideAnim,
+        child: ScaleTransition(
+          scale: _scaleAnim,
+          child: panel,
+        ),
+      ),
+    );
 
     return PopScope(
       canPop: false,
@@ -2800,13 +4190,96 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
         if (didPop) return;
         await _closeDialog();
       },
-      child: FadeTransition(
-        opacity: _fadeAnim,
-        child: SlideTransition(
-          position: _slideAnim,
-          child: ScaleTransition(
-            scale: _scaleAnim,
-            child: panel,
+      child: widget.fullscreen ? panel : animated,
+    );
+  }
+}
+
+/// Поле «Для цеха» под работой: Enter / кнопка → сразу в ленту.
+class _WorkItemCommentField extends StatefulWidget {
+  final int itemId;
+  final String initial;
+  final Future<bool> Function(int itemId, String text) onSend;
+
+  const _WorkItemCommentField({
+    super.key,
+    required this.itemId,
+    required this.initial,
+    required this.onSend,
+  });
+
+  @override
+  State<_WorkItemCommentField> createState() => _WorkItemCommentFieldState();
+}
+
+class _WorkItemCommentFieldState extends State<_WorkItemCommentField> {
+  late final TextEditingController _ctrl;
+  late final FocusNode _focus;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.initial);
+    _focus = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _send() async {
+    if (_saving) return;
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final ok = await widget.onSend(widget.itemId, text);
+      if (!mounted) return;
+      if (ok) {
+        // Готово к следующему сообщению; текст уже в БД и в ленте.
+        _ctrl.clear();
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter): _send,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): _send,
+      },
+      child: TextField(
+        controller: _ctrl,
+        focusNode: _focus,
+        enabled: !_saving,
+        maxLines: 1,
+        style: GoogleFonts.manrope(color: AppColors.text, fontSize: 12),
+        textInputAction: TextInputAction.send,
+        onSubmitted: (_) => _send(),
+        decoration: InputDecoration(
+          labelText: 'Для цеха',
+          hintText: 'Enter или кнопка → в ленту',
+          isDense: true,
+          labelStyle: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+          hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+          contentPadding: const EdgeInsets.fromLTRB(10, 8, 0, 8),
+          suffixIcon: IconButton(
+            tooltip: 'Отправить в ленту',
+            icon: _saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.send, size: 18, color: AppColors.primary),
+            onPressed: _saving ? null : _send,
           ),
         ),
       ),

@@ -25,35 +25,40 @@ Future<bool> tryUpdateOrderStatus(
         "Нельзя выдать заказ",
         style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Сначала закройте долг и отметьте все работы выполненными.",
-            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13),
-          ),
-          const SizedBox(height: 12),
-          for (final r in reasons)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("• ", style: TextStyle(color: AppColors.danger)),
-                  Expanded(
-                    child: Text(
-                      r,
-                      style: GoogleFonts.manrope(
-                        color: AppColors.text,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 360),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Сначала закройте долг, отметьте все работы и заполните чек-лист выдачи.",
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13),
               ),
-            ),
-        ],
+              const SizedBox(height: 12),
+              for (final r in reasons)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("• ", style: TextStyle(color: AppColors.danger)),
+                      Expanded(
+                        child: Text(
+                          r,
+                          style: GoogleFonts.manrope(
+                            color: AppColors.text,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
       actions: [
         ElevatedButton(

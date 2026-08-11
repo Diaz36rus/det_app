@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'database.dart';
 import 'order_details_dialog.dart';
+import 'responsive.dart';
 
 class SearchDialog extends StatefulWidget {
   const SearchDialog({super.key});
@@ -60,7 +61,7 @@ class _SearchDialogState extends State<SearchDialog> {
           style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
         ),
         content: SizedBox(
-          width: 400,
+          width: AppResponsive.dialogWidth(context, desktop: 400),
           child: cars.isEmpty
               ? Text("Нет автомобилей в базе", style: GoogleFonts.manrope(color: AppColors.textDim))
               : Column(
@@ -101,13 +102,16 @@ class _SearchDialogState extends State<SearchDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final mobile = AppResponsive.isMobile(context);
+    final size = MediaQuery.sizeOf(context);
     return Dialog(
       backgroundColor: AppColors.surface,
+      insetPadding: AppResponsive.dialogInsetPadding(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: 640,
-        height: 520,
-        padding: const EdgeInsets.all(20),
+        width: mobile ? size.width : 640,
+        height: mobile ? size.height * 0.85 : 520,
+        padding: EdgeInsets.all(mobile ? 14 : 20),
         child: Column(
           children: [
             Row(

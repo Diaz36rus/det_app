@@ -21,21 +21,37 @@ double servicePriceForCar(Map<String, dynamic> s, String carCategory) {
   return ((s[key] ?? 0) as num).toDouble();
 }
 
-bool _isWrapRiskZone(Map<String, dynamic> s) {
-  return (s['name'] ?? '').toString().contains(' · ЗР · ');
+bool _isWrapPopular(Map<String, dynamic> s) {
+  final n = (s['name'] ?? '').toString();
+  return n.startsWith('Оклейка ·') &&
+      !n.contains(' · Перед · ') &&
+      !n.contains(' · Борт · ') &&
+      !n.contains(' · Зад · ') &&
+      !n.contains(' · ЗР · ');
+}
+
+String? _wrapZoneLabel(Map<String, dynamic> s) {
+  final n = (s['name'] ?? '').toString();
+  if (n.contains(' · Перед · ')) return 'Перед';
+  if (n.contains(' · Борт · ')) return 'Борта';
+  if (n.contains(' · Зад · ')) return 'Зад';
+  return null;
 }
 
 /// Сначала категории, по нажатию — подуслуги (+ добавить).
+/// Для оклейки/тонировки — [onConfigurePackage] (чеклист зон + сумма).
 class ServiceCategoryBrowser extends StatefulWidget {
   final List<Map<String, dynamic>> services;
   final String carCategory;
   final void Function(String name, double price, String category) onAdd;
+  final void Function(String category)? onConfigurePackage;
 
   const ServiceCategoryBrowser({
     super.key,
     required this.services,
     required this.carCategory,
     required this.onAdd,
+    this.onConfigurePackage,
   });
 
   @override
@@ -99,10 +115,57 @@ class _ServiceCategoryBrowserState extends State<ServiceCategoryBrowser> {
     );
   }
 
-  /// Оклейка: частые сверху + раскрывающиеся зоны риска.
+  /// Оклейка: популярные + Перед / Борта / Зад (fallback, если нет пакетного диалога).
   Widget _wrapServiceList(List<Map<String, dynamic>> items) {
-    final popular = items.where((s) => !_isWrapRiskZone(s)).toList();
-    final risk = items.where(_isWrapRiskZone).toList();
+    final popular = items.where(_isWrapPopular).toList();
+    final byZone = <String, List<Map<String, dynamic>>>{};
+    for (final s in items) {
+      final z = _wrapZoneLabel(s);
+      if (z == null) continue;
+      byZone.putIfAbsent(z, () => []).add(s);
+    }
+
+    Widget zoneTile(String title, List<Map<String, dynamic>> list) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface2,
+            borderRadius: BorderRadius.circular(AppTheme.radius),
+            border: Border.all(color: AppColors.border),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              initiallyExpanded: false,
+              tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+              childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
+              iconColor: AppColors.primary,
+              collapsedIconColor: AppColors.textMuted,
+              title: Text(
+                title,
+                style: GoogleFonts.manrope(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
+              subtitle: Text(
+                "${list.length} позиций",
+                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+              ),
+              children: [
+                for (var i = 0; i < list.length; i++) ...[
+                  if (i > 0) const SizedBox(height: 4),
+                  _serviceRow(list[i]),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return ListView(
       children: [
@@ -110,7 +173,7 @@ class _ServiceCategoryBrowserState extends State<ServiceCategoryBrowser> {
           Padding(
             padding: const EdgeInsets.only(bottom: 6, left: 2),
             child: Text(
-              "Частые",
+              "Популярные",
               style: GoogleFonts.manrope(
                 color: AppColors.textDim,
                 fontSize: 12,
@@ -123,45 +186,8 @@ class _ServiceCategoryBrowserState extends State<ServiceCategoryBrowser> {
             _serviceRow(popular[i]),
           ],
         ],
-        if (risk.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Container(
-            decoration: BoxDecoration(
-              color: AppColors.surface2,
-              borderRadius: BorderRadius.circular(AppTheme.radius),
-              border: Border.all(color: AppColors.border),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                initiallyExpanded: false,
-                tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 10),
-                iconColor: AppColors.primary,
-                collapsedIconColor: AppColors.textMuted,
-                title: Text(
-                  "Зоны риска",
-                  style: GoogleFonts.manrope(
-                    color: AppColors.text,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
-                  ),
-                ),
-                subtitle: Text(
-                  "${risk.length} позиций",
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
-                ),
-                children: [
-                  for (var i = 0; i < risk.length; i++) ...[
-                    if (i > 0) const SizedBox(height: 4),
-                    _serviceRow(risk[i]),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
+        for (final z in ['Перед', 'Борта', 'Зад'])
+          if (byZone[z]?.isNotEmpty == true) zoneTile(z, byZone[z]!),
       ],
     );
   }
@@ -183,11 +209,18 @@ class _ServiceCategoryBrowserState extends State<ServiceCategoryBrowser> {
         itemBuilder: (context, index) {
           final cat = categories[index];
           final count = grouped[cat]!.length;
+          final isPackageCat = cat == 'Оклейка (Пленка)' || cat == 'Тонировка';
           return Material(
             color: Colors.transparent,
             child: InkWell(
               borderRadius: BorderRadius.circular(AppTheme.radius),
-              onTap: () => setState(() => _selectedCategory = cat),
+              onTap: () {
+                if (isPackageCat && widget.onConfigurePackage != null) {
+                  widget.onConfigurePackage!(cat);
+                  return;
+                }
+                setState(() => _selectedCategory = cat);
+              },
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 decoration: BoxDecoration(
@@ -198,13 +231,23 @@ class _ServiceCategoryBrowserState extends State<ServiceCategoryBrowser> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(
-                        cat,
-                        style: GoogleFonts.manrope(
-                          color: AppColors.text,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            cat,
+                            style: GoogleFonts.manrope(
+                              color: AppColors.text,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          if (isPackageCat)
+                            Text(
+                              'Зоны + одна сумма',
+                              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+                            ),
+                        ],
                       ),
                     ),
                     Text(
@@ -212,7 +255,11 @@ class _ServiceCategoryBrowserState extends State<ServiceCategoryBrowser> {
                       style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(width: 6),
-                    const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
+                    Icon(
+                      isPackageCat ? Icons.checklist_rtl : Icons.chevron_right,
+                      color: AppColors.textMuted,
+                      size: 20,
+                    ),
                   ],
                 ),
               ),
