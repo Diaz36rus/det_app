@@ -30,8 +30,11 @@ class CalendarScreen extends StatefulWidget {
 class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   List<Map<String, dynamic>> _orders = [];
   List<Map<String, dynamic>> _workItems = [];
+  /// Заказы по дням недели (ключ yyyy-MM-dd) — режим «Неделя».
+  final Map<String, List<Map<String, dynamic>>> _ordersByDay = {};
   bool _isLoading = true;
   bool _showGeneral = true;
+  bool _weekMode = false;
   int _loadGen = 0;
 
   @override
@@ -108,10 +111,37 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     }
   }
 
+  DateTime _weekStart(DateTime d) {
+    final day = _dateOnly(d);
+    return day.subtract(Duration(days: day.weekday - DateTime.monday));
+  }
+
+  List<DateTime> _weekDays(DateTime d) =>
+      List.generate(7, (i) => _weekStart(d).add(Duration(days: i)));
+
   Future<void> _loadData({bool showSpinner = true}) async {
     final gen = ++_loadGen;
     if (showSpinner && mounted) setState(() => _isLoading = true);
     try {
+      if (_weekMode) {
+        final days = _weekDays(widget.selectedDate);
+        final results = await Future.wait(
+          days.map((d) => DatabaseHelper().getOrdersForCalendar(DateFormat('yyyy-MM-dd').format(d))),
+        );
+        if (!mounted || gen != _loadGen) return;
+        setState(() {
+          _ordersByDay
+            ..clear()
+            ..addEntries([
+              for (var i = 0; i < days.length; i++)
+                MapEntry(DateFormat('yyyy-MM-dd').format(days[i]), results[i]),
+            ]);
+          _orders = results.expand((e) => e).toList();
+          _workItems = [];
+          _isLoading = false;
+        });
+        return;
+      }
       final dateStr = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
       final orders = await DatabaseHelper().getOrdersForCalendar(dateStr);
       final workItems = await DatabaseHelper().getOrderItemsForCalendar(dateStr);
@@ -119,6 +149,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       setState(() {
         _orders = orders;
         _workItems = workItems;
+        _ordersByDay.clear();
         _isLoading = false;
       });
     } catch (e, st) {
@@ -127,14 +158,16 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         setState(() {
           _orders = [];
           _workItems = [];
+          _ordersByDay.clear();
           _isLoading = false;
         });
       }
     }
   }
 
-  /// Полная дата-время: "2026-07-31 15:30:00", ISO, либо только "15:30" → выбранный день.
-  DateTime? _tryParseDateTime(String? dtStr) {
+  /// Полная дата-время: "2026-07-31 15:30:00", ISO, либо только "15:30" → [viewDay].
+  DateTime? _tryParseDateTime(String? dtStr, {DateTime? viewDay}) {
+    final day = viewDay ?? widget.selectedDate;
     if (dtStr == null || dtStr.trim().isEmpty) return null;
     try {
       final n = dtStr.replaceFirst('T', ' ').split('.').first.trim();
@@ -143,9 +176,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       }
       final parts = n.split(':');
       return DateTime(
-        widget.selectedDate.year,
-        widget.selectedDate.month,
-        widget.selectedDate.day,
+        day.year,
+        day.month,
+        day.day,
         int.parse(parts[0]),
         parts.length > 1 ? int.parse(parts[1]) : 0,
       );
@@ -156,20 +189,21 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
 
   /// Обрезает интервал заказа до видимого дня сетки (08:00–22:30).
   /// `null` — событие не пересекает выбранный день.
-  ({DateTime start, DateTime end})? _clipEventToViewDay(String? startStr, String? endStr) {
-    final day = DateTime(
-      widget.selectedDate.year,
-      widget.selectedDate.month,
-      widget.selectedDate.day,
-    );
+  ({DateTime start, DateTime end})? _clipEventToViewDay(
+    String? startStr,
+    String? endStr, {
+    DateTime? viewDay,
+  }) {
+    final base = viewDay ?? widget.selectedDate;
+    final day = DateTime(base.year, base.month, base.day);
     final dayEnd = day.add(const Duration(days: 1));
     final gridStart = DateTime(day.year, day.month, day.day, _startHour);
     final gridEnd = DateTime(day.year, day.month, day.day, _endHour)
         .add(Duration(minutes: _slotMinutes));
 
-    final rawStart = _tryParseDateTime(startStr);
+    final rawStart = _tryParseDateTime(startStr, viewDay: day);
     if (rawStart == null) return null;
-    var rawEnd = _tryParseDateTime(endStr);
+    var rawEnd = _tryParseDateTime(endStr, viewDay: day);
     rawEnd ??= rawStart.add(const Duration(hours: 1));
     if (!rawEnd.isAfter(rawStart)) {
       rawEnd = rawStart.add(const Duration(minutes: 30));
@@ -212,7 +246,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
   void _shiftDay(int delta) {
-    final next = _dateOnly(widget.selectedDate).add(Duration(days: delta));
+    final step = _weekMode ? 7 : 1;
+    final next = _dateOnly(widget.selectedDate).add(Duration(days: delta * step));
     widget.onDateChanged?.call(next);
   }
 
@@ -241,7 +276,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       mainAxisSize: MainAxisSize.min,
       children: [
         IconButton(
-          tooltip: "Предыдущий день",
+          tooltip: _weekMode ? "Предыдущая неделя" : "Предыдущий день",
           onPressed: widget.onDateChanged == null ? null : () => _shiftDay(-1),
           icon: const Icon(Icons.chevron_left, color: AppColors.primary),
         ),
@@ -265,11 +300,109 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           ),
         ),
         IconButton(
-          tooltip: "Следующий день",
+          tooltip: _weekMode ? "Следующая неделя" : "Следующий день",
           onPressed: widget.onDateChanged == null ? null : () => _shiftDay(1),
           icon: const Icon(Icons.chevron_right, color: AppColors.primary),
         ),
       ],
+    );
+  }
+
+  Widget _scopeToggle({required bool mobile}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.bg.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(AppTheme.radius),
+      ),
+      child: ToggleButtons(
+        isSelected: [!_weekMode, _weekMode],
+        onPressed: (index) {
+          setState(() {
+            _weekMode = index == 1;
+            if (_weekMode) _showGeneral = true;
+          });
+          _loadData();
+        },
+        color: AppColors.textMuted,
+        selectedColor: AppColors.text,
+        fillColor: AppColors.primarySoft.withOpacity(0.65),
+        borderColor: Colors.transparent,
+        selectedBorderColor: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppTheme.radius - 2),
+        constraints: BoxConstraints(minHeight: 36, minWidth: mobile ? 64 : 72),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text('День', style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 12)),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text('Неделя', style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _weekStrip({required bool mobile}) {
+    final days = _weekDays(widget.selectedDate);
+    final today = _dateOnly(DateTime.now());
+    final selected = _dateOnly(widget.selectedDate);
+    return SizedBox(
+      height: mobile ? 58 : 64,
+      child: Row(
+        children: [
+          for (final d in days)
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
+                    onTap: widget.onDateChanged == null ? null : () => widget.onDateChanged!(_dateOnly(d)),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: _dateOnly(d) == selected
+                            ? AppColors.primarySoft.withOpacity(0.75)
+                            : AppColors.surface2.withOpacity(0.55),
+                        borderRadius: BorderRadius.circular(AppTheme.radius),
+                        border: Border.all(
+                          color: _dateOnly(d) == today
+                              ? AppColors.primary.withOpacity(0.7)
+                              : AppColors.borderSoft.withOpacity(0.4),
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            DateFormat('E', 'ru').format(d),
+                            style: GoogleFonts.manrope(
+                              color: AppColors.textDim,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${d.day}',
+                            style: GoogleFonts.manrope(
+                              color: AppColors.text,
+                              fontSize: mobile ? 14 : 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -281,17 +414,19 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       ),
       child: ToggleButtons(
         isSelected: [_showGeneral, !_showGeneral],
-        onPressed: (index) {
-          setState(() => _showGeneral = index == 0);
-          _loadData();
-        },
+        onPressed: _weekMode
+            ? null
+            : (index) {
+                setState(() => _showGeneral = index == 0);
+                _loadData();
+              },
         color: AppColors.textMuted,
         selectedColor: AppColors.text,
         fillColor: AppColors.primarySoft.withOpacity(0.65),
         borderColor: Colors.transparent,
         selectedBorderColor: Colors.transparent,
         borderRadius: BorderRadius.circular(AppTheme.radius - 2),
-        constraints: BoxConstraints(minHeight: 40, minWidth: mobile ? 120 : 140),
+        constraints: BoxConstraints(minHeight: 40, minWidth: mobile ? 100 : 130),
         children: [
           Padding(
             padding: EdgeInsets.symmetric(horizontal: mobile ? 8 : 12),
@@ -304,7 +439,11 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
             padding: EdgeInsets.symmetric(horizontal: mobile ? 8 : 12),
             child: Text(
               mobile ? "Детально" : "Детальное время",
-              style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: mobile ? 12 : 13),
+              style: GoogleFonts.manrope(
+                fontWeight: FontWeight.w600,
+                fontSize: mobile ? 12 : 13,
+                color: _weekMode ? AppColors.textDim.withOpacity(0.45) : null,
+              ),
             ),
           ),
         ],
@@ -331,8 +470,14 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _dayNavigator(fontSize: 16),
-                      const SizedBox(height: 10),
-                      _modeToggle(mobile: true),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          _scopeToggle(mobile: true),
+                          const SizedBox(width: 8),
+                          Expanded(child: _modeToggle(mobile: true)),
+                        ],
+                      ),
                     ],
                   )
                 : Row(
@@ -340,15 +485,23 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                       Text("Календарь", style: AppTheme.pageTitle),
                       const SizedBox(width: 12),
                       Expanded(child: _dayNavigator(fontSize: 18)),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
+                      _scopeToggle(mobile: false),
+                      const SizedBox(width: 8),
                       _modeToggle(mobile: false),
                     ],
                   ),
           ),
           Padding(
             padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 6),
+            child: _weekStrip(mobile: mobile),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 6),
             child: Text(
-              'Пустой слот в «Общей записи» — новый заказ',
+              _weekMode
+                  ? 'Неделя: колонка = день · пустой слот — новый заказ'
+                  : 'Пустой слот в «Общей записи» — новый заказ',
               style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
             ),
           ),
@@ -361,13 +514,100 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                       builder: (context, constraints) {
                         final timeGutter = mobile ? 44.0 : 56.0;
                         final detailColW = mobile ? 160.0 : _colWidth;
-                        // Ширина уже после padding — gutter + колонка должны влезть ровно.
                         final bodyColW = (constraints.maxWidth - timeGutter).clamp(120.0, 4000.0);
+                        final weekDays = _weekDays(widget.selectedDate);
+                        final weekColW = mobile ? 120.0 : 150.0;
+
+                        Widget timeGutterCol() => SizedBox(
+                              width: timeGutter,
+                              child: Column(
+                                children: List.generate(_slotsCount, (i) {
+                                  final totalMin = _startHour * 60 + i * _slotMinutes;
+                                  final h = totalMin ~/ 60;
+                                  final m = totalMin % 60;
+                                  final isHour = m == 0;
+                                  return SizedBox(
+                                    height: _slotHeight,
+                                    child: Align(
+                                      alignment: Alignment.topRight,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(top: 2, right: 4),
+                                        child: Text(
+                                          "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}",
+                                          style: GoogleFonts.manrope(
+                                            color: isHour ? AppColors.textMuted : AppColors.textDim,
+                                            fontSize: isHour ? 11 : 10,
+                                            fontWeight: isHour ? FontWeight.w700 : FontWeight.w500,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }),
+                              ),
+                            );
+
+                        if (_weekMode) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(
+                                height: _headerHeight,
+                                child: Row(
+                                  children: [
+                                    SizedBox(width: timeGutter),
+                                    Expanded(
+                                      child: SingleChildScrollView(
+                                        controller: _hHeaderCtrl,
+                                        scrollDirection: Axis.horizontal,
+                                        child: Row(
+                                          children: weekDays.map((d) {
+                                            final label = DateFormat('E d.MM', 'ru').format(d);
+                                            return _buildColumnHeader(label, weekColW);
+                                          }).toList(),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: SingleChildScrollView(
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      timeGutterCol(),
+                                      SizedBox(
+                                        width: bodyColW,
+                                        child: SingleChildScrollView(
+                                          controller: _hBodyCtrl,
+                                          scrollDirection: Axis.horizontal,
+                                          child: Row(
+                                            children: weekDays.map((d) {
+                                              final key = DateFormat('yyyy-MM-dd').format(d);
+                                              return _buildColumnBody(
+                                                DateFormat('E d.MM', 'ru').format(d),
+                                                weekColW,
+                                                gridHeight,
+                                                true,
+                                                viewDay: d,
+                                                ordersOverride: _ordersByDay[key] ?? const [],
+                                              );
+                                            }).toList(),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }
 
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            // Липкие заголовки колонок — не уезжают при скролле вниз
                             SizedBox(
                               height: _headerHeight,
                               child: Row(
@@ -395,34 +635,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    SizedBox(
-                                      width: timeGutter,
-                                      child: Column(
-                                        children: List.generate(_slotsCount, (i) {
-                                          final totalMin = _startHour * 60 + i * _slotMinutes;
-                                          final h = totalMin ~/ 60;
-                                          final m = totalMin % 60;
-                                          final isHour = m == 0;
-                                          return SizedBox(
-                                            height: _slotHeight,
-                                            child: Align(
-                                              alignment: Alignment.topRight,
-                                              child: Padding(
-                                                padding: const EdgeInsets.only(top: 2, right: 4),
-                                                child: Text(
-                                                  "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}",
-                                                  style: GoogleFonts.manrope(
-                                                    color: isHour ? AppColors.textMuted : AppColors.textDim,
-                                                    fontSize: isHour ? 11 : 10,
-                                                    fontWeight: isHour ? FontWeight.w700 : FontWeight.w500,
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          );
-                                        }),
-                                      ),
-                                    ),
+                                    timeGutterCol(),
                                     if (_showGeneral)
                                       SizedBox(
                                         width: bodyColW,
@@ -469,8 +682,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   }
 
   Widget _buildColumnHeader(String title, double width) {
-    // В «Общей» width = вся доступная полоса; в детальном — фиксированная + зазор между цехами.
-    final gap = _showGeneral ? 0.0 : 10.0;
+    // В «Общей» (день) — без зазора; неделя / детально — зазор между колонками.
+    final gap = (!_weekMode && _showGeneral) ? 0.0 : 10.0;
     return Container(
       width: width,
       height: _headerHeight,
@@ -494,8 +707,16 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     );
   }
 
-  Widget _buildColumnBody(String title, double width, double gridHeight, bool isGeneral) {
-    final gap = isGeneral ? 0.0 : 10.0;
+  Widget _buildColumnBody(
+    String title,
+    double width,
+    double gridHeight,
+    bool isGeneral, {
+    DateTime? viewDay,
+    List<Map<String, dynamic>>? ordersOverride,
+  }) {
+    final gap = (!_weekMode && isGeneral) ? 0.0 : 10.0;
+    final dayForCreate = viewDay ?? widget.selectedDate;
     return Container(
       width: width,
       height: gridHeight,
@@ -534,9 +755,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                     if (slot >= _slotsCount) slot = _slotsCount - 1;
                     final totalMin = _startHour * 60 + slot * _slotMinutes;
                     final day = DateTime(
-                      widget.selectedDate.year,
-                      widget.selectedDate.month,
-                      widget.selectedDate.day,
+                      dayForCreate.year,
+                      dayForCreate.month,
+                      dayForCreate.day,
                     );
                     widget.onCreateAt!(
                       day,
@@ -545,7 +766,14 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                   },
                 ),
               ),
-            ..._buildCards(title, isGeneral, gridHeight, width),
+            ..._buildCards(
+              title,
+              isGeneral,
+              gridHeight,
+              width,
+              viewDay: viewDay,
+              ordersOverride: ordersOverride,
+            ),
             if (isGeneral && widget.onCreateAt != null)
               Positioned(
                 top: 8,
@@ -564,8 +792,17 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     );
   }
 
-  List<Widget> _buildCards(String colTitle, bool isGeneral, double gridHeight, double colWidth) {
+  List<Widget> _buildCards(
+    String colTitle,
+    bool isGeneral,
+    double gridHeight,
+    double colWidth, {
+    DateTime? viewDay,
+    List<Map<String, dynamic>>? ordersOverride,
+  }) {
     final events = <Map<String, dynamic>>[];
+    final day = viewDay ?? widget.selectedDate;
+    final dayOrders = ordersOverride ?? _orders;
 
     String carLine(Map<String, dynamic> row) {
       final model = row['make_model']?.toString() ?? "";
@@ -577,12 +814,12 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     }
 
     if (isGeneral) {
-      for (final o in _orders) {
+      for (final o in dayOrders) {
         var startStr = o['start_time']?.toString();
         var endStr = o['end_time']?.toString();
         // Старые записи только с due_date/end_date — маркер 09:00 на этот день.
         if (startStr == null || startStr.trim().isEmpty) {
-          final dayStr = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
+          final dayStr = DateFormat('yyyy-MM-dd').format(day);
           String dayOf(String? raw) {
             if (raw == null || raw.trim().isEmpty) return '';
             return raw.replaceAll('T', ' ').trim().substring(0, 10);
@@ -593,7 +830,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           startStr = '$dayStr 09:00:00';
           endStr = '$dayStr 10:00:00';
         }
-        final clipped = _clipEventToViewDay(startStr, endStr);
+        final clipped = _clipEventToViewDay(startStr, endStr, viewDay: day);
         if (clipped == null) continue;
         events.add({
           'orderId': o['id'],
@@ -613,6 +850,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         final clipped = _clipEventToViewDay(
           w['start_time']?.toString(),
           w['end_time']?.toString(),
+          viewDay: day,
         );
         if (clipped == null) continue;
         final car = carLine(w);
@@ -642,11 +880,12 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         });
       }
       if (colTitle == "Мойка") {
-        for (final o in _orders) {
+        for (final o in dayOrders) {
           if (o['tech_wash_start'] == null) continue;
           final clipped = _clipEventToViewDay(
             o['tech_wash_start']?.toString(),
             o['tech_wash_end']?.toString(),
+            viewDay: day,
           );
           if (clipped == null) continue;
           final car = carLine(o);

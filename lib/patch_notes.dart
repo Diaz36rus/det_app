@@ -29,6 +29,15 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 32,
+    version: '1.0.1',
+    items: [
+      'Календарь: режим «Неделя» + полоска дней Пн–Вс',
+      'Касса: Z-отчёт смены (PDF) после закрытия и из списка',
+      'Склад: мин. остаток и алерт «мало» (схема БД 22)',
+    ],
+  ),
+  PatchRelease(
     build: 31,
     version: '1.0.1',
     items: [

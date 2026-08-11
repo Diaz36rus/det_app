@@ -95,6 +95,7 @@ class _InventoryScreenState extends State<InventoryScreen>
     final nameCtrl = TextEditingController();
     final qtyCtrl = TextEditingController(text: '0');
     final unitCtrl = TextEditingController(text: 'шт');
+    final minCtrl = TextEditingController(text: '0');
     final ok = await runWithPulseHighlight(
       _pulseAddInv,
       () => showDialog<bool>(
@@ -129,6 +130,16 @@ class _InventoryScreenState extends State<InventoryScreen>
                 ),
               ],
             ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: minCtrl,
+              decoration: const InputDecoration(
+                labelText: "Мин. остаток",
+                helperText: "0 = алерт только при нуле",
+                isDense: true,
+              ),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            ),
           ],
         ),
         actions: [
@@ -142,7 +153,8 @@ class _InventoryScreenState extends State<InventoryScreen>
     final name = nameCtrl.text.trim();
     if (name.isEmpty) return;
     final qty = double.tryParse(qtyCtrl.text.replaceAll(',', '.')) ?? 0;
-    await DatabaseHelper().addInventoryItem(name, qty, unitCtrl.text.trim());
+    final minQty = double.tryParse(minCtrl.text.replaceAll(',', '.')) ?? 0;
+    await DatabaseHelper().addInventoryItem(name, qty, unitCtrl.text.trim(), minQty: minQty);
     _loadAll();
   }
 
@@ -156,6 +168,7 @@ class _InventoryScreenState extends State<InventoryScreen>
     final nameCtrl = TextEditingController(text: item['name']?.toString() ?? '');
     final qtyCtrl = TextEditingController(text: '${item['quantity'] ?? 0}');
     final unitCtrl = TextEditingController(text: item['unit']?.toString() ?? 'шт');
+    final minCtrl = TextEditingController(text: '${item['min_qty'] ?? 0}');
     final ok = await runWithPulseHighlight(
       invId,
       () => showDialog<bool>(
@@ -189,6 +202,16 @@ class _InventoryScreenState extends State<InventoryScreen>
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: minCtrl,
+                decoration: const InputDecoration(
+                  labelText: "Мин. остаток",
+                  helperText: "0 = алерт только при нуле",
+                  isDense: true,
+                ),
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              ),
             ],
           ),
           actions: [
@@ -202,13 +225,21 @@ class _InventoryScreenState extends State<InventoryScreen>
     final name = nameCtrl.text.trim();
     if (name.isEmpty) return;
     final qty = double.tryParse(qtyCtrl.text.replaceAll(',', '.')) ?? 0;
+    final minQty = double.tryParse(minCtrl.text.replaceAll(',', '.')) ?? 0;
     await DatabaseHelper().updateInventoryItem(
       invId,
       name: name,
       quantity: qty,
       unit: unitCtrl.text.trim(),
+      minQty: minQty,
     );
     _loadAll();
+  }
+
+  bool _isLowStock(Map<String, dynamic> item) {
+    final qty = (item['quantity'] as num?)?.toDouble() ?? 0;
+    final min = (item['min_qty'] as num?)?.toDouble() ?? 0;
+    return qty <= (min > 0 ? min : 0);
   }
 
   Future<void> _deleteInventory(Map<String, dynamic> item) async {
@@ -402,14 +433,46 @@ class _InventoryScreenState extends State<InventoryScreen>
                     style: GoogleFonts.manrope(color: AppColors.textDim),
                   ),
                 )
-              : ListView.builder(
+              : Builder(
+                  builder: (context) {
+                    final sorted = [..._inventory]..sort((a, b) {
+                      final la = _isLowStock(a);
+                      final lb = _isLowStock(b);
+                      if (la != lb) return la ? -1 : 1;
+                      return (a['name']?.toString() ?? '')
+                          .compareTo(b['name']?.toString() ?? '');
+                    });
+                    final lowCount = sorted.where(_isLowStock).length;
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (lowCount > 0)
+                          Padding(
+                            padding: EdgeInsets.fromLTRB(
+                              AppResponsive.isMobile(context) ? 12 : 24,
+                              0,
+                              AppResponsive.isMobile(context) ? 12 : 24,
+                              8,
+                            ),
+                            child: Text(
+                              'Мало на складе: $lowCount',
+                              style: GoogleFonts.manrope(
+                                color: AppColors.danger,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        Expanded(
+                          child: ListView.builder(
                   padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 24),
-                  itemCount: _inventory.length,
+                  itemCount: sorted.length,
                   itemBuilder: (context, index) {
-                    final item = _inventory[index];
+                    final item = sorted[index];
                     final invId = (item['id'] as num).toInt();
                     final qty = (item['quantity'] as num?)?.toDouble() ?? 0;
-                    final low = qty <= 0;
+                    final minQty = (item['min_qty'] as num?)?.toDouble() ?? 0;
+                    final low = _isLowStock(item);
                     return PulseAnchor(
                       active: isPulseActive(invId),
                       accent: low ? AppColors.danger : AppColors.primary,
@@ -434,7 +497,11 @@ class _InventoryScreenState extends State<InventoryScreen>
                           style: GoogleFonts.manrope(fontWeight: FontWeight.w700, color: AppColors.text),
                         ),
                         subtitle: Text(
-                          "${_fmtQty(qty)} ${item['unit'] ?? 'шт'}",
+                          low
+                              ? "${_fmtQty(qty)} ${item['unit'] ?? 'шт'} · мало (мин ${_fmtQty(minQty)})"
+                              : minQty > 0
+                                  ? "${_fmtQty(qty)} ${item['unit'] ?? 'шт'} · мин ${_fmtQty(minQty)}"
+                                  : "${_fmtQty(qty)} ${item['unit'] ?? 'шт'}",
                           style: GoogleFonts.manrope(
                             color: low ? AppColors.danger : AppColors.textMuted,
                             fontWeight: FontWeight.w600,
@@ -467,6 +534,11 @@ class _InventoryScreenState extends State<InventoryScreen>
                         ),
                       ),
                     ),
+                    );
+                  },
+                          ),
+                        ),
+                      ],
                     );
                   },
                 ),

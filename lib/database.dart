@@ -401,7 +401,7 @@ class DatabaseHelper {
     await _seedCashRegisters(db);
     await db.execute('''CREATE TABLE custom_works (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, category TEXT DEFAULT 'Прочее', price REAL DEFAULT 0)''');
     await db.execute('''CREATE TABLE services (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL, name TEXT NOT NULL UNIQUE, price1 REAL DEFAULT 0, price2 REAL DEFAULT 0, price3 REAL DEFAULT 0, price4 REAL DEFAULT 0, fixed_price REAL DEFAULT 0)''');
-    await db.execute('''CREATE TABLE inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, quantity REAL DEFAULT 0, unit TEXT DEFAULT 'шт')''');
+    await db.execute('''CREATE TABLE inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, quantity REAL DEFAULT 0, unit TEXT DEFAULT 'шт', min_qty REAL DEFAULT 0)''');
     await db.execute('''CREATE TABLE service_recipes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       service_name TEXT NOT NULL,
@@ -659,6 +659,10 @@ class DatabaseHelper {
       ]) {
         await _ensureColumn(db, 'orders', column, 'INTEGER DEFAULT 0');
       }
+    }
+    // --- Версия 22: мин. остаток на складе ---
+    if (oldVersion < 22) {
+      await _ensureColumn(db, 'inventory', 'min_qty', 'REAL DEFAULT 0');
     }
   }
 
@@ -2626,14 +2630,14 @@ class DatabaseHelper {
     return opening + payments + income - expense;
   }
 
-  /// Карточки касс для открытой смены: name, money_type, opening, expected.
+  /// Карточки касс для смены: name, money_type, opening, expected (+ fact/Δ после закрытия).
   Future<List<Map<String, dynamic>>> getShiftRegisterSnapshots(int shiftId) async {
     final registers = await getCashRegisters();
     final out = <Map<String, dynamic>>[];
+    final db = await database;
     for (final r in registers) {
       final rid = (r['id'] as num).toInt();
       final expected = await getRegisterExpected(shiftId, rid);
-      final db = await database;
       final bal = await db.query(
         'cash_shift_balances',
         where: 'shift_id = ? AND register_id = ?',
@@ -2641,10 +2645,15 @@ class DatabaseHelper {
         limit: 1,
       );
       final opening = bal.isEmpty ? 0.0 : ((bal.first['opening'] as num?)?.toDouble() ?? 0);
+      final fact = bal.isEmpty ? null : (bal.first['fact'] as num?)?.toDouble();
+      final diff = bal.isEmpty ? null : (bal.first['difference'] as num?)?.toDouble();
+      final storedExpected = bal.isEmpty ? null : (bal.first['expected'] as num?)?.toDouble();
       out.add({
         ...r,
         'opening': opening,
-        'expected': expected,
+        'expected': storedExpected ?? expected,
+        if (fact != null) 'fact': fact,
+        if (diff != null) 'difference': diff,
       });
     }
     return out;
@@ -3069,23 +3078,95 @@ class DatabaseHelper {
     return await db.query('inventory', orderBy: 'name ASC');
   }
 
-  Future<int> addInventoryItem(String name, double quantity, String unit) async {
+  Future<int> addInventoryItem(
+    String name,
+    double quantity,
+    String unit, {
+    double minQty = 0,
+  }) async {
     final db = await database;
     return await db.insert('inventory', {
       'name': name.trim(),
       'quantity': quantity,
       'unit': unit.trim().isEmpty ? 'шт' : unit.trim(),
+      'min_qty': minQty < 0 ? 0 : minQty,
     });
   }
 
-  Future<void> updateInventoryItem(int id, {String? name, double? quantity, String? unit}) async {
+  Future<void> updateInventoryItem(
+    int id, {
+    String? name,
+    double? quantity,
+    String? unit,
+    double? minQty,
+  }) async {
     final db = await database;
     final data = <String, dynamic>{};
     if (name != null) data['name'] = name.trim();
     if (quantity != null) data['quantity'] = quantity;
     if (unit != null) data['unit'] = unit.trim().isEmpty ? 'шт' : unit.trim();
+    if (minQty != null) data['min_qty'] = minQty < 0 ? 0 : minQty;
     if (data.isEmpty) return;
     await db.update('inventory', data, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Позиции с остатком ≤ мин. (или ≤ 0, если мин. не задан).
+  Future<List<Map<String, dynamic>>> getLowStockInventory() async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT * FROM inventory
+      WHERE quantity <= CASE
+        WHEN coalesce(min_qty, 0) > 0 THEN min_qty
+        ELSE 0
+      END
+      ORDER BY quantity ASC, name ASC
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> getCashJournalForShift(int shiftId) async {
+    final db = await database;
+    return await db.rawQuery('''
+      SELECT
+        'payment' as source,
+        payments.id as id,
+        payments.created_at as created_at,
+        payments.amount as amount,
+        'Приход' as type,
+        'Оплата заказа' as category,
+        COALESCE(payments.method, '') as method,
+        ('Оплата заказа #' || orders.id || ' (' || clients.name || ')') as title,
+        payments.shift_id as shift_id,
+        payments.register_id as register_id
+      FROM payments
+      JOIN orders ON payments.order_id = orders.id
+      JOIN clients ON orders.client_id = clients.id
+      WHERE payments.shift_id = ?
+
+      UNION ALL
+
+      SELECT
+        'flow' as source,
+        cash_flow.id as id,
+        cash_flow.created_at as created_at,
+        cash_flow.amount as amount,
+        cash_flow.type as type,
+        COALESCE(cash_flow.category, 'Прочее') as category,
+        COALESCE(cash_flow.method, '') as method,
+        COALESCE(cash_flow.description, '') as title,
+        cash_flow.shift_id as shift_id,
+        cash_flow.register_id as register_id
+      FROM cash_flow
+      WHERE cash_flow.shift_id = ?
+
+      ORDER BY created_at DESC
+    ''', [shiftId, shiftId]);
+  }
+
+  Future<Map<String, dynamic>?> getCashShiftById(int shiftId) async {
+    final db = await database;
+    final rows = await db.query('cash_shifts', where: 'id = ?', whereArgs: [shiftId], limit: 1);
+    if (rows.isEmpty) return null;
+    return Map<String, dynamic>.from(rows.first);
   }
 
   Future<void> deleteInventoryItem(int id) async {

@@ -7,6 +7,7 @@ import 'cash_catalog.dart';
 import 'cash_operation_dialog.dart';
 import 'database.dart';
 import 'pulse_anchor.dart';
+import 'shift_z_report_pdf.dart';
 
 /// Панель смены: несколько касс, открытие/закрытие, добавление кассы.
 class CashShiftPanel extends StatefulWidget {
@@ -290,6 +291,80 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
     }
     noteCtrl.dispose();
     onChanged();
+    if (!context.mounted) return;
+    final showZ = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Смена закрыта', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: Text(
+          'Открыть Z-отчёт (печать / отправка)?',
+          style: GoogleFonts.manrope(color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Позже')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Z-отчёт')),
+        ],
+      ),
+    );
+    if (showZ == true && context.mounted) {
+      await ShiftZReportPdf.showPreview(context, shiftId: shiftId);
+    }
+  }
+
+  Future<void> _showLastZReport(BuildContext context) async {
+    final recent = await DatabaseHelper().getRecentShifts(limit: 10);
+    final closed = recent.where((s) => s['status']?.toString() == 'closed').toList();
+    if (!context.mounted) return;
+    if (closed.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Нет закрытых смен', style: GoogleFonts.manrope()),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final picked = await runWithPulseHighlight(
+      _pulsePanel,
+      () => showDialog<int>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Z-отчёт', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          content: SizedBox(
+            width: 360,
+            height: 320,
+            child: ListView.separated(
+              itemCount: closed.length,
+              separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
+              itemBuilder: (_, i) {
+                final s = closed[i];
+                final id = (s['id'] as num).toInt();
+                return ListTile(
+                  dense: true,
+                  title: Text(
+                    'Смена #$id',
+                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(
+                    '${AppDateTime.format(s['opened_at'])} → ${AppDateTime.format(s['closed_at'])}',
+                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                  ),
+                  onTap: () => Navigator.pop(ctx, id),
+                );
+              },
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+          ],
+        ),
+      ),
+    );
+    if (picked != null && context.mounted) {
+      await ShiftZReportPdf.showPreview(context, shiftId: picked);
+    }
   }
 
   Future<void> _collection(BuildContext context) async {
@@ -360,11 +435,17 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
                   style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
                   child: Text('Закрыть', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
                 ),
-              ] else
+              ] else ...[
+                TextButton(
+                  onPressed: () => _showLastZReport(context),
+                  child: Text('Z-отчёт', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
+                ),
+                const SizedBox(width: 6),
                 ElevatedButton(
                   onPressed: () => _openShift(context),
                   child: Text('Открыть смену', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
                 ),
+              ],
             ],
           ),
           const SizedBox(height: 10),
