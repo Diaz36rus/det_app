@@ -234,7 +234,13 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
 
   void _selectMenu(int id) {
     setState(() {
-      // Не сбрасываем слот из календаря при повторном выборе «Новый заказ».
+      // Сброс слота календаря только при уходе с «Новый заказ».
+      // Нельзя чистить в onOrderCreated: ValueKey remount'ит экран
+      // посреди диалога «Что дальше?» и ломает переход в Календарь.
+      if (_selectedIndex == AppMenuIds.newOrder && id != AppMenuIds.newOrder) {
+        _newOrderDate = null;
+        _newOrderTime = null;
+      }
       _selectedIndex = id;
     });
   }
@@ -341,12 +347,6 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
           initialDate: _newOrderDate,
           initialTime: _newOrderTime,
           onNavigateMenu: (i) => _selectMenu(i),
-          onOrderCreated: () {
-            setState(() {
-              _newOrderDate = null;
-              _newOrderTime = null;
-            });
-          },
         );
       case AppMenuIds.calendar:
         final cal = _selectedCalendarDate;

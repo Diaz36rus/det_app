@@ -440,8 +440,6 @@ class _OrdersScreenState extends State<OrdersScreen> {
       _selectedClientCarId = null;
       _clientCars = [];
     });
-    widget.onOrderCreated?.call();
-
     if (!mounted) return;
     final next = await showDialog<String>(
       context: context,

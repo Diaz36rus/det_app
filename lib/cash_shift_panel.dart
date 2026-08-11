@@ -172,7 +172,12 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
         ),
       ),
     );
-    if (ok != true) return;
+    if (ok != true) {
+      for (final c in ctrls.values) {
+        c.dispose();
+      }
+      return;
+    }
     final openings = <int, double>{};
     for (final e in ctrls.entries) {
       openings[e.key] = double.tryParse(e.value.text.replaceAll(',', '.')) ?? 0;
@@ -257,7 +262,13 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
         ),
       ),
     );
-    if (ok != true) return;
+    if (ok != true) {
+      for (final c in ctrls.values) {
+        c.dispose();
+      }
+      noteCtrl.dispose();
+      return;
+    }
     final facts = <int, double>{};
     for (final e in ctrls.entries) {
       facts[e.key] = double.tryParse(e.value.text.replaceAll(',', '.')) ?? 0;

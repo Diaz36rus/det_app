@@ -1524,6 +1524,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                                   }
                                 });
                                 DatabaseHelper().updateOrderItemMasters(w['id'] as int, currentIds).then((_) {
+                                  if (!mounted) return;
                                   setState(() {
                                     final updatedWork = Map<String, dynamic>.from(w);
                                     updatedWork['master_ids'] = currentIds.join(',');
@@ -1949,20 +1950,16 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           .toList(),
       onChanged: (val) async {
         if (val == null || val == _status) return;
-        final previous = _status;
         if (val == 'Выдан' && !await _ensureHandoverCompleteForIssue()) return;
         if (!mounted) return;
-        setState(() => _status = val);
         final ok = await tryUpdateOrderStatus(
           context,
           widget.order['id'] as int,
           val,
         );
         if (!mounted) return;
-        if (!ok) {
-          setState(() => _status = previous);
-          return;
-        }
+        if (!ok) return;
+        setState(() => _status = val);
         await DatabaseHelper().addOrderEvent(widget.order['id'], "Статус изменен на: $val");
         _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
         if (mounted) setState(() {});

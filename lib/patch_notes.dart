@@ -29,6 +29,16 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 30,
+    version: '1.0.1',
+    items: [
+      'Календарь→заказ: переход «Календарь» после создания больше не ломается',
+      'Календарь: скролл не открывает создание слота; без времени — только due/end день',
+      'LAN: ревизия данных после оплаты, заказа, статуса, открытия/закрытия смены',
+      'Касса: сумма opening_cash по всем наличным; dispose контроллеров при отмене',
+    ],
+  ),
+  PatchRelease(
     build: 29,
     version: '1.0.1',
     items: [

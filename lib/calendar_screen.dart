@@ -526,7 +526,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.translucent,
-                  onTapDown: (details) {
+                  // onTapUp (не onTapDown): скролл не должен открывать создание.
+                  onTapUp: (details) {
                     final dy = details.localPosition.dy;
                     var slot = (dy / _slotHeight).floor();
                     if (slot < 0) slot = 0;
@@ -579,9 +580,16 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       for (final o in _orders) {
         var startStr = o['start_time']?.toString();
         var endStr = o['end_time']?.toString();
-        // Старые записи только с due_date — маркер на выбранный день.
+        // Старые записи только с due_date/end_date — маркер 09:00 на этот день.
         if (startStr == null || startStr.trim().isEmpty) {
           final dayStr = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
+          String dayOf(String? raw) {
+            if (raw == null || raw.trim().isEmpty) return '';
+            return raw.replaceAll('T', ' ').trim().substring(0, 10);
+          }
+          final dueDay = dayOf(o['due_date']?.toString());
+          final endDay = dayOf(o['end_date']?.toString());
+          if (dueDay != dayStr && endDay != dayStr) continue;
           startStr = '$dayStr 09:00:00';
           endStr = '$dayStr 10:00:00';
         }

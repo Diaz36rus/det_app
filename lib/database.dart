@@ -1154,6 +1154,7 @@ class DatabaseHelper {
       );
     }
     await syncOrderFromItems(orderId);
+    bumpDataRevision();
     return orderId;
   }
 
@@ -1368,6 +1369,7 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [orderId],
     );
+    bumpDataRevision();
     return true;
   }
 
@@ -1378,6 +1380,7 @@ class DatabaseHelper {
     await db.delete('order_events', where: 'order_id = ?', whereArgs: [orderId]);
     await db.delete('payments', where: 'order_id = ?', whereArgs: [orderId]);
     await db.delete('orders', where: 'id = ?', whereArgs: [orderId]);
+    bumpDataRevision();
   }
 
   Future<void> setWorkshopTaskCompleted(int orderId, int isCompleted) async {
@@ -2108,6 +2111,7 @@ class DatabaseHelper {
       'register_id': rid,
     });
     await db.rawQuery('UPDATE orders SET paid_amount = paid_amount + ? WHERE id = ?', [amount, orderId]);
+    bumpDataRevision();
   }
 
   Future<List<Map<String, dynamic>>> getOrderPayments(int orderId) async {
@@ -2482,17 +2486,20 @@ class DatabaseHelper {
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     final registers = await getCashRegisters();
+    // openingCash — сумма по наличным кассам (передаёт UI). Не перезаписывать
+    // первым registerId: при нескольких наличных кассах это ломало остаток смены.
     var cashOpening = openingCash;
     if (openings != null) {
+      var sum = 0.0;
+      var anyCash = false;
       for (final r in registers) {
-        if (r['money_type']?.toString() == CashMethods.cash) {
-          final rid = (r['id'] as num).toInt();
-          if (openings.containsKey(rid)) {
-            cashOpening = openings[rid]!;
-            break;
-          }
-        }
+        if (r['money_type']?.toString() != CashMethods.cash) continue;
+        final rid = (r['id'] as num).toInt();
+        if (!openings.containsKey(rid)) continue;
+        sum += openings[rid]!;
+        anyCash = true;
       }
+      if (anyCash) cashOpening = sum;
     }
     final shiftId = await db.insert('cash_shifts', {
       'opened_at': now,
@@ -2510,6 +2517,7 @@ class DatabaseHelper {
         'opening': open,
       });
     }
+    bumpDataRevision();
     return shiftId;
   }
 
@@ -2650,6 +2658,7 @@ class DatabaseHelper {
       where: 'id = ?',
       whereArgs: [shiftId],
     );
+    bumpDataRevision();
   }
 
   Future<List<Map<String, dynamic>>> getRecentShifts({int limit = 20}) async {
