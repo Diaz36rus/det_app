@@ -1417,28 +1417,16 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
 
   Widget _section({required String title, required Widget child}) {
     return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: AppTheme.panelDecoration,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
-            child: Text(
-              title,
-              style: GoogleFonts.manrope(
-                color: AppColors.textMuted,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.6,
-              ),
-            ),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: Text(title, style: AppTheme.sectionLabel),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
             child: child,
           ),
         ],
@@ -1591,9 +1579,14 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       decoration: BoxDecoration(
-        color: isDone ? AppColors.surface2 : AppColors.surface,
+        color: isDone ? AppColors.success.withOpacity(0.06) : AppColors.bg.withOpacity(0.45),
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: isDone ? AppColors.success.withOpacity(0.45) : AppColors.border),
+        border: Border(
+          left: BorderSide(
+            color: isDone ? AppColors.success.withOpacity(0.75) : AppColors.borderSoft,
+            width: 3,
+          ),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1817,15 +1810,18 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     final done = _handoverDoneCount;
     final total = _handoverItems.length;
     final complete = _handoverComplete;
-    final borderColor = complete ? AppColors.success.withOpacity(0.55) : AppColors.border;
     final accent = complete ? AppColors.success : AppColors.primary;
 
     return Container(
       margin: const EdgeInsets.only(top: 12),
       decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: borderColor),
+        color: complete
+            ? AppColors.success.withOpacity(0.08)
+            : AppColors.surface2.withOpacity(0.85),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border(
+          left: BorderSide(color: accent.withOpacity(0.8), width: 3),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2094,29 +2090,42 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
 
   Widget _buildHeader() {
     final mobile = _isMobileLayout;
+    final client = widget.order['client_name']?.toString() ?? '';
     return Padding(
-      padding: EdgeInsets.fromLTRB(mobile ? 12 : 20, 14, mobile ? 8 : 16, 10),
+      padding: EdgeInsets.fromLTRB(mobile ? 12 : 22, 16, mobile ? 8 : 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Text(
-                  "Заказ #${widget.order['id']}  ·  ${widget.order['client_name']}",
-                  style: GoogleFonts.manrope(
-                    color: AppColors.text,
-                    fontSize: mobile ? 18 : 22,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.2,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ЗАКАЗ #${widget.order['id']}',
+                      style: AppTheme.sectionLabel,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      client.isEmpty ? 'Без клиента' : client,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.text,
+                        fontSize: mobile ? 20 : 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.35,
+                        height: 1.15,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
               IconButton(
                 tooltip: "Печать заказ-наряда",
                 onPressed: _printWorkOrder,
-                icon: const Icon(Icons.print_outlined, color: AppColors.primary),
+                icon: const Icon(Icons.print_outlined, color: AppColors.textMuted),
               ),
               IconButton(
                 tooltip: 'Дефекты',
@@ -2128,11 +2137,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
               IconButton(
                 tooltip: 'Закрыть',
                 onPressed: _closeDialog,
-                icon: const Icon(Icons.close, color: AppColors.textMuted),
+                icon: const Icon(Icons.close, color: AppColors.textDim),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           if (mobile) ...[
             _statusDropdown(),
             const SizedBox(height: 10),
@@ -2174,12 +2183,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   Widget _buildWorksColumn({bool fill = true, bool showTitle = true}) {
     final list = _buildWorksListView(shrinkWrap: !fill);
     return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
-      ),
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: AppTheme.panelDecoration,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
@@ -2214,9 +2219,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
                   height: 280,
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppColors.bg,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.border),
+                    color: AppColors.bg.withOpacity(0.55),
+                    borderRadius: BorderRadius.circular(AppTheme.radius),
                   ),
                   child: ServiceCategoryBrowser(
                     services: _services,
@@ -3024,12 +3028,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   Widget _buildNotesColumn({bool fill = true}) {
     final timeline = Container(
       height: fill ? null : 280,
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
-      ),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+      decoration: AppTheme.panelDecoration,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
       child: _buildPinnedTimelineBody(
         composer: TextField(
           controller: _commentController,
@@ -3061,9 +3061,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
               Container(
                 padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
                 decoration: BoxDecoration(
-                  color: AppColors.bg,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.border),
+                  color: AppColors.bg.withOpacity(0.45),
+                  borderRadius: BorderRadius.circular(AppTheme.radius),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3306,15 +3305,15 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   Widget _buildFooter() {
     final mobile = _isMobileLayout;
     return Container(
-      padding: EdgeInsets.fromLTRB(mobile ? 12 : 20, 14, mobile ? 12 : 20, 14),
+      padding: EdgeInsets.fromLTRB(mobile ? 12 : 22, 16, mobile ? 12 : 22, 16),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: const Border(top: BorderSide(color: AppColors.border)),
+        color: AppColors.surface.withOpacity(0.98),
+        border: const Border(top: BorderSide(color: AppColors.borderSoft)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.18),
-            blurRadius: 16,
-            offset: const Offset(0, -4),
+            color: Colors.black.withOpacity(0.22),
+            blurRadius: 20,
+            offset: const Offset(0, -6),
           ),
         ],
       ),
@@ -3686,11 +3685,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: AppTheme.panelDecoration,
       child: Row(
         children: [
           Expanded(
@@ -3957,11 +3952,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     return Container(
       key: key,
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: AppTheme.panelDecoration,
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(

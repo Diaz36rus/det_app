@@ -270,12 +270,15 @@ class CashShiftPanel extends StatelessWidget {
     final openedAt = AppDateTime.format(shift?['opened_at']);
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(
-          color: open ? AppColors.success.withOpacity(0.45) : AppColors.border,
+        color: AppColors.surface2.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border(
+          left: BorderSide(
+            color: (open ? AppColors.success : AppColors.textDim).withOpacity(0.85),
+            width: 3,
+          ),
         ),
       ),
       child: Column(
@@ -283,26 +286,16 @@ class CashShiftPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text('Смена', style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 15)),
+              Text('Смена', style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16)),
               const SizedBox(width: 10),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: (open ? AppColors.success : AppColors.danger).withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: (open ? AppColors.success : AppColors.danger).withOpacity(0.45),
-                  ),
-                ),
-                child: Text(
-                  open
-                      ? (openedAt.isEmpty ? 'открыта' : 'открыта · $openedAt')
-                      : 'закрыта',
-                  style: GoogleFonts.manrope(
-                    color: open ? AppColors.success : AppColors.danger,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                  ),
+              Text(
+                open
+                    ? (openedAt.isEmpty ? 'открыта' : 'открыта · $openedAt')
+                    : 'закрыта',
+                style: GoogleFonts.manrope(
+                  color: open ? AppColors.success : AppColors.danger,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
               const Spacer(),
@@ -384,11 +377,10 @@ class CashShiftPanel extends StatelessWidget {
           duration: const Duration(milliseconds: 160),
           padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
           decoration: BoxDecoration(
-            color: AppColors.surface.withOpacity(0.75),
+            color: selected ? color.withOpacity(0.12) : AppColors.bg.withOpacity(0.4),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: selected ? color : color.withOpacity(0.4),
-              width: selected ? 1.8 : 1,
+            border: Border(
+              left: BorderSide(color: color.withOpacity(selected ? 0.95 : 0.55), width: 3),
             ),
           ),
           child: Column(

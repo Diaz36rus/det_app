@@ -60,8 +60,8 @@ class MenuBackgrounds {
                 fit: BoxFit.cover,
                 alignment: Alignment.center,
                 errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                // Видно, но не спорит с карточками/таблицами.
-                opacity: const AlwaysStoppedAnimation(0.28),
+                // Заметнее атмосфера студии, но без спора с таблицами.
+                opacity: const AlwaysStoppedAnimation(0.42),
               ),
             ),
           if (asset != null)
@@ -69,12 +69,12 @@ class MenuBackgrounds {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                     colors: [
-                      AppColors.bg.withOpacity(0.35),
-                      AppColors.bg.withOpacity(0.55),
-                      AppColors.bg.withOpacity(0.72),
+                      AppColors.bg.withOpacity(0.28),
+                      AppColors.bg.withOpacity(0.52),
+                      AppColors.bg.withOpacity(0.78),
                     ],
                   ),
                 ),

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Цвета приложения — тёмная операционная CRM.
+/// Цвета приложения — тёмная студия детейлинга (не «админ-коробки»).
 /// surface / surface2 — непрозрачные: drawer, сайдбар и карточки не смешивают текст
 /// с фоном. Картинка меню — только в [MenuBackgrounds] под прозрачным контентом.
 class AppColors {
@@ -10,7 +10,10 @@ class AppColors {
   static const surface = Color(0xFF141821);
   /// Карточки, поля ввода, колонки.
   static const surface2 = Color(0xFF1A2030);
-  static const border = Color(0xFF3A4558);
+  /// Мягкая линия разделения (почти невидима на фоне).
+  static const border = Color(0xFF2A3344);
+  /// Ещё тише — для неактивных обводок.
+  static const borderSoft = Color(0xFF222A38);
   static const primary = Color(0xFF3B82F6);
   static const primarySoft = Color(0xFF1E3A5F);
   static const success = Color(0xFF22C55E);
@@ -22,6 +25,7 @@ class AppColors {
 
 class AppTheme {
   static const double radius = 12;
+  static const double radiusLg = 16;
   static const EdgeInsets pagePadding = EdgeInsets.all(24);
 
   static TextStyle get pageTitle => GoogleFonts.manrope(
@@ -37,18 +41,58 @@ class AppTheme {
         fontWeight: FontWeight.w700,
       );
 
+  static TextStyle get sectionLabel => GoogleFonts.manrope(
+        color: AppColors.textMuted,
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.6,
+      );
+
+  /// Карточка без рамки — фон + лёгкая тень.
   static BoxDecoration get cardDecoration => BoxDecoration(
         color: AppColors.surface2,
         borderRadius: BorderRadius.circular(radius),
-        border: Border.all(color: AppColors.border),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 12,
-            offset: Offset(0, 2),
+            color: Color(0x28000000),
+            blurRadius: 16,
+            offset: Offset(0, 4),
           ),
         ],
       );
+
+  /// Секция / колонка в диалогах — мягкий fill, без бордера.
+  static BoxDecoration get panelDecoration => BoxDecoration(
+        color: AppColors.surface2.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(radiusLg),
+      );
+
+  /// Интерактивный блок (кликабельный) — тонкая рамка.
+  static BoxDecoration interactiveDecoration({
+    Color? accent,
+    bool emphasized = false,
+  }) {
+    final edge = accent ?? AppColors.border;
+    return BoxDecoration(
+      color: AppColors.surface2,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(
+        color: emphasized ? edge.withOpacity(0.55) : edge.withOpacity(0.35),
+        width: emphasized ? 1.25 : 1,
+      ),
+    );
+  }
+
+  /// KPI / метрика: цветной акцент слева, без коробки.
+  static BoxDecoration kpiDecoration({required Color accent, bool emphasize = false}) {
+    return BoxDecoration(
+      color: emphasize ? AppColors.surface2 : AppColors.surface2.withOpacity(0.7),
+      borderRadius: BorderRadius.circular(radius),
+      border: Border(
+        left: BorderSide(color: accent.withOpacity(emphasize ? 0.9 : 0.55), width: 3),
+      ),
+    );
+  }
 
   static ThemeData build() {
     final base = ThemeData(
@@ -77,13 +121,17 @@ class AppTheme {
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radius),
-          side: const BorderSide(color: AppColors.border),
         ),
       ),
-      dividerTheme: const DividerThemeData(color: AppColors.border, thickness: 1, space: 1),
+      dividerTheme: const DividerThemeData(
+        color: AppColors.borderSoft,
+        thickness: 1,
+        space: 1,
+      ),
       dialogTheme: DialogTheme(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusLg)),
+        elevation: 0,
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(
         backgroundColor: AppColors.surface2,
@@ -91,23 +139,22 @@ class AppTheme {
         elevation: 0,
         extendedPadding: const EdgeInsets.symmetric(horizontal: 16),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: AppColors.border),
+          borderRadius: BorderRadius.circular(radius),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.surface2,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        fillColor: AppColors.bg.withOpacity(0.55),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         labelStyle: const TextStyle(color: AppColors.textMuted),
         hintStyle: const TextStyle(color: AppColors.textDim),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radius),
-          borderSide: const BorderSide(color: AppColors.border),
+          borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radius),
-          borderSide: const BorderSide(color: AppColors.border),
+          borderSide: const BorderSide(color: AppColors.borderSoft),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radius),
@@ -135,7 +182,7 @@ class AppTheme {
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.text,
-          side: const BorderSide(color: AppColors.border),
+          side: const BorderSide(color: AppColors.borderSoft),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
         ),

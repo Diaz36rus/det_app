@@ -368,17 +368,8 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
     final child = Container(
       width: expand ? null : 132,
       height: compact ? 56 : 72,
-      padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14, vertical: compact ? 8 : 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(
-          color: emphasize
-              ? AppColors.primary.withOpacity(0.65)
-              : (onTap != null ? color.withOpacity(0.45) : AppColors.border),
-          width: emphasize ? 1.5 : 1,
-        ),
-      ),
+      padding: EdgeInsets.fromLTRB(compact ? 12 : 14, compact ? 8 : 10, compact ? 10 : 14, compact ? 8 : 10),
+      decoration: AppTheme.kpiDecoration(accent: color, emphasize: emphasize || onTap != null),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
@@ -433,9 +424,8 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
             padding: EdgeInsets.symmetric(horizontal: emphasize ? 14 : 12),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: accent.withOpacity(emphasize ? 0.22 : 0.10),
+              color: accent.withOpacity(emphasize ? 0.18 : 0.08),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: accent.withOpacity(emphasize ? 0.75 : 0.40), width: emphasize ? 1.4 : 1),
             ),
             child: Text(
               t.label,
@@ -804,30 +794,17 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
             key: TourKeys.cashTemplates,
             padding: const EdgeInsets.fromLTRB(padH, 0, padH, 8),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-              decoration: BoxDecoration(
-                color: AppColors.surface2,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.primary.withOpacity(0.45)),
-              ),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              decoration: AppTheme.panelDecoration,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.bolt_rounded, size: 18, color: AppColors.primary.withOpacity(0.95)),
-                      const SizedBox(width: 6),
+                      Text('Быстрые шаблоны', style: AppTheme.sectionTitle),
+                      const SizedBox(width: 10),
                       Text(
-                        'Быстрые шаблоны',
-                        style: GoogleFonts.manrope(
-                          color: AppColors.text,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'один клик — новая операция',
+                        'один клик',
                         style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
                       ),
                     ],
@@ -843,11 +820,10 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
             key: TourKeys.cashJournal,
             padding: const EdgeInsets.fromLTRB(padH, 4, padH, 0),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
               decoration: BoxDecoration(
-                color: AppColors.surface2,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                border: Border.all(color: AppColors.border),
+                color: AppColors.surface2.withOpacity(0.9),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLg)),
               ),
               child: Row(
                 children: [
@@ -905,13 +881,8 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin {
               padding: const EdgeInsets.fromLTRB(padH, 0, padH, 20),
               child: Container(
                 decoration: BoxDecoration(
-                  color: AppColors.surface.withOpacity(0.35),
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
-                  border: const Border(
-                    left: BorderSide(color: AppColors.border),
-                    right: BorderSide(color: AppColors.border),
-                    bottom: BorderSide(color: AppColors.border),
-                  ),
+                  color: AppColors.surface2.withOpacity(0.55),
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(AppTheme.radiusLg)),
                 ),
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator(color: AppColors.primary))

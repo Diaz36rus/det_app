@@ -419,9 +419,8 @@ class _HomeScreenState extends State<HomeScreen> {
             curve: Curves.easeOut,
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 8 : 11),
             decoration: BoxDecoration(
-              color: active ? AppColors.primarySoft : Colors.transparent,
+              color: active ? AppColors.primarySoft.withOpacity(0.55) : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: active ? AppColors.primary.withOpacity(0.45) : Colors.transparent),
             ),
             child: Row(
               children: [
@@ -508,29 +507,20 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: AppColors.surface2,
+              color: AppColors.bg.withOpacity(0.45),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.primary.withOpacity(0.35)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.search, color: AppColors.primary, size: 20),
+                const Icon(Icons.search, color: AppColors.textMuted, size: 20),
                 const SizedBox(width: 10),
                 Text(
                   "Поиск",
-                  style: GoogleFonts.manrope(color: AppColors.text, fontWeight: FontWeight.w700, fontSize: 14),
+                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 14),
                 ),
                 if (showShortcut) ...[
                   const Spacer(),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AppColors.bg,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Text("Ctrl+K", style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11)),
-                  ),
+                  Text("Ctrl+K", style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11)),
                 ],
               ],
             ),
@@ -1108,14 +1098,14 @@ class _HomeScreenState extends State<HomeScreen> {
       width: 268,
       decoration: const BoxDecoration(
         color: AppColors.surface,
-        border: Border(right: BorderSide(color: AppColors.border)),
+        border: Border(right: BorderSide(color: AppColors.borderSoft)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildBrandHeader(),
           _buildSearchTile(showShortcut: true),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 12),
