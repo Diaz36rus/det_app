@@ -33,7 +33,7 @@ mixin PulseHighlightMixin<T extends StatefulWidget> on State<T> {
   }
 }
 
-/// Оборачивает виджет: при [active] мягко пульсирует, затем держит тихое свечение.
+/// Оборачивает виджет: при [active] мягко пульсирует, пока открыто подокно.
 class PulseAnchor extends StatefulWidget {
   final bool active;
   final Widget child;
@@ -54,7 +54,6 @@ class PulseAnchor extends StatefulWidget {
 
 class _PulseAnchorState extends State<PulseAnchor> with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
-  int _runToken = 0;
 
   @override
   void initState() {
@@ -76,23 +75,14 @@ class _PulseAnchorState extends State<PulseAnchor> with SingleTickerProviderStat
     }
   }
 
-  Future<void> _startPulse() async {
-    final token = ++_runToken;
+  void _startPulse() {
     _ctrl.stop();
     _ctrl.value = 0;
-    // 3 цикла, потом статичная мягкая подсветка.
-    for (var i = 0; i < 3; i++) {
-      if (!mounted || token != _runToken || !widget.active) return;
-      await _ctrl.forward();
-      if (!mounted || token != _runToken || !widget.active) return;
-      await _ctrl.reverse();
-    }
-    if (!mounted || token != _runToken || !widget.active) return;
-    await _ctrl.animateTo(0.45, duration: const Duration(milliseconds: 280), curve: Curves.easeOut);
+    // Пока active — бесконечный мягкий цикл; стоп при закрытии диалога.
+    _ctrl.repeat(reverse: true);
   }
 
   void _stopPulse() {
-    _runToken++;
     if (!_ctrl.isAnimating && _ctrl.value == 0) return;
     _ctrl.stop();
     _ctrl.animateTo(0, duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
@@ -100,7 +90,6 @@ class _PulseAnchorState extends State<PulseAnchor> with SingleTickerProviderStat
 
   @override
   void dispose() {
-    _runToken++;
     _ctrl.dispose();
     super.dispose();
   }
