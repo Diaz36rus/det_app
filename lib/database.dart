@@ -1045,10 +1045,11 @@ class DatabaseHelper {
 
   /// Работы с заданным временем на выбранный день (для режима «Детальное время»).
   /// Если у позиции нет своего времени — берём график заказа (start_time/end_time).
+  /// Пустой workshop → [workshopForService] по имени (иначе позиция пропадала из колонок).
   /// Длинные слоты показываются во все дни пересечения.
   Future<List<Map<String, dynamic>>> getOrderItemsForCalendar(String dateStr) async {
     final db = await database;
-    return await db.rawQuery('''
+    final rows = await db.rawQuery('''
       SELECT order_items.id as item_id, order_items.order_id, order_items.name as work_name,
              coalesce(nullif(trim(order_items.start_time), ''), orders.start_time) as start_time,
              coalesce(nullif(trim(order_items.end_time), ''), orders.end_time) as end_time,
@@ -1060,8 +1061,6 @@ class DatabaseHelper {
       JOIN clients ON orders.client_id = clients.id
       JOIN cars ON orders.car_id = cars.id
       WHERE orders.is_completed = 0
-        AND order_items.workshop IS NOT NULL
-        AND trim(order_items.workshop) != ''
         AND coalesce(nullif(trim(order_items.start_time), ''), orders.start_time) IS NOT NULL
         AND trim(coalesce(nullif(trim(order_items.start_time), ''), orders.start_time)) != ''
         AND substr(replace(coalesce(nullif(trim(order_items.start_time), ''), orders.start_time), 'T', ' '), 1, 10) <= ?
@@ -1072,6 +1071,17 @@ class DatabaseHelper {
               ), 'T', ' '), 1, 10) >= ?
       ORDER BY start_time ASC
     ''', [dateStr, dateStr]);
+    final out = <Map<String, dynamic>>[];
+    for (final r in rows) {
+      final m = Map<String, dynamic>.from(r);
+      final ws = m['workshop']?.toString().trim() ?? '';
+      if (ws.isEmpty) {
+        m['workshop'] = workshopForService(name: m['work_name']?.toString()) ?? '';
+      }
+      if ((m['workshop']?.toString() ?? '').trim().isEmpty) continue;
+      out.add(m);
+    }
+    return out;
   }
 
   Future<int> addClient(String name, String phone, {int isVip = 0}) async {
@@ -2258,13 +2268,78 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getClientHistory(int clientId) async {
     final db = await database;
     return await db.rawQuery('''
-      SELECT orders.id, orders.created_at, orders.notes, orders.price, orders.status, orders.is_completed,
+      SELECT orders.id, orders.created_at, orders.notes, orders.price, orders.paid_amount,
+             orders.status, orders.is_completed,
+             (orders.price - orders.paid_amount) as debt,
              cars.make_model, cars.plate
       FROM orders
       JOIN cars ON orders.car_id = cars.id
       WHERE orders.client_id = ?
       ORDER BY orders.id DESC
     ''', [clientId]);
+  }
+
+  /// Позиции последнего заказа клиента/авто в форме корзины «Новый заказ».
+  /// Дети пакетов сворачиваются в wrapZones; график/мастера не копируются.
+  Future<List<Map<String, dynamic>>> getLastOrderCartLines({
+    required int clientId,
+    int? carId,
+  }) async {
+    final db = await database;
+    final where = carId != null ? 'client_id = ? AND car_id = ?' : 'client_id = ?';
+    final args = carId != null ? <Object>[clientId, carId] : <Object>[clientId];
+    final orders = await db.query(
+      'orders',
+      columns: ['id'],
+      where: where,
+      whereArgs: args,
+      orderBy: 'id DESC',
+      limit: 1,
+    );
+    if (orders.isEmpty) return [];
+    final orderId = (orders.first['id'] as num).toInt();
+    final items = await getOrderItems(orderId);
+    final result = <Map<String, dynamic>>[];
+    for (final item in items) {
+      if (item['parent_id'] != null) continue;
+      final name = item['name']?.toString() ?? '';
+      if (name.isEmpty) continue;
+      final price = (item['price'] as num?)?.toDouble() ?? 0;
+      var ws = item['workshop']?.toString().trim() ?? '';
+      if (ws.isEmpty) ws = workshopForService(name: name) ?? '';
+
+      if (isWrapPackageHeader(name) || isTintPackageHeader(name)) {
+        final headerId = (item['id'] as num?)?.toInt();
+        final kids = items
+            .where((x) => (x['parent_id'] as num?)?.toInt() == headerId)
+            .toList();
+        if (kids.isNotEmpty) {
+          final zones = kids.map((k) => k['name'].toString()).toList();
+          final kidSum = kids.fold<double>(
+            0,
+            (s, k) => s + ((k['price'] as num?)?.toDouble() ?? 0),
+          );
+          result.add({
+            'name': zones.length == 1 ? zones.first : '$name · ${zones.length} поз.',
+            'price': price > 0 ? price : kidSum,
+            'category': isWrapPackageHeader(name) ? 'Оклейка (Пленка)' : 'Тонировка',
+            'workshop': ws.isNotEmpty
+                ? ws
+                : (isWrapPackageHeader(name) ? 'Оклейка' : 'Тонировка'),
+            'wrapZones': zones,
+          });
+          continue;
+        }
+      }
+
+      result.add({
+        'name': name,
+        'price': price,
+        'category': '',
+        'workshop': ws,
+      });
+    }
+    return result;
   }
 
   Future<void> updateClientVip(int clientId, int isVip) async {
@@ -2877,7 +2952,8 @@ class DatabaseHelper {
     return await db.rawQuery('''
       SELECT orders.id, orders.price, orders.paid_amount, orders.status,
              (orders.price - orders.paid_amount) as debt,
-             clients.name as client_name, cars.make_model, cars.plate
+             clients.name as client_name, clients.phone as client_phone,
+             cars.make_model, cars.plate
       FROM orders
       JOIN clients ON clients.id = orders.client_id
       JOIN cars ON cars.id = orders.car_id
@@ -2886,6 +2962,16 @@ class DatabaseHelper {
       ORDER BY debt DESC
       LIMIT ?
     ''', [limit]);
+  }
+
+  Future<double> getClientDebtTotal(int clientId) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT COALESCE(SUM(CASE WHEN price - paid_amount > 0.01 THEN price - paid_amount ELSE 0 END), 0) as debt
+      FROM orders
+      WHERE client_id = ? AND is_completed = 0
+    ''', [clientId]);
+    return (rows.first['debt'] as num?)?.toDouble() ?? 0;
   }
 
   Future<double> getTotalDebt() async {

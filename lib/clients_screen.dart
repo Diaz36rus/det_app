@@ -320,9 +320,22 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                                       style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
                                     ),
                                     const SizedBox(height: 4),
-                                    Text(
-                                      "${AppDateTime.format(h['created_at'])} · ${h['price']} ₽",
-                                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                                    Builder(
+                                      builder: (_) {
+                                        final price = (h['price'] as num?)?.toDouble() ?? 0;
+                                        final debt = (h['debt'] as num?)?.toDouble() ?? 0;
+                                        final open = (h['is_completed'] as num?)?.toInt() != 1 && debt > 0.01;
+                                        return Text(
+                                          open
+                                              ? "${AppDateTime.format(h['created_at'])} · ${price.toStringAsFixed(0)} ₽ · долг ${debt.toStringAsFixed(0)} ₽"
+                                              : "${AppDateTime.format(h['created_at'])} · ${price.toStringAsFixed(0)} ₽",
+                                          style: GoogleFonts.manrope(
+                                            color: open ? AppColors.danger : AppColors.textDim,
+                                            fontSize: 12,
+                                            fontWeight: open ? FontWeight.w700 : FontWeight.w400,
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ],
                                 ),

@@ -29,6 +29,16 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 31,
+    version: '1.0.1',
+    items: [
+      'Новый заказ: «Как в прошлый раз» — корзина из последнего заказа клиента',
+      'Касса→Долги: копирование текста, WhatsApp, быстрая оплата',
+      'Доска: долг на карточке, быстрая оплата и PDF заказ-наряда',
+      'Календарь (деталь): позиции без цеха больше не пропадают',
+    ],
+  ),
+  PatchRelease(
     build: 30,
     version: '1.0.1',
     items: [

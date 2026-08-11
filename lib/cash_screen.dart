@@ -3,15 +3,18 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'app_datetime.dart';
 import 'app_theme.dart';
+import 'app_toast.dart';
 import 'cash_catalog.dart';
 import 'cash_operation_dialog.dart';
 import 'cash_register_tx_dialog.dart';
 import 'cash_shift_panel.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
+import 'debt_reminder.dart';
 import 'order_details_dialog.dart';
 import 'payment_edit_dialog.dart';
 import 'pulse_anchor.dart';
+import 'quick_payment_dialog.dart';
 import 'responsive.dart';
 import 'tour_keys.dart';
 
@@ -310,52 +313,123 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
   }
 
   Future<void> _showDebts() async {
-    final debts = await DatabaseHelper().getOrderDebts();
+    var debts = await DatabaseHelper().getOrderDebts();
     if (!mounted) return;
+
+    Future<void> remind(Map<String, dynamic> d, {required bool whatsapp}) async {
+      final id = (d['id'] as num).toInt();
+      final debt = (d['debt'] as num?)?.toDouble() ?? 0;
+      final text = DebtReminder.buildText(
+        clientName: d['client_name']?.toString() ?? '',
+        orderId: id,
+        debt: debt,
+        plate: d['plate']?.toString(),
+        car: d['make_model']?.toString(),
+      );
+      if (whatsapp) {
+        final r = await DebtReminder.share(
+          phone: d['client_phone']?.toString(),
+          text: text,
+        );
+        if (!mounted) return;
+        if (r == 'opened') {
+          showAppToast(context, 'Открыт WhatsApp');
+        } else if (r == 'copied_link') {
+          showAppToast(context, 'Ссылка WhatsApp скопирована');
+        } else if (r == 'no_phone') {
+          showAppToast(context, 'Нет телефона — текст скопирован');
+        } else {
+          showAppToast(context, 'Текст скопирован');
+        }
+      } else {
+        await DebtReminder.copyText(text);
+        if (mounted) showAppToast(context, 'Текст напоминания скопирован');
+      }
+    }
+
     await runWithPulseHighlight(
       _pulseDebts,
       () => showDialog<void>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          title: Text('Долги по заказам', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-          content: SizedBox(
-            width: AppResponsive.dialogWidth(ctx, desktop: 480),
-            height: AppResponsive.isMobile(ctx) ? MediaQuery.sizeOf(ctx).height * 0.55 : 420,
-            child: debts.isEmpty
-                ? Center(child: Text('Долгов нет', style: GoogleFonts.manrope(color: AppColors.textDim)))
-                : ListView.separated(
-                    itemCount: debts.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
-                    itemBuilder: (_, i) {
-                      final d = debts[i];
-                      final id = (d['id'] as num).toInt();
-                      final debt = (d['debt'] as num?)?.toDouble() ?? 0;
-                      return ListTile(
-                        dense: true,
-                        title: Text(
-                          '#$id · ${d['client_name']}',
-                          style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14),
-                        ),
-                        subtitle: Text(
-                          '${d['make_model']} · ${d['plate']}',
-                          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                        ),
-                        trailing: Text(
-                          '${_money.format(debt)} ₽',
-                          style: GoogleFonts.manrope(color: AppColors.danger, fontWeight: FontWeight.w800),
-                        ),
-                        onTap: () async {
-                          Navigator.pop(ctx);
-                          await _openOrder(id);
-                        },
-                      );
-                    },
-                  ),
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setLocal) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: Text('Долги по заказам', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+            content: SizedBox(
+              width: AppResponsive.dialogWidth(ctx, desktop: 520),
+              height: AppResponsive.isMobile(ctx) ? MediaQuery.sizeOf(ctx).height * 0.55 : 440,
+              child: debts.isEmpty
+                  ? Center(child: Text('Долгов нет', style: GoogleFonts.manrope(color: AppColors.textDim)))
+                  : ListView.separated(
+                      itemCount: debts.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
+                      itemBuilder: (_, i) {
+                        final d = debts[i];
+                        final id = (d['id'] as num).toInt();
+                        final debt = (d['debt'] as num?)?.toDouble() ?? 0;
+                        return ListTile(
+                          dense: true,
+                          title: Text(
+                            '#$id · ${d['client_name']}',
+                            style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14),
+                          ),
+                          subtitle: Text(
+                            '${d['make_model']} · ${d['plate']}',
+                            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                          ),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '${_money.format(debt)} ₽',
+                                style: GoogleFonts.manrope(
+                                  color: AppColors.danger,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              IconButton(
+                                tooltip: 'Скопировать текст',
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.copy_outlined, size: 18),
+                                onPressed: () => remind(d, whatsapp: false),
+                              ),
+                              IconButton(
+                                tooltip: 'WhatsApp',
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.chat_outlined, size: 18, color: AppColors.success),
+                                onPressed: () => remind(d, whatsapp: true),
+                              ),
+                              IconButton(
+                                tooltip: 'Оплатить',
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.payments_outlined, size: 18, color: AppColors.primary),
+                                onPressed: () async {
+                                  final paid = await QuickPaymentDialog.open(
+                                    context,
+                                    orderId: id,
+                                  );
+                                  if (paid == true) {
+                                    debts = await DatabaseHelper().getOrderDebts();
+                                    setLocal(() {});
+                                    _loadData();
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                          onTap: () async {
+                            Navigator.pop(ctx);
+                            await _openOrder(id);
+                          },
+                        );
+                      },
+                    ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
+            ],
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
-          ],
         ),
       ),
     );

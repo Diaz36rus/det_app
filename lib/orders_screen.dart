@@ -51,6 +51,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Color _statusColor = AppColors.danger;
   List<Map<String, dynamic>> _clientCars = [];
   int? _selectedClientCarId;
+  int? _knownClientId;
   String? _vinWarning;
   List<Map<String, dynamic>> _plateHistory = [];
   int _plateLookupGen = 0;
@@ -282,6 +283,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
           );
         }
         _nameController.text = client['name']?.toString() ?? '';
+        _knownClientId = (client['id'] as num?)?.toInt();
         _clientCars = cars;
         _carController.clear();
         _plateController.clear();
@@ -291,9 +293,49 @@ class _OrdersScreenState extends State<OrdersScreen> {
       });
     } else {
       setState(() {
+        _knownClientId = null;
         _clientCars = [];
       });
     }
+  }
+
+  Future<void> _fillFromLastOrder() async {
+    var clientId = _knownClientId;
+    if (clientId == null) {
+      final phone = PhonePlus7Formatter.normalize(_phoneController.text);
+      final client = await DatabaseHelper().getClientByPhone(phone);
+      clientId = (client?['id'] as num?)?.toInt();
+    }
+    if (clientId == null) {
+      setState(() {
+        _statusMessage = 'Сначала укажите телефон существующего клиента';
+        _statusColor = AppColors.danger;
+      });
+      return;
+    }
+    final lines = await DatabaseHelper().getLastOrderCartLines(
+      clientId: clientId,
+      carId: _selectedClientCarId,
+    );
+    if (!mounted) return;
+    if (lines.isEmpty) {
+      setState(() {
+        _statusMessage = 'Предыдущих заказов не найдено';
+        _statusColor = AppColors.danger;
+      });
+      return;
+    }
+    setState(() {
+      _cart
+        ..clear()
+        ..addAll(lines.map((e) => Map<String, dynamic>.from(e)));
+      _recalcCartTotal();
+      _priceController.text = _total == _total.roundToDouble()
+          ? _total.toInt().toString()
+          : _total.toStringAsFixed(0);
+      _statusMessage = 'Корзина из прошлого заказа · ${lines.length} поз.';
+      _statusColor = AppColors.success;
+    });
   }
 
   Future<void> _saveOrder() async {
@@ -669,6 +711,20 @@ class _OrdersScreenState extends State<OrdersScreen> {
             if (_clientCars.isNotEmpty) ...[
               const SizedBox(height: 10),
               _clientCarsDropdown(),
+            ],
+            if (_knownClientId != null) ...[
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _fillFromLastOrder,
+                  icon: const Icon(Icons.history, size: 18),
+                  label: Text(
+                    'Как в прошлый раз',
+                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
             ],
             const SizedBox(height: 10),
             if (mobile) ...[

@@ -8,8 +8,10 @@ import 'db_refresh_mixin.dart';
 import 'issue_guard.dart';
 import 'order_details_dialog.dart';
 import 'pulse_anchor.dart';
+import 'quick_payment_dialog.dart';
 import 'responsive.dart';
 import 'tour_keys.dart';
+import 'work_order_actions.dart';
 import 'works_progress_bar.dart';
 
 class KanbanScreen extends StatefulWidget {
@@ -146,51 +148,99 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                   const SizedBox(height: 8),
                   WorksProgressBar.fromOrder(o, compact: true),
                   const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Text(
-                        "${o['price']} ₽",
-                        style: GoogleFonts.manrope(
-                          color: AppColors.success,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        visualDensity: VisualDensity.compact,
-                        tooltip: "Удалить",
-                        icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
-                        onPressed: () async {
-                          final id = (o['id'] as num).toInt();
-                          final confirm = await runWithPulseHighlight(
-                            id,
-                            () => showDialog<bool>(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                title: Text("Удалить заказ?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-                                content: Text(
-                                  "Все данные заказа будут безвозвратно удалены.",
-                                  style: GoogleFonts.manrope(color: AppColors.textMuted),
-                                ),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-                                    onPressed: () => Navigator.pop(context, true),
-                                    child: const Text("Удалить"),
+                  Builder(
+                    builder: (_) {
+                      final price = (o['price'] as num?)?.toDouble() ?? 0;
+                      final paid = (o['paid_amount'] as num?)?.toDouble() ?? 0;
+                      final debt = price - paid;
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "${o['price']} ₽",
+                                  style: GoogleFonts.manrope(
+                                    color: AppColors.success,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 14,
                                   ),
-                                ],
-                              ),
+                                ),
+                                if (debt > 0.01)
+                                  Text(
+                                    'долг ${debt == debt.roundToDouble() ? debt.toInt() : debt.toStringAsFixed(0)} ₽',
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.danger,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                              ],
                             ),
-                          );
-                          if (confirm == true) {
-                            await DatabaseHelper().deleteOrder(id);
-                            _loadOrders();
-                          }
-                        },
-                      ),
-                    ],
+                          ),
+                          if (debt > 0.01)
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: 'Быстрая оплата',
+                              icon: const Icon(Icons.payments_outlined, color: AppColors.primary, size: 18),
+                              onPressed: () async {
+                                final id = (o['id'] as num).toInt();
+                                final ok = await runWithPulseHighlight(
+                                  id,
+                                  () => QuickPaymentDialog.open(context, orderId: id),
+                                );
+                                if (ok == true) _loadOrders();
+                              },
+                            ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'Заказ-наряд PDF',
+                            icon: const Icon(Icons.print_outlined, color: AppColors.textMuted, size: 18),
+                            onPressed: () async {
+                              final id = (o['id'] as num).toInt();
+                              await runWithPulseHighlight(
+                                id,
+                                () => WorkOrderActions.previewByOrderId(context, id),
+                              );
+                            },
+                          ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: "Удалить",
+                            icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
+                            onPressed: () async {
+                              final id = (o['id'] as num).toInt();
+                              final confirm = await runWithPulseHighlight(
+                                id,
+                                () => showDialog<bool>(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: Text("Удалить заказ?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                                    content: Text(
+                                      "Все данные заказа будут безвозвратно удалены.",
+                                      style: GoogleFonts.manrope(color: AppColors.textMuted),
+                                    ),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+                                        onPressed: () => Navigator.pop(context, true),
+                                        child: const Text("Удалить"),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                              if (confirm == true) {
+                                await DatabaseHelper().deleteOrder(id);
+                                _loadOrders();
+                              }
+                            },
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ],
