@@ -102,6 +102,11 @@ class ShiftZReportPdf {
   }
 
   static Future<Uint8List> build({required int shiftId}) async {
+    // Helvetica в pdf без кириллицы → «квадратики». Как в заказ-наряде — Noto Sans.
+    final font = await PdfGoogleFonts.notoSansRegular();
+    final fontBold = await PdfGoogleFonts.notoSansBold();
+    final theme = pw.ThemeData.withFont(base: font, bold: fontBold);
+
     final db = DatabaseHelper();
     final shift = await db.getCashShiftById(shiftId);
     if (shift == null) throw StateError('Смена #$shiftId не найдена');
@@ -130,11 +135,12 @@ class ShiftZReportPdf {
       }
     }
 
-    final doc = pw.Document();
+    final doc = pw.Document(theme: theme);
     doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(28),
+        theme: theme,
         build: (ctx) => [
           pw.Text(
             'Z-отчёт смены #$shiftId',
