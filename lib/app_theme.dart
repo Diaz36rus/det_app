@@ -23,6 +23,20 @@ class AppColors {
   static const textDim = Color(0xFF64748B);
 }
 
+/// Цвета статусов заказа — календарь, доска, карточка заказа.
+const Map<String, Color> kOrderStatusColors = {
+  "Предварительная запись": AppColors.textDim,
+  "Принят в работу": AppColors.primary,
+  "Мойка": Color(0xFF22D3EE),
+  "Химчистка": Color(0xFFA78BFA),
+  "Полировка": Color(0xFFF59E0B),
+  "Оклейка": AppColors.danger,
+  "Интерьер": Color(0xFF14B8A6),
+  "Оборудование": Color(0xFFD97706),
+  "Подготовка к выдаче": Color(0xFF6366F1),
+  "Выдан": AppColors.success,
+};
+
 class AppTheme {
   static const double radius = 12;
   static const double radiusLg = 16;

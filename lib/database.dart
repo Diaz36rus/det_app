@@ -1025,7 +1025,8 @@ class DatabaseHelper {
     final db = await database;
     // День через substr после T→пробел. Длинные заказы: start_day ≤ день ≤ end_day.
     return await db.rawQuery('''
-      SELECT orders.id, orders.status, orders.start_time, orders.end_time, orders.due_date, orders.tech_wash_start, orders.tech_wash_end, 
+      SELECT orders.id, orders.status, orders.price, orders.paid_amount,
+             orders.start_time, orders.end_time, orders.due_date, orders.tech_wash_start, orders.tech_wash_end,
              clients.name as client_name, cars.make_model, cars.plate
       FROM orders
       JOIN clients ON orders.client_id = clients.id
@@ -1066,6 +1067,7 @@ class DatabaseHelper {
              coalesce(nullif(trim(order_items.end_time), ''), orders.end_time) as end_time,
              order_items.workshop,
              order_items.is_done, order_items.parent_id,
+             orders.status, orders.price, orders.paid_amount,
              clients.name as client_name, cars.make_model, cars.plate
       FROM order_items
       JOIN orders ON order_items.order_id = orders.id

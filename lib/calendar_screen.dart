@@ -820,6 +820,12 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       return "$model · $plate";
     }
 
+    bool hasDebt(Map<String, dynamic> row) {
+      final price = (row['price'] as num?)?.toDouble() ?? 0;
+      final paid = (row['paid_amount'] as num?)?.toDouble() ?? 0;
+      return (price - paid) > 0.01;
+    }
+
     if (isGeneral) {
       for (final o in dayOrders) {
         var startStr = o['start_time']?.toString();
@@ -849,6 +855,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           'fullEnd': fullEnd.isAfter(fullStart) ? fullEnd : fullStart.add(const Duration(minutes: 30)),
           'isTech': false,
           'draggable': true,
+          'status': o['status']?.toString() ?? '',
+          'hasDebt': hasDebt(o),
           'title': "${o['client_name']}",
           'subtitle': carLine(o),
         });
@@ -887,6 +895,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           'end': clipped.end,
           'isTech': false,
           'isDone': isDone,
+          'status': w['status']?.toString() ?? '',
+          'hasDebt': hasDebt(w),
           'title': "${w['client_name']}",
           'subtitle': car.isEmpty ? work : (work.isEmpty ? car : "$car · $work"),
         });
@@ -906,6 +916,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
             'start': clipped.start,
             'end': clipped.end,
             'isTech': true,
+            'status': o['status']?.toString() ?? '',
+            'hasDebt': hasDebt(o),
             'title': "${o['client_name']}",
             'subtitle': car.isEmpty ? "Тех. мойка" : "$car · Тех. мойка",
           });
@@ -1003,11 +1015,20 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       final start = e['start'] as DateTime;
       final isTech = e['isTech'] == true;
       final isDone = e['isDone'] == true;
+      final hasDebt = e['hasDebt'] == true;
+      final status = e['status']?.toString() ?? '';
+      final statusColor = kOrderStatusColors[status] ?? AppColors.primary;
       final groupLanes = (e['groupLanes'] as int).clamp(1, 12);
 
       final timeStr = "${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}";
       final titleText = "$timeStr  ${e['title']}";
       final subtitleText = "${e['subtitle']}";
+
+      final subtitleTint = isDone
+          ? AppColors.textDim
+          : (isTech
+              ? const Color(0xFF5EEAD4)
+              : Color.lerp(statusColor, Colors.white, 0.35) ?? const Color(0xFF93C5FD));
 
       final titleStyle = GoogleFonts.manrope(
         color: isDone ? AppColors.textDim : AppColors.text,
@@ -1018,9 +1039,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         decorationColor: AppColors.textDim,
       );
       final subtitleStyle = GoogleFonts.manrope(
-        color: isDone
-            ? AppColors.textDim
-            : (isTech ? const Color(0xFF5EEAD4) : const Color(0xFF93C5FD)),
+        color: subtitleTint,
         fontSize: groupLanes >= 3 ? 9.5 : 11,
         fontWeight: FontWeight.w600,
         height: 1.15,
@@ -1028,8 +1047,10 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
 
       final titleW = _measureTextWidth(titleText, titleStyle);
       final subtitleW = subtitleText.isEmpty ? 0.0 : _measureTextWidth(subtitleText, subtitleStyle);
-      final iconW = isDone ? 15.0 : 0.0;
+      final iconW = (isDone ? 15.0 : 0.0) + (hasDebt && !isDone ? 14.0 : 0.0);
       final extras = padH + borderW + iconW;
+      e['statusColor'] = statusColor;
+      e['hasDebt'] = hasDebt;
       // min — имя клиента целиком; preferred — ещё и авто/номер.
       final minW = (titleW + extras).clamp(56.0, colWidth - edgePad * 2);
       final preferred = ((titleW > subtitleW ? titleW : subtitleW) + extras)
@@ -1128,12 +1149,18 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       final dragging = _dragOrderId == orderId;
       if (dragging) top += _dragDy;
 
+      final hasDebt = e['hasDebt'] == true;
+      final statusColor = (e['statusColor'] as Color?) ?? AppColors.primary;
+      // Полоска слева = статус; долг — иконка + тонкая красная линия сверху.
       final accent = isDone
           ? AppColors.success
-          : (isTech ? const Color(0xFF14B8A6) : AppColors.primary);
-      final fill = isDone
-          ? AppColors.surface2.withOpacity(0.9)
-          : (isTech ? const Color(0xFF0F2E2A) : const Color(0xFF152A4A));
+          : (isTech ? const Color(0xFF14B8A6) : statusColor);
+      final fillBase = isDone
+          ? AppColors.surface2
+          : (isTech
+              ? const Color(0xFF0F2E2A)
+              : (Color.lerp(AppColors.surface2, statusColor, 0.22) ?? const Color(0xFF152A4A)));
+      final fill = isDone ? fillBase.withOpacity(0.9) : fillBase;
 
       final cardBody = Opacity(
         opacity: isDone ? 0.6 : (dragging ? 0.92 : 1),
@@ -1190,6 +1217,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                     color: (dragging ? AppColors.primary : accent).withOpacity(0.9),
                     width: 3,
                   ),
+                  top: hasDebt && !isDone && !isTech
+                      ? BorderSide(color: AppColors.danger.withOpacity(0.75), width: 1.5)
+                      : BorderSide.none,
                 ),
                 boxShadow: isDone && !dragging
                     ? null
@@ -1208,6 +1238,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                     children: [
                       if (isDone) ...[
                         const Icon(Icons.check_circle, size: 12, color: AppColors.success),
+                        const SizedBox(width: 3),
+                      ] else if (hasDebt) ...[
+                        const Icon(Icons.payments_outlined, size: 12, color: AppColors.danger),
                         const SizedBox(width: 3),
                       ],
                       Expanded(

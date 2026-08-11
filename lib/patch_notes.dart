@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 39,
+    version: '1.0.1',
+    items: [
+      'Календарь: цвет карточек по статусу (как на доске) + маркер долга',
+    ],
+  ),
+  PatchRelease(
     build: 38,
     version: '1.0.1',
     items: [
