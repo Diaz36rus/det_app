@@ -1848,7 +1848,47 @@ class DatabaseHelper {
 
   Future<void> updateOrderSchedule(int orderId, String dueDate, String startTime, String endTime, String endDate) async {
     final db = await database;
-    await db.update('orders', {'due_date': dueDate, 'start_time': startTime, 'end_time': endTime, 'end_date': endDate}, where: 'id = ?', whereArgs: [orderId]);
+    final prev = await db.query(
+      'orders',
+      columns: ['start_time', 'end_time'],
+      where: 'id = ?',
+      whereArgs: [orderId],
+      limit: 1,
+    );
+    final oldStart = prev.isEmpty ? '' : (prev.first['start_time']?.toString() ?? '');
+    await db.update(
+      'orders',
+      {'due_date': dueDate, 'start_time': startTime, 'end_time': endTime, 'end_date': endDate},
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
+    // Позиции без своего графика или с тем же, что был у заказа — едут вместе.
+    if (oldStart.trim().isNotEmpty) {
+      final alt = oldStart.contains('T') ? oldStart.replaceFirst('T', ' ') : oldStart.replaceFirst(' ', 'T');
+      await db.rawUpdate(
+        '''
+        UPDATE order_items
+        SET start_time = ?, end_time = ?
+        WHERE order_id = ?
+          AND (
+            trim(coalesce(start_time, '')) = ''
+            OR start_time = ?
+            OR start_time = ?
+          )
+        ''',
+        [startTime, endTime, orderId, oldStart, alt],
+      );
+    } else {
+      await db.rawUpdate(
+        '''
+        UPDATE order_items
+        SET start_time = ?, end_time = ?
+        WHERE order_id = ? AND trim(coalesce(start_time, '')) = ''
+        ''',
+        [startTime, endTime, orderId],
+      );
+    }
+    bumpDataRevision();
   }
 
   Future<void> setTechWash(int orderId, String? startDate, String? endDate) async {

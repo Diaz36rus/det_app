@@ -37,6 +37,13 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   bool _weekMode = false;
   int _loadGen = 0;
 
+  /// Long-press drag карточки в «Общей» / неделе.
+  int? _dragOrderId;
+  double _dragDy = 0;
+  DateTime? _dragFullStart;
+  DateTime? _dragFullEnd;
+  DateTime? _dragViewDay;
+
   @override
   void onDatabaseChanged() => _loadData(showSpinner: false);
 
@@ -500,8 +507,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
             padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 6),
             child: Text(
               _weekMode
-                  ? 'Неделя: колонка = день · пустой слот — новый заказ'
-                  : 'Пустой слот в «Общей записи» — новый заказ',
+                  ? 'Неделя · пустой слот — новый заказ · удерживайте карточку для переноса'
+                  : 'Пустой слот — новый заказ · удерживайте карточку — перенос по времени',
               style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
             ),
           ),
@@ -832,11 +839,16 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         }
         final clipped = _clipEventToViewDay(startStr, endStr, viewDay: day);
         if (clipped == null) continue;
+        final fullStart = _tryParseDateTime(startStr, viewDay: day) ?? clipped.start;
+        final fullEnd = _tryParseDateTime(endStr, viewDay: day) ?? clipped.end;
         events.add({
           'orderId': o['id'],
           'start': clipped.start,
           'end': clipped.end,
+          'fullStart': fullStart,
+          'fullEnd': fullEnd.isAfter(fullStart) ? fullEnd : fullStart.add(const Duration(minutes: 30)),
           'isTech': false,
+          'draggable': true,
           'title': "${o['client_name']}",
           'subtitle': carLine(o),
         });
@@ -1089,13 +1101,14 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       final end = e['end'] as DateTime;
       final isTech = e['isTech'] == true;
       final isDone = e['isDone'] == true;
-      final orderId = e['orderId'] as int;
+      final orderId = (e['orderId'] as num).toInt();
       final cardW = laneWByEvent[e]!;
       final left = leftByEvent[e]!;
       final titleText = e['titleText'] as String;
       final subtitleText = e['subtitleText'] as String;
       final titleStyle = e['titleStyle'] as TextStyle;
       final subtitleStyle = e['subtitleStyle'] as TextStyle;
+      final canDrag = e['draggable'] == true && isGeneral;
 
       var top = _offsetForTime(start.hour, start.minute);
       var minutes = end.difference(start).inMinutes.toDouble();
@@ -1112,6 +1125,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         }
       }
 
+      final dragging = _dragOrderId == orderId;
+      if (dragging) top += _dragDy;
+
       final accent = isDone
           ? AppColors.success
           : (isTech ? const Color(0xFF14B8A6) : AppColors.primary);
@@ -1120,12 +1136,46 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           : (isTech ? const Color(0xFF0F2E2A) : const Color(0xFF152A4A));
 
       final cardBody = Opacity(
-        opacity: isDone ? 0.6 : 1,
+        opacity: isDone ? 0.6 : (dragging ? 0.92 : 1),
         child: Material(
           color: Colors.transparent,
-          child: InkWell(
-            onTap: () => _openOrder(orderId),
-            borderRadius: BorderRadius.circular(10),
+          elevation: dragging ? 8 : 0,
+          borderRadius: BorderRadius.circular(10),
+          child: GestureDetector(
+            onTap: dragging ? null : () => _openOrder(orderId),
+            onLongPressStart: !canDrag
+                ? null
+                : (_) {
+                    setState(() {
+                      _dragOrderId = orderId;
+                      _dragDy = 0;
+                      _dragFullStart = e['fullStart'] as DateTime? ?? start;
+                      _dragFullEnd = e['fullEnd'] as DateTime? ?? end;
+                      _dragViewDay = day;
+                    });
+                  },
+            onLongPressMoveUpdate: !canDrag
+                ? null
+                : (details) {
+                    if (_dragOrderId != orderId) return;
+                    setState(() => _dragDy = details.localOffsetFromOrigin.dy);
+                  },
+            onLongPressEnd: !canDrag
+                ? null
+                : (_) => _finishOrderDrag(orderId),
+            onLongPressCancel: !canDrag
+                ? null
+                : () {
+                    if (_dragOrderId == orderId) {
+                      setState(() {
+                        _dragOrderId = null;
+                        _dragDy = 0;
+                        _dragFullStart = null;
+                        _dragFullEnd = null;
+                        _dragViewDay = null;
+                      });
+                    }
+                  },
             child: Container(
               width: cardW,
               padding: const EdgeInsets.fromLTRB(8, 6, 7, 6),
@@ -1133,14 +1183,17 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                 color: fill,
                 borderRadius: BorderRadius.circular(10),
                 border: Border(
-                  left: BorderSide(color: accent.withOpacity(0.9), width: 3),
+                  left: BorderSide(
+                    color: (dragging ? AppColors.primary : accent).withOpacity(0.9),
+                    width: 3,
+                  ),
                 ),
-                boxShadow: isDone
+                boxShadow: isDone && !dragging
                     ? null
                     : [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.28),
-                          blurRadius: 8,
+                          color: Colors.black.withOpacity(dragging ? 0.45 : 0.28),
+                          blurRadius: dragging ? 14 : 8,
                           offset: const Offset(0, 2),
                         ),
                       ],
@@ -1193,6 +1246,76 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       );
     }
     return cards;
+  }
+
+  String _fmtDbDateTime(DateTime dt) {
+    final y = dt.year.toString().padLeft(4, '0');
+    final mo = dt.month.toString().padLeft(2, '0');
+    final d = dt.day.toString().padLeft(2, '0');
+    final h = dt.hour.toString().padLeft(2, '0');
+    final mi = dt.minute.toString().padLeft(2, '0');
+    return '$y-$mo-$d $h:$mi:00';
+  }
+
+  Future<void> _finishOrderDrag(int orderId) async {
+    final dy = _dragDy;
+    final fullStart = _dragFullStart;
+    final fullEnd = _dragFullEnd;
+    final viewDay = _dragViewDay ?? widget.selectedDate;
+    setState(() {
+      _dragOrderId = null;
+      _dragDy = 0;
+      _dragFullStart = null;
+      _dragFullEnd = null;
+      _dragViewDay = null;
+    });
+    if (fullStart == null || fullEnd == null) return;
+
+    final slotDelta = (dy / _slotHeight).round();
+    if (slotDelta == 0) return;
+    final shiftMin = slotDelta * _slotMinutes;
+    var newStart = fullStart.add(Duration(minutes: shiftMin));
+    final duration = fullEnd.difference(fullStart);
+    var durMin = duration.inMinutes;
+    if (durMin < 30) durMin = 30;
+
+    // Держим старт в рабочих часах выбранного дня сетки.
+    final day = DateTime(viewDay.year, viewDay.month, viewDay.day);
+    final gridStart = DateTime(day.year, day.month, day.day, _startHour);
+    final gridEnd = DateTime(day.year, day.month, day.day, _endHour)
+        .add(Duration(minutes: _slotMinutes));
+    if (newStart.isBefore(gridStart)) newStart = gridStart;
+    var newEnd = newStart.add(Duration(minutes: durMin));
+    if (newEnd.isAfter(gridEnd)) {
+      newEnd = gridEnd;
+      newStart = newEnd.subtract(Duration(minutes: durMin));
+      if (newStart.isBefore(gridStart)) newStart = gridStart;
+    }
+    // Snap к слоту 30 мин.
+    final fromGrid = newStart.difference(gridStart).inMinutes;
+    final snapped = (fromGrid / _slotMinutes).round() * _slotMinutes;
+    newStart = gridStart.add(Duration(minutes: snapped));
+    newEnd = newStart.add(Duration(minutes: durMin));
+    if (newEnd.isAfter(gridEnd)) {
+      newEnd = gridEnd;
+      newStart = newEnd.subtract(Duration(minutes: durMin));
+      if (newStart.isBefore(gridStart)) newStart = gridStart;
+    }
+
+    final startStr = _fmtDbDateTime(newStart);
+    final endStr = _fmtDbDateTime(newEnd);
+    final due = DateFormat('yyyy-MM-dd').format(newStart);
+    try {
+      await DatabaseHelper().updateOrderSchedule(orderId, due, startStr, endStr, '');
+      await DatabaseHelper().addOrderEvent(
+        orderId,
+        'Календарь: перенос на ${DateFormat('dd.MM HH:mm', 'ru').format(newStart)}'
+        '–${DateFormat('HH:mm').format(newEnd)}',
+      );
+    } catch (e, st) {
+      debugPrint('Calendar drag save: $e\n$st');
+    }
+    if (mounted) _loadData(showSpinner: false);
   }
 
   double _measureTextWidth(String text, TextStyle style) {

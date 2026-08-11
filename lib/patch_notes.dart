@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 37,
+    version: '1.0.1',
+    items: [
+      'Календарь: удерживайте карточку — перенос по времени (общая / неделя)',
+    ],
+  ),
+  PatchRelease(
     build: 36,
     version: '1.0.1',
     items: [
