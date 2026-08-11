@@ -29,13 +29,18 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 35,
+    version: '1.0.1',
+    items: [
+      'Убран таймер работ — не нужен в ежедневном сценарии',
+    ],
+  ),
+  PatchRelease(
     build: 34,
     version: '1.0.1',
     items: [
       'Новый заказ: шаблоны корзины (сохранить / подставить)',
-      'Карточка/цех: таймер работы на позиции (старт/стоп)',
       'Сайдбар: последний бэкап + создать бэкап сейчас',
-      'Схема БД 23: work_started_at / work_ended_at',
     ],
   ),
   PatchRelease(

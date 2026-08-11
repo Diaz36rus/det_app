@@ -666,7 +666,7 @@ class DatabaseHelper {
     if (oldVersion < 22) {
       await _ensureColumn(db, 'inventory', 'min_qty', 'REAL DEFAULT 0');
     }
-    // --- Версия 23: таймер работы на позиции (не путать с графиком start/end_time) ---
+    // --- Версия 23: резерв колонок на order_items (UI таймера снят) ---
     if (oldVersion < 23) {
       await _ensureColumn(db, 'order_items', 'work_started_at', 'TEXT');
       await _ensureColumn(db, 'order_items', 'work_ended_at', 'TEXT');
@@ -1686,42 +1686,6 @@ class DatabaseHelper {
     );
     final orderId = rows.isNotEmpty ? rows.first['order_id'] as int? : null;
     if (orderId != null) await syncOrderFromItems(orderId);
-  }
-
-  /// Старт таймера работы (отдельно от графика start_time/end_time).
-  Future<void> startOrderItemWork(int itemId) async {
-    final db = await database;
-    final now = DateTime.now().toIso8601String().substring(0, 19);
-    await db.update(
-      'order_items',
-      {'work_started_at': now, 'work_ended_at': null},
-      where: 'id = ?',
-      whereArgs: [itemId],
-    );
-    bumpDataRevision();
-  }
-
-  Future<void> stopOrderItemWork(int itemId) async {
-    final db = await database;
-    final now = DateTime.now().toIso8601String().substring(0, 19);
-    await db.update(
-      'order_items',
-      {'work_ended_at': now},
-      where: 'id = ?',
-      whereArgs: [itemId],
-    );
-    bumpDataRevision();
-  }
-
-  Future<void> resetOrderItemWork(int itemId) async {
-    final db = await database;
-    await db.update(
-      'order_items',
-      {'work_started_at': null, 'work_ended_at': null},
-      where: 'id = ?',
-      whereArgs: [itemId],
-    );
-    bumpDataRevision();
   }
 
   Future<void> updateOrderItemDone(int itemId, bool isDone) async {
