@@ -355,20 +355,16 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                : LayoutBuilder(
-                    builder: (context, constraints) {
-                      final timeGutter = mobile ? 44.0 : 56.0;
-                      final padH = mobile ? 8.0 : 12.0;
-                      final padRight = mobile ? 12.0 : 16.0;
-                      final detailColW = mobile ? 160.0 : _colWidth;
-                      // Явная ширина колонки — без Expanded внутри ScrollView
-                      // (на mobile maxWidth иногда 0 → clamp падал и карточки исчезали).
-                      final bodyColW = (constraints.maxWidth - timeGutter - padH - padRight - 8)
-                          .clamp(160.0, 4000.0);
+                : Padding(
+                    padding: EdgeInsets.fromLTRB(mobile ? 8 : 12, 8, mobile ? 12 : 16, 16),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final timeGutter = mobile ? 44.0 : 56.0;
+                        final detailColW = mobile ? 160.0 : _colWidth;
+                        // Ширина уже после padding — gutter + колонка должны влезть ровно.
+                        final bodyColW = (constraints.maxWidth - timeGutter).clamp(120.0, 4000.0);
 
-                      return Padding(
-                        padding: EdgeInsets.fromLTRB(padH, 8, padRight, 16),
-                        child: Column(
+                        return Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             // Липкие заголовки колонок — не уезжают при скролле вниз
@@ -427,39 +423,44 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                                         }),
                                       ),
                                     ),
-                                    _showGeneral
-                                        ? _buildColumnBody(
-                                            'Общая запись',
-                                            bodyColW,
-                                            gridHeight,
-                                            true,
-                                          )
-                                        : Expanded(
-                                            child: SingleChildScrollView(
-                                              controller: _hBodyCtrl,
-                                              scrollDirection: Axis.horizontal,
-                                              child: Row(
-                                                children: detailColumns
-                                                    .map(
-                                                      (s) => _buildColumnBody(
-                                                        s,
-                                                        detailColW,
-                                                        gridHeight,
-                                                        false,
-                                                      ),
-                                                    )
-                                                    .toList(),
-                                              ),
-                                            ),
+                                    if (_showGeneral)
+                                      SizedBox(
+                                        width: bodyColW,
+                                        child: _buildColumnBody(
+                                          'Общая запись',
+                                          bodyColW,
+                                          gridHeight,
+                                          true,
+                                        ),
+                                      )
+                                    else
+                                      SizedBox(
+                                        width: bodyColW,
+                                        child: SingleChildScrollView(
+                                          controller: _hBodyCtrl,
+                                          scrollDirection: Axis.horizontal,
+                                          child: Row(
+                                            children: detailColumns
+                                                .map(
+                                                  (s) => _buildColumnBody(
+                                                    s,
+                                                    detailColW,
+                                                    gridHeight,
+                                                    false,
+                                                  ),
+                                                )
+                                                .toList(),
                                           ),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
                             ),
                           ],
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
           ),
         ],
@@ -468,10 +469,12 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   }
 
   Widget _buildColumnHeader(String title, double width) {
+    // В «Общей» width = вся доступная полоса; в детальном — фиксированная + зазор между цехами.
+    final gap = _showGeneral ? 0.0 : 10.0;
     return Container(
       width: width,
       height: _headerHeight,
-      margin: const EdgeInsets.only(right: 10),
+      margin: EdgeInsets.only(right: gap),
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
@@ -492,10 +495,11 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   }
 
   Widget _buildColumnBody(String title, double width, double gridHeight, bool isGeneral) {
+    final gap = isGeneral ? 0.0 : 10.0;
     return Container(
       width: width,
       height: gridHeight,
-      margin: const EdgeInsets.only(right: 10),
+      margin: EdgeInsets.only(right: gap),
       decoration: BoxDecoration(
         color: AppColors.surface.withOpacity(0.55),
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(AppTheme.radiusLg)),
