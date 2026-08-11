@@ -11,6 +11,7 @@ import 'schedule_conflict.dart';
 import 'service_category_gallery.dart';
 import 'tour_keys.dart';
 import 'vin_utils.dart';
+import 'order_templates.dart';
 import 'wrap_catalog.dart';
 
 class OrdersScreen extends StatefulWidget {
@@ -712,20 +713,30 @@ class _OrdersScreenState extends State<OrdersScreen> {
               const SizedBox(height: 10),
               _clientCarsDropdown(),
             ],
-            if (_knownClientId != null) ...[
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _fillFromLastOrder,
-                  icon: const Icon(Icons.history, size: 18),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 4,
+              runSpacing: 0,
+              children: [
+                if (_knownClientId != null)
+                  TextButton.icon(
+                    onPressed: _fillFromLastOrder,
+                    icon: const Icon(Icons.history, size: 18),
+                    label: Text(
+                      'Как в прошлый раз',
+                      style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                TextButton.icon(
+                  onPressed: _showTemplates,
+                  icon: const Icon(Icons.bookmark_outline, size: 18),
                   label: Text(
-                    'Как в прошлый раз',
+                    'Шаблоны',
                     style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
             const SizedBox(height: 10),
             if (mobile) ...[
               _carField(),
@@ -877,6 +888,130 @@ class _OrdersScreenState extends State<OrdersScreen> {
               ],
             ),
     );
+  }
+
+  Future<void> _showTemplates() async {
+    final templates = await OrderTemplatesStore.load();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Шаблоны записи', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: SizedBox(
+          width: 420,
+          height: 360,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_cart.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      Navigator.pop(ctx);
+                      await _saveCartAsTemplate();
+                    },
+                    icon: const Icon(Icons.save_outlined, size: 18),
+                    label: Text(
+                      'Сохранить текущую корзину',
+                      style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: templates.isEmpty
+                    ? Center(
+                        child: Text(
+                          'Шаблонов пока нет.\nСоберите корзину и сохраните.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.manrope(color: AppColors.textDim),
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: templates.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
+                        itemBuilder: (_, i) {
+                          final t = templates[i];
+                          return ListTile(
+                            dense: true,
+                            title: Text(
+                              t.name,
+                              style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(
+                              '${t.items.length} поз.',
+                              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Удалить',
+                              icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
+                              onPressed: () async {
+                                await OrderTemplatesStore.delete(t.id);
+                                if (ctx.mounted) Navigator.pop(ctx);
+                                if (mounted) _showTemplates();
+                              },
+                            ),
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              setState(() {
+                                _cart
+                                  ..clear()
+                                  ..addAll(t.items.map((e) => Map<String, dynamic>.from(e)));
+                                _recalcCartTotal();
+                                _priceController.text = _total == _total.roundToDouble()
+                                    ? _total.toInt().toString()
+                                    : _total.toStringAsFixed(0);
+                                _statusMessage = 'Шаблон «${t.name}» · ${t.items.length} поз.';
+                                _statusColor = AppColors.success;
+                              });
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveCartAsTemplate() async {
+    if (_cart.isEmpty) return;
+    final nameCtrl = TextEditingController(
+      text: _cart.length == 1
+          ? (_cart.first['name']?.toString() ?? 'Шаблон')
+          : 'Шаблон · ${_cart.length} поз.',
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Сохранить шаблон', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: TextField(
+          controller: nameCtrl,
+          decoration: const InputDecoration(labelText: 'Название', isDense: true),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Сохранить')),
+        ],
+      ),
+    );
+    final name = nameCtrl.text.trim();
+    nameCtrl.dispose();
+    if (ok != true || name.isEmpty) return;
+    await OrderTemplatesStore.saveFromCart(name: name, cart: _cart);
+    if (!mounted) return;
+    setState(() {
+      _statusMessage = 'Шаблон «$name» сохранён';
+      _statusColor = AppColors.success;
+    });
   }
 
   Widget _cartBlock() {

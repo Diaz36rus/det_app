@@ -654,6 +654,92 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     setState(() {});
   }
 
+  String _formatWorkDuration(Map<String, dynamic> w) {
+    final startRaw = w['work_started_at']?.toString();
+    if (startRaw == null || startRaw.isEmpty) return '';
+    try {
+      final start = DateTime.parse(startRaw.replaceFirst(' ', 'T'));
+      DateTime? end;
+      final endRaw = w['work_ended_at']?.toString();
+      if (endRaw != null && endRaw.isNotEmpty) {
+        end = DateTime.parse(endRaw.replaceFirst(' ', 'T'));
+      }
+      final sec = (end ?? DateTime.now()).difference(start).inSeconds;
+      if (sec < 0) return '';
+      final h = sec ~/ 3600;
+      final m = (sec % 3600) ~/ 60;
+      final s = sec % 60;
+      if (h > 0) return '${h}ч ${m.toString().padLeft(2, '0')}м';
+      if (m > 0) return '${m}м ${s.toString().padLeft(2, '0')}с';
+      return '${s}с';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> _toggleWorkTimer(int index) async {
+    final w = _selectedWorks[index];
+    final id = (w['id'] as num?)?.toInt();
+    if (id == null) return;
+    final started = w['work_started_at']?.toString();
+    final ended = w['work_ended_at']?.toString();
+    final running = started != null && started.isNotEmpty && (ended == null || ended.isEmpty);
+    final updated = Map<String, dynamic>.from(w);
+    if (running) {
+      await DatabaseHelper().stopOrderItemWork(id);
+      updated['work_ended_at'] = DateTime.now().toIso8601String().substring(0, 19);
+      await DatabaseHelper().addOrderEvent(
+        widget.order['id'],
+        'Таймер остановлен: ${w['name']} · ${_formatWorkDuration(updated)}',
+      );
+    } else {
+      await DatabaseHelper().startOrderItemWork(id);
+      updated['work_started_at'] = DateTime.now().toIso8601String().substring(0, 19);
+      updated['work_ended_at'] = null;
+      await DatabaseHelper().addOrderEvent(
+        widget.order['id'],
+        'Таймер запущен: ${w['name']}',
+      );
+    }
+    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (!mounted) return;
+    setState(() => _selectedWorks[index] = updated);
+  }
+
+  Widget _workTimerChip(Map<String, dynamic> w, int index) {
+    final started = w['work_started_at']?.toString();
+    final ended = w['work_ended_at']?.toString();
+    final hasStart = started != null && started.isNotEmpty;
+    final running = hasStart && (ended == null || ended.isEmpty);
+    final dur = _formatWorkDuration(w);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (dur.isNotEmpty) ...[
+          Text(
+            running ? '▶ $dur' : '⏱ $dur',
+            style: GoogleFonts.manrope(
+              color: running ? AppColors.primary : AppColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: running ? 'Стоп' : 'Старт таймера',
+          icon: Icon(
+            running ? Icons.stop_circle_outlined : Icons.play_circle_outline,
+            size: 20,
+            color: running ? AppColors.danger : AppColors.primary,
+          ),
+          onPressed: () => _toggleWorkTimer(index),
+        ),
+      ],
+    );
+  }
+
   Future<void> _addWorkshopMasterComment() async {
     if (_timelineSubmitBusy) return;
     final text = _commentController.text.trim();
@@ -1661,6 +1747,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 tooltip: "Назначить мастеров",
                 onPressed: () => _pickMastersForWork(index, w),
               ),
+              _workTimerChip(w, index),
               if (!hidePrice)
                 Text(
                   "${w['price']} ₽",
@@ -3816,6 +3903,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               ],
             ),
           ),
+          if (canToggle) _workTimerChip(w, index),
         ],
       ),
     );

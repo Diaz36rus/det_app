@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'app_datetime.dart';
 import 'app_diagnostics.dart';
 import 'app_menu.dart';
 import 'app_theme.dart';
@@ -151,9 +152,11 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   DateTime? _newOrderDate;
   TimeOfDay? _newOrderTime;
   int _openBugs = 0;
+  DateTime? _lastBackupAt;
 
   static const _pulseSearch = 'nav_search';
   static const _pulseUpdate = 'nav_update';
+  static const _pulseBackup = 'nav_backup';
 
   /// Mobile: false = ПК+телефон (облегчённый), true = «полный телефон».
   /// Desktop меню всегда полное.
@@ -173,10 +176,17 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     {"id": AppMenuIds.completed, "icon": Icons.task_alt_outlined, "label": "Завершённые"},
   ];
 
+  Future<void> _refreshLastBackup() async {
+    final at = await BackupHelper.lastBackupAt();
+    if (!mounted) return;
+    setState(() => _lastBackupAt = at);
+  }
+
   @override
   void initState() {
     super.initState();
     _refreshOpenBugs();
+    _refreshLastBackup();
     _loadMobileMenuMode();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await SyncDeepLink.instance.flushPending(context);
@@ -976,6 +986,61 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 ],
               ),
             ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          child: PulseAnchor(
+            active: isPulseActive(_pulseBackup),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
+            child: SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () async {
+                  afterAction?.call();
+                  await runWithPulseHighlight(_pulseBackup, () async {
+                    final path = await BackupHelper.forceBackupNow();
+                    await _refreshLastBackup();
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          path == null ? 'Не удалось создать бэкап' : 'Бэкап создан',
+                          style: GoogleFonts.manrope(),
+                        ),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  });
+                },
+                style: TextButton.styleFrom(
+                  alignment: Alignment.centerLeft,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.cloud_done_outlined,
+                      size: 18,
+                      color: _lastBackupAt == null ? AppColors.danger : AppColors.textDim,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _lastBackupAt == null
+                            ? 'Бэкап: нет'
+                            : 'Бэкап: ${AppDateTime.format(_lastBackupAt)}',
+                        style: GoogleFonts.manrope(
+                          color: _lastBackupAt == null ? AppColors.danger : AppColors.textDim,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
