@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 36,
+    version: '1.0.1',
+    items: [
+      'Оплата заказа только при открытой смене — без обхода',
+    ],
+  ),
+  PatchRelease(
     build: 35,
     version: '1.0.1',
     items: [

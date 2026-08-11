@@ -2118,10 +2118,14 @@ class DatabaseHelper {
     }
   }
 
+  /// Новая оплата только в открытую смену (иначе касса «теряет» проводки).
   Future<void> addPayment(int orderId, double amount, String method, {int? shiftId, int? registerId}) async {
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     final sid = shiftId ?? (await getCurrentShift())?['id'] as int?;
+    if (sid == null) {
+      throw StateError('Смена не открыта — оплату провести нельзя');
+    }
     final rid = registerId ?? await resolveRegisterIdForMethod(method);
     await db.insert('payments', {
       'order_id': orderId,

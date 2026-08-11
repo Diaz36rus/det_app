@@ -1136,25 +1136,25 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     final shift = await DatabaseHelper().getCurrentShift();
     if (shift == null) {
       if (!mounted) return;
-      final go = await runWithPulseHighlight(
+      await runWithPulseHighlight(
         'od_pay',
-        () => showDialog<bool>(
+        () => showDialog<void>(
           context: context,
           builder: (ctx) => AlertDialog(
             backgroundColor: AppColors.surface,
             title: Text('Смена не открыта', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
             content: Text(
-              'Оплата не попадёт в текущую смену. Всё равно провести?',
-              style: GoogleFonts.manrope(color: AppColors.textMuted),
+              'Откройте смену в разделе «Касса», затем проведите оплату.\n'
+              'Без смены оплата запрещена.',
+              style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-              ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Провести')),
+              ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Понятно')),
             ],
           ),
         ),
       );
-      if (go != true) return;
+      return;
     }
 
     var registerId = _selectedRegisterId;
@@ -1173,7 +1173,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       widget.order['id'],
       amount,
       _paymentMethod,
-      shiftId: shift != null ? (shift['id'] as num).toInt() : null,
+      shiftId: (shift['id'] as num).toInt(),
       registerId: registerId,
     );
     await DatabaseHelper().updateOrderPaymentMethod(widget.order['id'], _paymentMethod);

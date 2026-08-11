@@ -160,23 +160,25 @@ class QuickPaymentDialog {
     }
 
     final shift = await DatabaseHelper().getCurrentShift();
-    if (shift == null && context.mounted) {
-      final go = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          title: Text('Смена не открыта', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-          content: Text(
-            'Оплата не попадёт в текущую смену. Всё равно провести?',
-            style: GoogleFonts.manrope(color: AppColors.textMuted),
+    if (shift == null) {
+      if (context.mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: Text('Смена не открыта', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+            content: Text(
+              'Откройте смену в разделе «Касса», затем проведите оплату.\n'
+              'Без смены оплата запрещена.',
+              style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
+            ),
+            actions: [
+              ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Понятно')),
+            ],
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Провести')),
-          ],
-        ),
-      );
-      if (go != true) return false;
+        );
+      }
+      return false;
     }
 
     var rid = registerId;
@@ -186,7 +188,7 @@ class QuickPaymentDialog {
       orderId,
       amount,
       method,
-      shiftId: shift != null ? (shift['id'] as num).toInt() : null,
+      shiftId: (shift['id'] as num).toInt(),
       registerId: rid,
     );
     await DatabaseHelper().updateOrderPaymentMethod(orderId, method);
