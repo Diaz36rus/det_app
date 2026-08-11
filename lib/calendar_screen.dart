@@ -276,9 +276,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   Widget _modeToggle({required bool mobile}) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.bg.withOpacity(0.45),
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
       ),
       child: ToggleButtons(
         isSelected: [_showGeneral, !_showGeneral],
@@ -288,7 +287,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         },
         color: AppColors.textMuted,
         selectedColor: AppColors.text,
-        fillColor: AppColors.primarySoft,
+        fillColor: AppColors.primarySoft.withOpacity(0.65),
         borderColor: Colors.transparent,
         selectedBorderColor: Colors.transparent,
         borderRadius: BorderRadius.circular(AppTheme.radius - 2),
@@ -347,13 +346,12 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                   ),
           ),
           Padding(
-            padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 10),
+            padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 6),
             child: Text(
-              'Клик по пустому слоту в «Общей записи» — создать заказ на это время',
+              'Пустой слот в «Общей записи» — новый заказ',
               style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
             ),
           ),
-          const Divider(height: 1),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
@@ -473,19 +471,20 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     return Container(
       width: width,
       height: _headerHeight,
-      margin: const EdgeInsets.only(right: 8),
-      alignment: Alignment.center,
+      margin: const EdgeInsets.only(right: 10),
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-        border: Border.all(color: AppColors.border),
+        color: AppColors.surface2.withOpacity(0.85),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radiusLg)),
       ),
       child: Text(
         title,
         style: GoogleFonts.manrope(
-          color: AppColors.text,
+          color: AppColors.textMuted,
           fontWeight: FontWeight.w700,
-          fontSize: 13,
+          fontSize: 12,
+          letterSpacing: 0.3,
         ),
         overflow: TextOverflow.ellipsis,
       ),
@@ -496,14 +495,13 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     return Container(
       width: width,
       height: gridHeight,
-      margin: const EdgeInsets.only(right: 8),
+      margin: const EdgeInsets.only(right: 10),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
-        border: Border.all(color: AppColors.border),
+        color: AppColors.surface.withOpacity(0.55),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(AppTheme.radiusLg)),
       ),
       child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(14)),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(AppTheme.radiusLg)),
         child: Stack(
           clipBehavior: Clip.hardEdge,
           children: [
@@ -511,11 +509,11 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
               final isHour = i % 2 == 0;
               return Positioned(
                 top: i * _slotHeight,
-                left: 0,
-                right: 0,
+                left: 8,
+                right: 8,
                 child: Container(
-                  height: 1,
-                  color: AppColors.border.withOpacity(isHour ? 0.75 : 0.4),
+                  height: isHour ? 1 : 0.5,
+                  color: AppColors.borderSoft.withOpacity(isHour ? 0.55 : 0.28),
                 ),
               );
             }),
@@ -545,13 +543,13 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
             ..._buildCards(title, isGeneral, gridHeight, width),
             if (isGeneral && widget.onCreateAt != null)
               Positioned(
-                top: 6,
-                right: 6,
+                top: 8,
+                right: 8,
                 child: IgnorePointer(
                   child: Icon(
                     Icons.add,
                     size: 14,
-                    color: AppColors.textDim.withOpacity(0.4),
+                    color: AppColors.textDim.withOpacity(0.28),
                   ),
                 ),
               ),
@@ -733,9 +731,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     }
 
     // Ширина по тексту; параллельные карточки вплотную (без зазора).
-    const padH = 12.0; // horizontal padding 6+6
-    const borderW = 2.4;
-    const edgePad = 5.0;
+    const padH = 14.0; // horizontal padding 7+7
+    const borderW = 3.0; // left accent
+    const edgePad = 6.0;
     final cards = <Widget>[];
 
     for (final e in events) {
@@ -750,8 +748,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
 
       final titleStyle = GoogleFonts.manrope(
         color: isDone ? AppColors.textDim : AppColors.text,
-        fontSize: groupLanes >= 3 ? 10 : 11,
-        fontWeight: FontWeight.w700,
+        fontSize: groupLanes >= 3 ? 10.5 : 12,
+        fontWeight: FontWeight.w800,
         height: 1.15,
         decoration: isDone ? TextDecoration.lineThrough : null,
         decorationColor: AppColors.textDim,
@@ -759,8 +757,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       final subtitleStyle = GoogleFonts.manrope(
         color: isDone
             ? AppColors.textDim
-            : (isTech ? const Color(0xFF5EEAD4) : const Color(0xFFBFDBFE)),
-        fontSize: groupLanes >= 3 ? 9 : 10,
+            : (isTech ? const Color(0xFF5EEAD4) : const Color(0xFF93C5FD)),
+        fontSize: groupLanes >= 3 ? 9.5 : 11,
+        fontWeight: FontWeight.w600,
         height: 1.15,
       );
 
@@ -862,27 +861,38 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         }
       }
 
+      final accent = isDone
+          ? AppColors.success
+          : (isTech ? const Color(0xFF14B8A6) : AppColors.primary);
+      final fill = isDone
+          ? AppColors.surface2.withOpacity(0.9)
+          : (isTech ? const Color(0xFF0F2E2A) : const Color(0xFF152A4A));
+
       final cardBody = Opacity(
-        opacity: isDone ? 0.55 : 1,
+        opacity: isDone ? 0.6 : 1,
         child: Material(
           color: Colors.transparent,
           child: InkWell(
             onTap: () => _openOrder(orderId),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(10),
             child: Container(
               width: cardW,
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              padding: const EdgeInsets.fromLTRB(8, 6, 7, 6),
               decoration: BoxDecoration(
-                color: isDone
-                    ? AppColors.surface2
-                    : (isTech ? const Color(0xFF12352F) : AppColors.primarySoft),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: isDone
-                      ? AppColors.success.withOpacity(0.45)
-                      : (isTech ? const Color(0xFF14B8A6) : AppColors.primary.withOpacity(0.75)),
-                  width: 1.2,
+                color: fill,
+                borderRadius: BorderRadius.circular(10),
+                border: Border(
+                  left: BorderSide(color: accent.withOpacity(0.9), width: 3),
                 ),
+                boxShadow: isDone
+                    ? null
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.28),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

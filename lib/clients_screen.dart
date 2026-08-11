@@ -367,11 +367,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
     return Container(
       margin: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 12),
       padding: EdgeInsets.all(mobile ? 12 : 16),
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: AppTheme.panelDecoration,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -664,20 +660,15 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: isVip ? _vipAccent.withOpacity(0.4) : AppColors.border),
+        color: AppColors.surface2.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border(
+          left: BorderSide(color: accent.withOpacity(0.85), width: 3),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            height: 3,
-            decoration: BoxDecoration(
-              color: accent,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radius)),
-            ),
-          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
             child: Column(
@@ -703,7 +694,6 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
                         decoration: BoxDecoration(
                           color: _vipAccent.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: _vipAccent.withOpacity(0.5)),
                         ),
                         child: Text(
                           "VIP",
@@ -757,9 +747,8 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             decoration: BoxDecoration(
-                              color: AppColors.surface,
+                              color: AppColors.bg.withOpacity(0.45),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppColors.border),
                             ),
                             child: Row(
                               children: [

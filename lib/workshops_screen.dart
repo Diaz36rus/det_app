@@ -188,22 +188,20 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin {
         child: Container(
           margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
-            color: AppColors.surface2,
-            borderRadius: BorderRadius.circular(AppTheme.radius),
-            border: Border.all(
-              color: isDone ? AppColors.success.withOpacity(0.45) : AppColors.border,
+            color: isDone
+                ? AppColors.success.withOpacity(0.06)
+                : AppColors.surface2.withOpacity(0.92),
+            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+            border: Border(
+              left: BorderSide(
+                color: (isDone ? AppColors.success : AppColors.primary).withOpacity(0.85),
+                width: 3,
+              ),
             ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Container(
-                height: 3,
-                decoration: BoxDecoration(
-                  color: isDone ? AppColors.success : AppColors.primary,
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radius)),
-                ),
-              ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
                 child: Column(
