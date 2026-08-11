@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 38,
+    version: '1.0.1',
+    items: [
+      'Календарь: фикс переноса — больше не сбрасывает на 08:00',
+    ],
+  ),
+  PatchRelease(
     build: 37,
     version: '1.0.1',
     items: [

@@ -40,9 +40,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   /// Long-press drag карточки в «Общей» / неделе.
   int? _dragOrderId;
   double _dragDy = 0;
+  double? _dragStartGlobalY;
   DateTime? _dragFullStart;
   DateTime? _dragFullEnd;
-  DateTime? _dragViewDay;
 
   @override
   void onDatabaseChanged() => _loadData(showSpinner: false);
@@ -1145,20 +1145,23 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
             onTap: dragging ? null : () => _openOrder(orderId),
             onLongPressStart: !canDrag
                 ? null
-                : (_) {
+                : (details) {
+                    // Global Y: localOffset ломается, когда карточка двигается под пальцем → 08:00.
                     setState(() {
                       _dragOrderId = orderId;
                       _dragDy = 0;
+                      _dragStartGlobalY = details.globalPosition.dy;
                       _dragFullStart = e['fullStart'] as DateTime? ?? start;
                       _dragFullEnd = e['fullEnd'] as DateTime? ?? end;
-                      _dragViewDay = day;
                     });
                   },
             onLongPressMoveUpdate: !canDrag
                 ? null
                 : (details) {
-                    if (_dragOrderId != orderId) return;
-                    setState(() => _dragDy = details.localOffsetFromOrigin.dy);
+                    if (_dragOrderId != orderId || _dragStartGlobalY == null) return;
+                    setState(() {
+                      _dragDy = details.globalPosition.dy - _dragStartGlobalY!;
+                    });
                   },
             onLongPressEnd: !canDrag
                 ? null
@@ -1170,9 +1173,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                       setState(() {
                         _dragOrderId = null;
                         _dragDy = 0;
+                        _dragStartGlobalY = null;
                         _dragFullStart = null;
                         _dragFullEnd = null;
-                        _dragViewDay = null;
                       });
                     }
                   },
@@ -1261,46 +1264,35 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     final dy = _dragDy;
     final fullStart = _dragFullStart;
     final fullEnd = _dragFullEnd;
-    final viewDay = _dragViewDay ?? widget.selectedDate;
     setState(() {
       _dragOrderId = null;
       _dragDy = 0;
+      _dragStartGlobalY = null;
       _dragFullStart = null;
       _dragFullEnd = null;
-      _dragViewDay = null;
     });
     if (fullStart == null || fullEnd == null) return;
 
     final slotDelta = (dy / _slotHeight).round();
     if (slotDelta == 0) return;
     final shiftMin = slotDelta * _slotMinutes;
-    var newStart = fullStart.add(Duration(minutes: shiftMin));
-    final duration = fullEnd.difference(fullStart);
-    var durMin = duration.inMinutes;
-    if (durMin < 30) durMin = 30;
 
-    // Держим старт в рабочих часах выбранного дня сетки.
-    final day = DateTime(viewDay.year, viewDay.month, viewDay.day);
-    final gridStart = DateTime(day.year, day.month, day.day, _startHour);
-    final gridEnd = DateTime(day.year, day.month, day.day, _endHour)
-        .add(Duration(minutes: _slotMinutes));
-    if (newStart.isBefore(gridStart)) newStart = gridStart;
-    var newEnd = newStart.add(Duration(minutes: durMin));
-    if (newEnd.isAfter(gridEnd)) {
-      newEnd = gridEnd;
-      newStart = newEnd.subtract(Duration(minutes: durMin));
-      if (newStart.isBefore(gridStart)) newStart = gridStart;
+    // Просто сдвигаем исходный интервал — без привязки к 08:00 дня сетки
+    // (старый clamp убивал время и ставил 08:00).
+    var newStart = fullStart.add(Duration(minutes: shiftMin));
+    var newEnd = fullEnd.add(Duration(minutes: shiftMin));
+    if (!newEnd.isAfter(newStart)) {
+      newEnd = newStart.add(const Duration(minutes: 30));
     }
-    // Snap к слоту 30 мин.
-    final fromGrid = newStart.difference(gridStart).inMinutes;
-    final snapped = (fromGrid / _slotMinutes).round() * _slotMinutes;
-    newStart = gridStart.add(Duration(minutes: snapped));
+    // Snap минут старта к шагу слота (0 или 30).
+    final snap = ((newStart.minute + _slotMinutes ~/ 2) ~/ _slotMinutes) * _slotMinutes;
+    if (snap == 60) {
+      newStart = DateTime(newStart.year, newStart.month, newStart.day, newStart.hour + 1);
+    } else {
+      newStart = DateTime(newStart.year, newStart.month, newStart.day, newStart.hour, snap);
+    }
+    final durMin = fullEnd.difference(fullStart).inMinutes.clamp(30, 24 * 60);
     newEnd = newStart.add(Duration(minutes: durMin));
-    if (newEnd.isAfter(gridEnd)) {
-      newEnd = gridEnd;
-      newStart = newEnd.subtract(Duration(minutes: durMin));
-      if (newStart.isBefore(gridStart)) newStart = gridStart;
-    }
 
     final startStr = _fmtDbDateTime(newStart);
     final endStr = _fmtDbDateTime(newEnd);
