@@ -81,11 +81,7 @@ class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> with DbRe
             padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 12),
             child: Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.surface2,
-                borderRadius: BorderRadius.circular(AppTheme.radius),
-                border: Border.all(color: AppColors.border),
-              ),
+              decoration: AppTheme.panelDecoration,
               child: TextField(
                 controller: _searchController,
                 decoration: const InputDecoration(
@@ -119,21 +115,20 @@ class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> with DbRe
                             borderRadius: BorderRadius.circular(AppTheme.radius),
                             child: Container(
                               margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(16),
+                              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
                               decoration: BoxDecoration(
-                                color: AppColors.surface2,
-                                borderRadius: BorderRadius.circular(AppTheme.radius),
-                                border: Border.all(color: AppColors.border),
+                                color: AppColors.surface2.withOpacity(0.92),
+                                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                                border: Border(
+                                  left: BorderSide(
+                                    color: AppColors.success.withOpacity(0.8),
+                                    width: 3,
+                                  ),
+                                ),
                               ),
                               clipBehavior: Clip.antiAlias,
                               child: Column(
                                 children: [
-                                  Container(
-                                    height: 3,
-                                    width: double.infinity,
-                                    color: AppColors.success,
-                                  ),
-                                  const SizedBox(height: 12),
                                   Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [

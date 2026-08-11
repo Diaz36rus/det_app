@@ -98,12 +98,8 @@ class _StatsScreenState extends State<StatsScreen> {
     final dayLabel = DateFormat('dd.MM.yyyy').format(_masterDayDate);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
-      ),
+      padding: const EdgeInsets.all(16),
+      decoration: AppTheme.panelDecoration,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -165,12 +161,8 @@ class _StatsScreenState extends State<StatsScreen> {
   Widget _kpiCard(String title, String value, Color color) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.surface2,
-          borderRadius: BorderRadius.circular(AppTheme.radius),
-          border: Border.all(color: AppColors.border),
-        ),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: AppTheme.kpiDecoration(accent: color),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -196,11 +188,7 @@ class _StatsScreenState extends State<StatsScreen> {
     return Container(
       height: 180,
       padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: AppTheme.panelDecoration,
       child: BarChart(
         BarChartData(
           maxY: chartMax,
@@ -287,9 +275,8 @@ class _StatsScreenState extends State<StatsScreen> {
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: AppColors.surface2,
+                          color: AppColors.bg.withOpacity(0.4),
                           borderRadius: BorderRadius.circular(AppTheme.radius),
-                          border: Border.all(color: AppColors.border),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,

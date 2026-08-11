@@ -79,22 +79,17 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
       width: isFeedback ? 240 : double.infinity,
       margin: isFeedback ? EdgeInsets.zero : const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
+        color: AppColors.surface2.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border(
+          left: BorderSide(color: accent.withOpacity(0.85), width: 3),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            height: 3,
-            decoration: BoxDecoration(
-              color: accent,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(AppTheme.radius)),
-            ),
-          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            padding: const EdgeInsets.fromLTRB(12, 12, 8, 10),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -224,11 +219,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            color: AppColors.surface2,
-                            borderRadius: BorderRadius.circular(AppTheme.radius),
-                            border: Border.all(color: AppColors.border),
-                          ),
+                          decoration: AppTheme.panelDecoration,
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
                               isExpanded: true,
@@ -262,11 +253,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
                         Flexible(
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: BoxDecoration(
-                              color: AppColors.surface2,
-                              borderRadius: BorderRadius.circular(AppTheme.radius),
-                              border: Border.all(color: AppColors.border),
-                            ),
+                            decoration: AppTheme.panelDecoration,
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<String>(
                                 value: _selectedStatusFilter,
@@ -292,7 +279,6 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
                       ],
                     ),
             ),
-            const Divider(height: 1),
             Expanded(
               child: RefreshIndicator(
                 color: AppColors.primary,
@@ -347,10 +333,12 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
                           margin: const EdgeInsets.only(right: 12),
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: hovering ? AppColors.primarySoft.withOpacity(0.45) : AppColors.surface,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: hovering ? AppColors.primary.withOpacity(0.55) : AppColors.border,
+                            color: hovering
+                                ? AppColors.primarySoft.withOpacity(0.45)
+                                : AppColors.surface.withOpacity(0.55),
+                            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                            border: Border(
+                              top: BorderSide(color: accent.withOpacity(hovering ? 0.9 : 0.55), width: 3),
                             ),
                           ),
                           child: Column(
@@ -374,20 +362,12 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.bg,
-                                      borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(color: AppColors.border),
-                                    ),
-                                    child: Text(
-                                      "${colOrders.length}",
-                                      style: GoogleFonts.manrope(
-                                        color: AppColors.textMuted,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                      ),
+                                  Text(
+                                    "${colOrders.length}",
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.textDim,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ],

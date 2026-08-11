@@ -147,11 +147,7 @@ class _MastersScreenState extends State<MastersScreen> {
     return Container(
       margin: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 12),
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: AppTheme.panelDecoration,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -159,12 +155,7 @@ class _MastersScreenState extends State<MastersScreen> {
             children: [
               Text(
                 "НОВЫЙ СОТРУДНИК",
-                style: GoogleFonts.manrope(
-                  color: AppColors.textDim,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
+                style: AppTheme.sectionLabel,
               ),
               const Spacer(),
               TextButton(
@@ -230,14 +221,15 @@ class _MastersScreenState extends State<MastersScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.border),
+        color: AppColors.surface2.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border(
+          left: BorderSide(color: AppColors.primary.withOpacity(0.8), width: 3),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          Container(height: 3, color: AppColors.primary),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
             child: Row(

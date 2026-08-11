@@ -288,11 +288,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
           padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 12, AppResponsive.isMobile(context) ? 12 : 24, 12),
           child: Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.surface2,
-              borderRadius: BorderRadius.circular(AppTheme.radius),
-              border: Border.all(color: AppColors.border),
-            ),
+            decoration: AppTheme.panelDecoration,
             child: TextField(
               controller: _searchController,
               decoration: const InputDecoration(
@@ -318,11 +314,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                     final items = categorized[catName]!;
                     return Container(
                       margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface2,
-                        borderRadius: BorderRadius.circular(AppTheme.radius),
-                        border: Border.all(color: AppColors.border),
-                      ),
+                      decoration: AppTheme.panelDecoration,
                       clipBehavior: Clip.antiAlias,
                       child: Theme(
                         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -395,10 +387,15 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                     return Container(
                       margin: const EdgeInsets.only(bottom: 10),
                       decoration: BoxDecoration(
-                        color: AppColors.surface2,
-                        borderRadius: BorderRadius.circular(AppTheme.radius),
-                        border: Border.all(
-                          color: low ? AppColors.danger.withOpacity(0.45) : AppColors.border,
+                        color: low
+                            ? AppColors.danger.withOpacity(0.06)
+                            : AppColors.surface2.withOpacity(0.92),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+                        border: Border(
+                          left: BorderSide(
+                            color: (low ? AppColors.danger : AppColors.primary).withOpacity(0.75),
+                            width: 3,
+                          ),
                         ),
                       ),
                       child: ListTile(
