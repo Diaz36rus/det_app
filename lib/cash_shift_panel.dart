@@ -9,7 +9,7 @@ import 'database.dart';
 import 'pulse_anchor.dart';
 
 /// Панель смены: несколько касс, открытие/закрытие, добавление кассы.
-class CashShiftPanel extends StatelessWidget {
+class CashShiftPanel extends StatefulWidget {
   final Map<String, dynamic>? shift;
   final List<Map<String, dynamic>> registerSnapshots;
   final int? selectedRegisterId;
@@ -17,7 +17,7 @@ class CashShiftPanel extends StatelessWidget {
   /// Клик по карточке кассы — открыть список транзакций.
   final ValueChanged<Map<String, dynamic>>? onOpenRegister;
   final VoidCallback onChanged;
-  /// Пилот PulseAnchor: id кассы, которая сейчас «дышит» за диалогом.
+  /// PulseAnchor: id кассы, которая сейчас «дышит» за диалогом (с экрана кассы).
   final int? pulsingRegisterId;
 
   const CashShiftPanel({
@@ -31,7 +31,21 @@ class CashShiftPanel extends StatelessWidget {
     this.pulsingRegisterId,
   });
 
+  @override
+  State<CashShiftPanel> createState() => _CashShiftPanelState();
+}
+
+class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin {
+  static const _pulsePanel = 'cash_shift_panel';
   static final _money = NumberFormat('#,##0.##', 'ru_RU');
+
+  Map<String, dynamic>? get shift => widget.shift;
+  List<Map<String, dynamic>> get registerSnapshots => widget.registerSnapshots;
+  int? get selectedRegisterId => widget.selectedRegisterId;
+  ValueChanged<int?>? get onSelectRegister => widget.onSelectRegister;
+  ValueChanged<Map<String, dynamic>>? get onOpenRegister => widget.onOpenRegister;
+  VoidCallback get onChanged => widget.onChanged;
+  int? get pulsingRegisterId => widget.pulsingRegisterId;
 
   Color _typeColor(String type) {
     switch (type) {
@@ -51,7 +65,9 @@ class CashShiftPanel extends StatelessWidget {
   Future<void> _addRegister(BuildContext context) async {
     final nameCtrl = TextEditingController();
     var moneyType = CashMethods.cash;
-    final ok = await showDialog<bool>(
+    final ok = await runWithPulseHighlight(
+      _pulsePanel,
+      () => showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
@@ -91,6 +107,7 @@ class CashShiftPanel extends StatelessWidget {
           ],
         ),
       ),
+    ),
     );
     if (ok != true) return;
     await DatabaseHelper().addCashRegister(nameCtrl.text.trim(), moneyType);
@@ -113,43 +130,46 @@ class CashShiftPanel extends StatelessWidget {
       ctrls[rid] = TextEditingController(text: isCash ? '0' : '0');
     }
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text('Открыть смену', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-        content: SizedBox(
-          width: 420,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Укажите стартовый остаток по каждой кассе',
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
-                ),
-                const SizedBox(height: 12),
-                for (final r in registers) ...[
-                  TextField(
-                    controller: ctrls[(r['id'] as num).toInt()],
-                    decoration: InputDecoration(
-                      labelText: '${r['name']} · ${r['money_type']}',
-                      isDense: true,
-                      suffixText: '₽',
-                    ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    final ok = await runWithPulseHighlight(
+      _pulsePanel,
+      () => showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Открыть смену', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Укажите стартовый остаток по каждой кассе',
+                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
+                  for (final r in registers) ...[
+                    TextField(
+                      controller: ctrls[(r['id'] as num).toInt()],
+                      decoration: InputDecoration(
+                        labelText: '${r['name']} · ${r['money_type']}',
+                        isDense: true,
+                        suffixText: '₽',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Открыть')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Открыть')),
-        ],
       ),
     );
     if (ok != true) return;
@@ -187,51 +207,54 @@ class CashShiftPanel extends StatelessWidget {
     }
     final noteCtrl = TextEditingController();
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text('Закрыть смену', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-        content: SizedBox(
-          width: 440,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final s in snaps) ...[
-                  Text(
-                    '${s['name']} · ожид. ${_money.format((s['expected'] as num?)?.toDouble() ?? 0)} ₽',
-                    style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: ctrls[(s['id'] as num).toInt()],
-                    decoration: InputDecoration(
-                      labelText: 'Факт · ${s['money_type']}',
-                      isDense: true,
-                      suffixText: '₽',
+    final ok = await runWithPulseHighlight(
+      _pulsePanel,
+      () => showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Закрыть смену', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          content: SizedBox(
+            width: 440,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final s in snaps) ...[
+                    Text(
+                      '${s['name']} · ожид. ${_money.format((s['expected'] as num?)?.toDouble() ?? 0)} ₽',
+                      style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    const SizedBox(height: 4),
+                    TextField(
+                      controller: ctrls[(s['id'] as num).toInt()],
+                      decoration: InputDecoration(
+                        labelText: 'Факт · ${s['money_type']}',
+                        isDense: true,
+                        suffixText: '₽',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                    const SizedBox(height: 10),
+                  ],
+                  TextField(
+                    controller: noteCtrl,
+                    decoration: const InputDecoration(labelText: 'Комментарий', isDense: true),
                   ),
-                  const SizedBox(height: 10),
                 ],
-                TextField(
-                  controller: noteCtrl,
-                  decoration: const InputDecoration(labelText: 'Комментарий', isDense: true),
-                ),
-              ],
+              ),
             ),
           ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Закрыть смену'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Закрыть смену'),
-          ),
-        ],
       ),
     );
     if (ok != true) return;
@@ -260,10 +283,13 @@ class CashShiftPanel extends StatelessWidget {
 
   Future<void> _collection(BuildContext context) async {
     final t = cashTemplateByKey('collect');
-    final saved = await CashOperationDialog.open(
-      context,
-      template: t,
-      registerId: selectedRegisterId,
+    final saved = await runWithPulseHighlight(
+      _pulsePanel,
+      () => CashOperationDialog.open(
+        context,
+        template: t,
+        registerId: selectedRegisterId,
+      ),
     );
     if (saved == true) onChanged();
   }
@@ -273,7 +299,10 @@ class CashShiftPanel extends StatelessWidget {
     final open = shift != null;
     final openedAt = AppDateTime.format(shift?['opened_at']);
 
-    return Container(
+    return PulseAnchor(
+      active: isPulseActive(_pulsePanel),
+      accent: open ? AppColors.success : AppColors.primary,
+      child: Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: AppColors.surface2.withOpacity(0.92),
@@ -352,6 +381,7 @@ class CashShiftPanel extends StatelessWidget {
               },
             ),
         ],
+      ),
       ),
     );
   }

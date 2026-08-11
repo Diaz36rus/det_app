@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'database.dart';
+import 'pulse_anchor.dart';
 import 'responsive.dart';
 
 class InventoryScreen extends StatefulWidget {
@@ -11,8 +12,10 @@ class InventoryScreen extends StatefulWidget {
   State<InventoryScreen> createState() => _InventoryScreenState();
 }
 
-class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProviderStateMixin {
+class _InventoryScreenState extends State<InventoryScreen>
+    with SingleTickerProviderStateMixin, PulseHighlightMixin {
   late final TabController _tabs;
+  static const _pulseAddInv = 'inv_add';
   List<Map<String, dynamic>> _services = [];
   List<Map<String, dynamic>> _inventory = [];
   bool _isLoading = true;
@@ -74,12 +77,15 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   Future<void> _openRecipeEditor(Map<String, dynamic> service) async {
     final serviceName = service['name']?.toString() ?? '';
     if (serviceName.isEmpty) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => _RecipeEditorDialog(
-        serviceName: serviceName,
-        inventory: _inventory,
-        onChanged: _loadAll,
+    await runWithPulseHighlight(
+      'svc_$serviceName',
+      () => showDialog<void>(
+        context: context,
+        builder: (context) => _RecipeEditorDialog(
+          serviceName: serviceName,
+          inventory: _inventory,
+          onChanged: _loadAll,
+        ),
       ),
     );
     _loadAll();
@@ -89,7 +95,9 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     final nameCtrl = TextEditingController();
     final qtyCtrl = TextEditingController(text: '0');
     final unitCtrl = TextEditingController(text: 'шт');
-    final ok = await showDialog<bool>(
+    final ok = await runWithPulseHighlight(
+      _pulseAddInv,
+      () => showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
@@ -128,6 +136,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
           ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Добавить")),
         ],
       ),
+    ),
     );
     if (ok != true) return;
     final name = nameCtrl.text.trim();
@@ -143,46 +152,50 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   }
 
   Future<void> _editInventory(Map<String, dynamic> item) async {
+    final invId = (item['id'] as num).toInt();
     final nameCtrl = TextEditingController(text: item['name']?.toString() ?? '');
     final qtyCtrl = TextEditingController(text: '${item['quantity'] ?? 0}');
     final unitCtrl = TextEditingController(text: item['unit']?.toString() ?? 'шт');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("Редактировать", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(labelText: "Название", isDense: true),
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: qtyCtrl,
-                    decoration: const InputDecoration(labelText: "Количество", isDense: true),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    final ok = await runWithPulseHighlight(
+      invId,
+      () => showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text("Редактировать", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(labelText: "Название", isDense: true),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: qtyCtrl,
+                      decoration: const InputDecoration(labelText: "Количество", isDense: true),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: unitCtrl,
-                    decoration: const InputDecoration(labelText: "Ед.", isDense: true),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: unitCtrl,
+                      decoration: const InputDecoration(labelText: "Ед.", isDense: true),
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Сохранить")),
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Сохранить")),
-        ],
       ),
     );
     if (ok != true) return;
@@ -190,7 +203,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     if (name.isEmpty) return;
     final qty = double.tryParse(qtyCtrl.text.replaceAll(',', '.')) ?? 0;
     await DatabaseHelper().updateInventoryItem(
-      (item['id'] as num).toInt(),
+      invId,
       name: name,
       quantity: qty,
       unit: unitCtrl.text.trim(),
@@ -199,27 +212,31 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   }
 
   Future<void> _deleteInventory(Map<String, dynamic> item) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("Удалить позицию?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: Text(
-          "${item['name']} будет удалена вместе с рецептами.",
-          style: GoogleFonts.manrope(color: AppColors.textMuted),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Удалить"),
+    final invId = (item['id'] as num).toInt();
+    final ok = await runWithPulseHighlight(
+      invId,
+      () => showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text("Удалить позицию?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          content: Text(
+            "${item['name']} будет удалена вместе с рецептами.",
+            style: GoogleFonts.manrope(color: AppColors.textMuted),
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Удалить"),
+            ),
+          ],
+        ),
       ),
     );
     if (ok != true) return;
-    await DatabaseHelper().deleteInventoryItem((item['id'] as num).toInt());
+    await DatabaseHelper().deleteInventoryItem(invId);
     _loadAll();
   }
 
@@ -228,51 +245,55 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     final fixed = (s['fixed_price'] as num?)?.toDouble() ?? 0;
     final isFixed = fixed > 0;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: Text(
-              name,
-              style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-          ),
-          if (isFixed)
+    return PulseAnchor(
+      active: isPulseActive('svc_$name'),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        child: Row(
+          children: [
             Expanded(
-              flex: 2,
-              child: _PriceSaveField(
-                initialValue: fixed.toString(),
-                label: "Фикс",
-                onSave: (val) => _savePrice(name, 'fixed_price', val),
+              flex: 3,
+              child: Text(
+                name,
+                style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
               ),
-            )
-          else
-            Expanded(
-              flex: 4,
-              child: Row(
-                children: [
-                  for (int i = 1; i <= 4; i++)
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.only(left: i == 1 ? 0 : 6),
-                        child: _PriceSaveField(
-                          initialValue: (s['price$i'] as num?)?.toString() ?? "0",
-                          label: "$i кл.",
-                          onSave: (val) => _savePrice(name, 'price$i', val),
+            ),
+            if (isFixed)
+              Expanded(
+                flex: 2,
+                child: _PriceSaveField(
+                  initialValue: fixed.toString(),
+                  label: "Фикс",
+                  onSave: (val) => _savePrice(name, 'fixed_price', val),
+                ),
+              )
+            else
+              Expanded(
+                flex: 4,
+                child: Row(
+                  children: [
+                    for (int i = 1; i <= 4; i++)
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(left: i == 1 ? 0 : 6),
+                          child: _PriceSaveField(
+                            initialValue: (s['price$i'] as num?)?.toString() ?? "0",
+                            label: "$i кл.",
+                            onSave: (val) => _savePrice(name, 'price$i', val),
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
+            IconButton(
+              tooltip: "Рецепт списания",
+              icon: const Icon(Icons.science_outlined, size: 20, color: AppColors.primary),
+              onPressed: () => _openRecipeEditor(s),
             ),
-          IconButton(
-            tooltip: "Рецепт списания",
-            icon: const Icon(Icons.science_outlined, size: 20, color: AppColors.primary),
-            onPressed: () => _openRecipeEditor(s),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -361,10 +382,14 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                   style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13),
                 ),
               ),
-              ElevatedButton.icon(
-                onPressed: _showAddInventoryDialog,
-                icon: const Icon(Icons.add, size: 18),
-                label: Text("Добавить", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+              PulseAnchor(
+                active: isPulseActive(_pulseAddInv),
+                borderRadius: BorderRadius.circular(AppTheme.radius),
+                child: ElevatedButton.icon(
+                  onPressed: _showAddInventoryDialog,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: Text("Добавить", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                ),
               ),
             ],
           ),
@@ -382,9 +407,13 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                   itemCount: _inventory.length,
                   itemBuilder: (context, index) {
                     final item = _inventory[index];
+                    final invId = (item['id'] as num).toInt();
                     final qty = (item['quantity'] as num?)?.toDouble() ?? 0;
                     final low = qty <= 0;
-                    return Container(
+                    return PulseAnchor(
+                      active: isPulseActive(invId),
+                      accent: low ? AppColors.danger : AppColors.primary,
+                      child: Container(
                       margin: const EdgeInsets.only(bottom: 10),
                       decoration: BoxDecoration(
                         color: low
@@ -437,6 +466,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                           ],
                         ),
                       ),
+                    ),
                     );
                   },
                 ),

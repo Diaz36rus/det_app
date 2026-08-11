@@ -29,6 +29,7 @@ import 'masters_screen.dart';
 import 'menu_backgrounds.dart';
 import 'orders_screen.dart';
 import 'patch_notes.dart';
+import 'pulse_anchor.dart';
 import 'responsive.dart';
 import 'search_dialog.dart';
 import 'stats_screen.dart';
@@ -143,13 +144,16 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   DateTime _selectedCalendarDate = DateTime.now();
   int _selectedIndex = AppMenuIds.board;
   String _selectedWorkshop = WORKSHOPS.first;
   DateTime? _newOrderDate;
   TimeOfDay? _newOrderTime;
   int _openBugs = 0;
+
+  static const _pulseSearch = 'nav_search';
+  static const _pulseUpdate = 'nav_update';
 
   /// Mobile: false = ПК+телефон (облегчённый), true = «полный телефон».
   /// Desktop меню всегда полное.
@@ -496,33 +500,40 @@ class _HomeScreenState extends State<HomeScreen> {
     return Padding(
       key: TourKeys.search,
       padding: const EdgeInsets.symmetric(horizontal: 14),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () async {
-            afterTap?.call();
-            await showDialog(context: context, builder: (context) => const SearchDialog());
-          },
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppColors.bg.withOpacity(0.45),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.search, color: AppColors.textMuted, size: 20),
-                const SizedBox(width: 10),
-                Text(
-                  "Поиск",
-                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 14),
-                ),
-                if (showShortcut) ...[
-                  const Spacer(),
-                  Text("Ctrl+K", style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11)),
+      child: PulseAnchor(
+        active: isPulseActive(_pulseSearch),
+        borderRadius: BorderRadius.circular(12),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () async {
+              afterTap?.call();
+              await runWithPulseHighlight(
+                _pulseSearch,
+                () => showDialog(context: context, builder: (context) => const SearchDialog()),
+              );
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.bg.withOpacity(0.45),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.search, color: AppColors.textMuted, size: 20),
+                  const SizedBox(width: 10),
+                  Text(
+                    "Поиск",
+                    style: GoogleFonts.manrope(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 14),
+                  ),
+                  if (showShortcut) ...[
+                    const Spacer(),
+                    Text("Ctrl+K", style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11)),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -928,12 +939,15 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-          child: SizedBox(
+          child: PulseAnchor(
+            active: isPulseActive(_pulseUpdate),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
+            child: SizedBox(
             width: double.infinity,
             child: OutlinedButton(
-              onPressed: () {
+              onPressed: () async {
                 afterAction?.call();
-                UpdateDialog.open(context);
+                await runWithPulseHighlight(_pulseUpdate, () => UpdateDialog.open(context));
               },
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.text,
@@ -961,6 +975,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
+            ),
             ),
           ),
         ),

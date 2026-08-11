@@ -128,27 +128,31 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
   }
 
   Future<void> _confirmDelete(Map<String, dynamic> master) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("Удалить сотрудника?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: Text(
-          "${master['name']} будет удалён из базы.",
-          style: GoogleFonts.manrope(color: AppColors.textMuted),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Удалить"),
+    final masterId = (master['id'] as num).toInt();
+    final ok = await runWithPulseHighlight(
+      masterId,
+      () => showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text("Удалить сотрудника?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          content: Text(
+            "${master['name']} будет удалён из базы.",
+            style: GoogleFonts.manrope(color: AppColors.textMuted),
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Удалить"),
+            ),
+          ],
+        ),
       ),
     );
     if (ok == true) {
-      await DatabaseHelper().deleteMasterById((master['id'] as num).toInt());
+      await DatabaseHelper().deleteMasterById(masterId);
       _loadData();
     }
   }

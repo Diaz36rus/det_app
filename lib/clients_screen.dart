@@ -7,6 +7,7 @@ import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'input_masks.dart';
 import 'order_details_dialog.dart';
+import 'pulse_anchor.dart';
 import 'responsive.dart';
 import 'vin_utils.dart';
 
@@ -19,7 +20,7 @@ class ClientsScreen extends StatefulWidget {
 
 enum _ClientSort { name, phone, car, plate, vip }
 
-class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
+class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, PulseHighlightMixin {
   @override
   void onDatabaseChanged() => _loadClients(_searchController.text);
   List<Map<String, dynamic>> _clients = [];
@@ -170,86 +171,89 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
     var selectedCategory = ['1', '2', '3', '4'].contains(category) ? category : '1';
     final isEdit = carId != null;
 
-    showDialog(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: Text(
-                isEdit ? "Редактировать авто" : "Добавить авто",
-                style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextField(controller: makeCtrl, decoration: const InputDecoration(labelText: "Марка/Модель")),
-                  TextField(
-                    controller: plateCtrl,
-                    decoration: const InputDecoration(labelText: "Госномер", hintText: "A123BC777"),
-                    textCapitalization: TextCapitalization.characters,
-                    inputFormatters: [PlateMaskFormatter()],
-                  ),
-                  TextField(
-                    controller: vinCtrl,
-                    decoration: const InputDecoration(labelText: "VIN код"),
-                    textCapitalization: TextCapitalization.characters,
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: selectedCategory,
-                    decoration: const InputDecoration(labelText: "Класс авто", isDense: true),
-                    dropdownColor: AppColors.surface,
-                    items: ['1', '2', '3', '4']
-                        .map((v) => DropdownMenuItem(value: v, child: Text("$v класс")))
-                        .toList(),
-                    onChanged: (val) {
-                      if (val == null) return;
-                      setDialogState(() => selectedCategory = val);
+    runWithPulseHighlight(
+      clientId,
+      () => showDialog(
+        context: context,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                backgroundColor: AppColors.surface,
+                title: Text(
+                  isEdit ? "Редактировать авто" : "Добавить авто",
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(controller: makeCtrl, decoration: const InputDecoration(labelText: "Марка/Модель")),
+                    TextField(
+                      controller: plateCtrl,
+                      decoration: const InputDecoration(labelText: "Госномер", hintText: "A123BC777"),
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [PlateMaskFormatter()],
+                    ),
+                    TextField(
+                      controller: vinCtrl,
+                      decoration: const InputDecoration(labelText: "VIN код"),
+                      textCapitalization: TextCapitalization.characters,
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: selectedCategory,
+                      decoration: const InputDecoration(labelText: "Класс авто", isDense: true),
+                      dropdownColor: AppColors.surface,
+                      items: ['1', '2', '3', '4']
+                          .map((v) => DropdownMenuItem(value: v, child: Text("$v класс")))
+                          .toList(),
+                      onChanged: (val) {
+                        if (val == null) return;
+                        setDialogState(() => selectedCategory = val);
+                      },
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
+                  ElevatedButton(
+                    onPressed: () async {
+                      if (makeCtrl.text.isEmpty) return;
+                      final vinWarning = VinUtils.validate(vinCtrl.text);
+                      if (vinWarning != null) {
+                        showAppToast(context, vinWarning);
+                        return;
+                      }
+                      final plateNorm = PlateMaskFormatter.normalize(plateCtrl.text);
+                      final vinNorm = VinUtils.normalize(vinCtrl.text);
+                      if (isEdit) {
+                        await DatabaseHelper().updateCar(
+                          carId,
+                          makeModel: makeCtrl.text,
+                          plate: plateNorm,
+                          vin: vinNorm,
+                          category: selectedCategory,
+                        );
+                      } else {
+                        await DatabaseHelper().addCar(
+                          clientId,
+                          makeCtrl.text,
+                          plateNorm,
+                          vin: vinNorm,
+                          category: selectedCategory,
+                        );
+                      }
+                      if (context.mounted) Navigator.pop(context);
+                      _loadClients(_searchController.text);
                     },
+                    child: Text(isEdit ? "Сохранить" : "Добавить"),
                   ),
                 ],
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
-                ElevatedButton(
-                  onPressed: () async {
-                    if (makeCtrl.text.isEmpty) return;
-                    final vinWarning = VinUtils.validate(vinCtrl.text);
-                    if (vinWarning != null) {
-                      showAppToast(context, vinWarning);
-                      return;
-                    }
-                    final plateNorm = PlateMaskFormatter.normalize(plateCtrl.text);
-                    final vinNorm = VinUtils.normalize(vinCtrl.text);
-                    if (isEdit) {
-                      await DatabaseHelper().updateCar(
-                        carId,
-                        makeModel: makeCtrl.text,
-                        plate: plateNorm,
-                        vin: vinNorm,
-                        category: selectedCategory,
-                      );
-                    } else {
-                      await DatabaseHelper().addCar(
-                        clientId,
-                        makeCtrl.text,
-                        plateNorm,
-                        vin: vinNorm,
-                        category: selectedCategory,
-                      );
-                    }
-                    if (context.mounted) Navigator.pop(context);
-                    _loadClients(_searchController.text);
-                  },
-                  child: Text(isEdit ? "Сохранить" : "Добавить"),
-                ),
-              ],
-            );
-          },
-        );
-      },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 
@@ -262,98 +266,105 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
   void _showHistory(int clientId, String name) async {
     final history = await DatabaseHelper().getClientHistory(clientId);
     if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("История: $name", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: SizedBox(
-          width: AppResponsive.dialogWidth(context, desktop: 480),
-          height: AppResponsive.isMobile(context) ? MediaQuery.sizeOf(context).height * 0.55 : 420,
-          child: history.isEmpty
-              ? Center(child: Text("Нет истории", style: GoogleFonts.manrope(color: AppColors.textMuted)))
-              : ListView.separated(
-                  itemCount: history.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final h = history[index];
-                    final id = h['id'] as int;
-                    final notes = (h['notes']?.toString().isNotEmpty == true)
-                        ? h['notes'].toString()
-                        : "Без услуг";
-                    return InkWell(
-                      onTap: () async {
-                        Navigator.pop(context);
-                        await _openHistoryOrder(id);
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    "#$id · ${h['status']}",
-                                    style: GoogleFonts.manrope(
-                                      color: AppColors.text,
-                                      fontWeight: FontWeight.w700,
+    await runWithPulseHighlight(
+      clientId,
+      () => showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text("История: $name", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          content: SizedBox(
+            width: AppResponsive.dialogWidth(context, desktop: 480),
+            height: AppResponsive.isMobile(context) ? MediaQuery.sizeOf(context).height * 0.55 : 420,
+            child: history.isEmpty
+                ? Center(child: Text("Нет истории", style: GoogleFonts.manrope(color: AppColors.textMuted)))
+                : ListView.separated(
+                    itemCount: history.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final h = history[index];
+                      final id = h['id'] as int;
+                      final notes = (h['notes']?.toString().isNotEmpty == true)
+                          ? h['notes'].toString()
+                          : "Без услуг";
+                      return InkWell(
+                        onTap: () async {
+                          Navigator.pop(context);
+                          await _openHistoryOrder(id);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      "#$id · ${h['status']}",
+                                      style: GoogleFonts.manrope(
+                                        color: AppColors.text,
+                                        fontWeight: FontWeight.w700,
+                                      ),
                                     ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    "${h['make_model'] ?? ''} · ${h['plate'] ?? ''}",
-                                    style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    notes,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    "${AppDateTime.format(h['created_at'])} · ${h['price']} ₽",
-                                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                                  ),
-                                ],
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      "${h['make_model'] ?? ''} · ${h['plate'] ?? ''}",
+                                      style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      notes,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      "${AppDateTime.format(h['created_at'])} · ${h['price']} ₽",
+                                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                            const Icon(Icons.chevron_right, color: AppColors.textMuted),
-                          ],
+                              const Icon(Icons.chevron_right, color: AppColors.textMuted),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Закрыть")),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Закрыть")),
-        ],
       ),
     );
   }
 
   Future<void> _confirmDelete(Map<String, dynamic> client) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("Удалить клиента?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: Text(
-          "${client['name']} будет удалён из базы.",
-          style: GoogleFonts.manrope(color: AppColors.textMuted),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text("Удалить"),
+    final clientId = client['id'] as int;
+    final ok = await runWithPulseHighlight(
+      clientId,
+      () => showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text("Удалить клиента?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          content: Text(
+            "${client['name']} будет удалён из базы.",
+            style: GoogleFonts.manrope(color: AppColors.textMuted),
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Удалить"),
+            ),
+          ],
+        ),
       ),
     );
     if (ok == true) {
@@ -657,7 +668,10 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
       ),
     ];
 
-    return Container(
+    return PulseAnchor(
+      active: isPulseActive(id),
+      accent: accent,
+      child: Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: AppColors.surface2.withOpacity(0.92),
@@ -799,6 +813,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin {
             ),
           ),
         ],
+      ),
       ),
     );
   }

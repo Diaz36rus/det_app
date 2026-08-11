@@ -7,6 +7,7 @@ import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'issue_guard.dart';
 import 'order_details_dialog.dart';
+import 'pulse_anchor.dart';
 import 'responsive.dart';
 import 'tour_keys.dart';
 import 'works_progress_bar.dart';
@@ -18,7 +19,7 @@ class KanbanScreen extends StatefulWidget {
   State<KanbanScreen> createState() => _KanbanScreenState();
 }
 
-class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
+class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseHighlightMixin {
   @override
   void onDatabaseChanged() => _loadOrders();
 
@@ -75,7 +76,11 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
 
   Widget _buildOrderCard(Map<String, dynamic> o, String status, {bool isFeedback = false}) {
     final accent = _statusColors[status] ?? AppColors.primary;
-    return Container(
+    final orderId = (o['id'] as num?)?.toInt();
+    return PulseAnchor(
+      active: !isFeedback && orderId != null && isPulseActive(orderId),
+      accent: AppColors.danger,
+      child: Container(
       width: isFeedback ? 240 : double.infinity,
       margin: isFeedback ? EdgeInsets.zero : const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
@@ -157,26 +162,30 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
                         tooltip: "Удалить",
                         icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
                         onPressed: () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: Text("Удалить заказ?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-                              content: Text(
-                                "Все данные заказа будут безвозвратно удалены.",
-                                style: GoogleFonts.manrope(color: AppColors.textMuted),
-                              ),
-                              actions: [
-                                TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-                                ElevatedButton(
-                                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-                                  onPressed: () => Navigator.pop(context, true),
-                                  child: const Text("Удалить"),
+                          final id = (o['id'] as num).toInt();
+                          final confirm = await runWithPulseHighlight(
+                            id,
+                            () => showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: Text("Удалить заказ?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                                content: Text(
+                                  "Все данные заказа будут безвозвратно удалены.",
+                                  style: GoogleFonts.manrope(color: AppColors.textMuted),
                                 ),
-                              ],
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+                                    onPressed: () => Navigator.pop(context, true),
+                                    child: const Text("Удалить"),
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                           if (confirm == true) {
-                            await DatabaseHelper().deleteOrder(o['id']);
+                            await DatabaseHelper().deleteOrder(id);
                             _loadOrders();
                           }
                         },
@@ -188,6 +197,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin {
             ),
           ),
         ],
+      ),
       ),
     );
   }

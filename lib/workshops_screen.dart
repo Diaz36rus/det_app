@@ -8,6 +8,7 @@ import 'issue_guard.dart';
 import 'master_picker.dart';
 import 'order_defects_sheet.dart';
 import 'order_details_dialog.dart';
+import 'pulse_anchor.dart';
 import 'responsive.dart';
 import 'works_progress_bar.dart';
 
@@ -19,7 +20,7 @@ class WorkshopsScreen extends StatefulWidget {
   State<WorkshopsScreen> createState() => _WorkshopsScreenState();
 }
 
-class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin {
+class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, PulseHighlightMixin {
   @override
   void onDatabaseChanged() => _loadOrders(widget.selectedWorkshop);
 
@@ -56,28 +57,32 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin {
   }
 
   Future<void> _openMoveDialog(Map<String, dynamic> order) async {
-    String? newStatus = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("Куда переводим заказ?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: SizedBox(
-          width: AppResponsive.dialogWidth(context, desktop: 300),
-          child: ListView(
-            shrinkWrap: true,
-            children: STATUSES.map((s) {
-              final isCurrent = s == order['status'];
-              return ListTile(
-                title: Text(
-                  s,
-                  style: GoogleFonts.manrope(
-                    color: isCurrent ? AppColors.primary : AppColors.text,
-                    fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
+    final orderId = order['id'] as int;
+    String? newStatus = await runWithPulseHighlight(
+      orderId,
+      () => showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text("Куда переводим заказ?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          content: SizedBox(
+            width: AppResponsive.dialogWidth(context, desktop: 300),
+            child: ListView(
+              shrinkWrap: true,
+              children: STATUSES.map((s) {
+                final isCurrent = s == order['status'];
+                return ListTile(
+                  title: Text(
+                    s,
+                    style: GoogleFonts.manrope(
+                      color: isCurrent ? AppColors.primary : AppColors.text,
+                      fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w500,
+                    ),
                   ),
-                ),
-                onTap: isCurrent ? null : () => Navigator.pop(context, s),
-              );
-            }).toList(),
+                  onTap: isCurrent ? null : () => Navigator.pop(context, s),
+                );
+              }).toList(),
+            ),
           ),
         ),
       ),
@@ -140,11 +145,14 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin {
     }
 
     if (!mounted) return;
-    final picked = await pickWorkshopMasters(
-      context,
-      workshop: workshop,
-      masters: _masters,
-      initialIds: idSet.toList(),
+    final picked = await runWithPulseHighlight(
+      orderId,
+      () => pickWorkshopMasters(
+        context,
+        workshop: workshop,
+        masters: _masters,
+        initialIds: idSet.toList(),
+      ),
     );
     if (picked == null) return;
 
@@ -171,7 +179,10 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin {
     final orderId = (o['id'] as num).toInt();
     final workshopMasters = _workshopMasters[orderId] ?? '';
 
-    return Material(
+    return PulseAnchor(
+      active: isPulseActive(orderId),
+      accent: isDone ? AppColors.success : AppColors.primary,
+      child: Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppTheme.radius),
@@ -339,6 +350,7 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin {
             ],
           ),
         ),
+      ),
       ),
     );
   }

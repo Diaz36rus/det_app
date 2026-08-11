@@ -37,6 +37,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
   static const _pulseOp = 'cash_op';
   static const _pulseTemplates = 'cash_templates';
   static const _pulseJournal = 'cash_journal';
+  static const _pulseDebts = 'cash_debts';
 
   double _cashSum = 0;
   double _cardSum = 0;
@@ -246,14 +247,17 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
       return;
     }
     if (source == 'payment') {
-      final result = await PaymentEditDialog.open(
-        context,
-        paymentId: id,
-        amount: (row['amount'] as num?)?.toDouble() ?? 0,
-        method: row['method']?.toString() ?? '',
-        registerId: (row['register_id'] as num?)?.toInt(),
-        orderId: (row['order_id'] as num?)?.toInt(),
-        title: row['title']?.toString() ?? 'Оплата',
+      final result = await runWithPulseHighlight(
+        _pulseJournal,
+        () => PaymentEditDialog.open(
+          context,
+          paymentId: id,
+          amount: (row['amount'] as num?)?.toDouble() ?? 0,
+          method: row['method']?.toString() ?? '',
+          registerId: (row['register_id'] as num?)?.toInt(),
+          orderId: (row['order_id'] as num?)?.toInt(),
+          title: row['title']?.toString() ?? 'Оплата',
+        ),
       );
       if (result == 'saved' || result == 'voided') {
         _loadData();
@@ -269,28 +273,31 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
     final id = (row['id'] as num?)?.toInt();
     if (id == null) return;
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text(
-          source == 'payment' ? 'Отменить оплату?' : 'Удалить операцию?',
-          style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
-        ),
-        content: Text(
-          source == 'payment'
-              ? 'Платёж будет удалён, сумма в заказе пересчитается.'
-              : 'Операция будет удалена безвозвратно.',
-          style: GoogleFonts.manrope(color: AppColors.textMuted),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Нет')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(source == 'payment' ? 'Отменить' : 'Удалить'),
+    final confirm = await runWithPulseHighlight(
+      _pulseJournal,
+      () => showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text(
+            source == 'payment' ? 'Отменить оплату?' : 'Удалить операцию?',
+            style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
           ),
-        ],
+          content: Text(
+            source == 'payment'
+                ? 'Платёж будет удалён, сумма в заказе пересчитается.'
+                : 'Операция будет удалена безвозвратно.',
+            style: GoogleFonts.manrope(color: AppColors.textMuted),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Нет')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(source == 'payment' ? 'Отменить' : 'Удалить'),
+            ),
+          ],
+        ),
       ),
     );
     if (confirm != true) return;
@@ -305,48 +312,51 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
   Future<void> _showDebts() async {
     final debts = await DatabaseHelper().getOrderDebts();
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text('Долги по заказам', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-        content: SizedBox(
-          width: AppResponsive.dialogWidth(ctx, desktop: 480),
-          height: AppResponsive.isMobile(ctx) ? MediaQuery.sizeOf(ctx).height * 0.55 : 420,
-          child: debts.isEmpty
-              ? Center(child: Text('Долгов нет', style: GoogleFonts.manrope(color: AppColors.textDim)))
-              : ListView.separated(
-                  itemCount: debts.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
-                  itemBuilder: (_, i) {
-                    final d = debts[i];
-                    final id = (d['id'] as num).toInt();
-                    final debt = (d['debt'] as num?)?.toDouble() ?? 0;
-                    return ListTile(
-                      dense: true,
-                      title: Text(
-                        '#$id · ${d['client_name']}',
-                        style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14),
-                      ),
-                      subtitle: Text(
-                        '${d['make_model']} · ${d['plate']}',
-                        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                      ),
-                      trailing: Text(
-                        '${_money.format(debt)} ₽',
-                        style: GoogleFonts.manrope(color: AppColors.danger, fontWeight: FontWeight.w800),
-                      ),
-                      onTap: () async {
-                        Navigator.pop(ctx);
-                        await _openOrder(id);
-                      },
-                    );
-                  },
-                ),
+    await runWithPulseHighlight(
+      _pulseDebts,
+      () => showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Долги по заказам', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          content: SizedBox(
+            width: AppResponsive.dialogWidth(ctx, desktop: 480),
+            height: AppResponsive.isMobile(ctx) ? MediaQuery.sizeOf(ctx).height * 0.55 : 420,
+            child: debts.isEmpty
+                ? Center(child: Text('Долгов нет', style: GoogleFonts.manrope(color: AppColors.textDim)))
+                : ListView.separated(
+                    itemCount: debts.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1, color: AppColors.border),
+                    itemBuilder: (_, i) {
+                      final d = debts[i];
+                      final id = (d['id'] as num).toInt();
+                      final debt = (d['debt'] as num?)?.toDouble() ?? 0;
+                      return ListTile(
+                        dense: true,
+                        title: Text(
+                          '#$id · ${d['client_name']}',
+                          style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14),
+                        ),
+                        subtitle: Text(
+                          '${d['make_model']} · ${d['plate']}',
+                          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                        ),
+                        trailing: Text(
+                          '${_money.format(debt)} ₽',
+                          style: GoogleFonts.manrope(color: AppColors.danger, fontWeight: FontWeight.w800),
+                        ),
+                        onTap: () async {
+                          Navigator.pop(ctx);
+                          await _openOrder(id);
+                        },
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
-        ],
       ),
     );
   }
@@ -383,39 +393,45 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
     /// false — фиксированная ширина (горизонтальный скролл на mobile).
     bool expand = true,
     bool compact = false,
+    bool pulse = false,
   }) {
-    final child = Container(
-      width: expand ? null : 132,
-      height: compact ? 56 : 72,
-      padding: EdgeInsets.fromLTRB(compact ? 12 : 14, compact ? 8 : 10, compact ? 10 : 14, compact ? 8 : 10),
-      decoration: AppTheme.kpiDecoration(accent: color, emphasize: emphasize || onTap != null),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            title,
-            style: GoogleFonts.manrope(
-              color: AppColors.textMuted,
-              fontSize: compact ? 10 : 11,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          SizedBox(height: compact ? 2 : 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              '${_money.format(amount)} ₽',
+    final child = PulseAnchor(
+      active: pulse,
+      accent: color,
+      borderRadius: BorderRadius.circular(AppTheme.radius),
+      child: Container(
+        width: expand ? null : 132,
+        height: compact ? 56 : 72,
+        padding: EdgeInsets.fromLTRB(compact ? 12 : 14, compact ? 8 : 10, compact ? 10 : 14, compact ? 8 : 10),
+        decoration: AppTheme.kpiDecoration(accent: color, emphasize: emphasize || onTap != null),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              title,
               style: GoogleFonts.manrope(
-                color: color,
-                fontSize: compact ? 15 : 18,
-                fontWeight: FontWeight.w800,
-                height: 1.1,
+                color: AppColors.textMuted,
+                fontSize: compact ? 10 : 11,
+                fontWeight: FontWeight.w700,
               ),
             ),
-          ),
-        ],
+            SizedBox(height: compact ? 2 : 4),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '${_money.format(amount)} ₽',
+                style: GoogleFonts.manrope(
+                  color: color,
+                  fontSize: compact ? 15 : 18,
+                  fontWeight: FontWeight.w800,
+                  height: 1.1,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
     final tappable = onTap == null
@@ -642,7 +658,17 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                     const SizedBox(width: 8),
                     SizedBox(width: 110, child: _kpi(title: 'Итого', amount: _net, color: AppColors.text, emphasize: true, expand: false)),
                     const SizedBox(width: 8),
-                    SizedBox(width: 110, child: _kpi(title: 'Долги', amount: _debtTotal, color: AppColors.danger, onTap: _showDebts, expand: false)),
+                    SizedBox(
+                      width: 110,
+                      child: _kpi(
+                        title: 'Долги',
+                        amount: _debtTotal,
+                        color: AppColors.danger,
+                        onTap: _showDebts,
+                        expand: false,
+                        pulse: isPulseActive(_pulseDebts),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -820,7 +846,14 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                   const SizedBox(width: 6),
                   _kpi(title: 'Итого', amount: _net, color: AppColors.text, emphasize: true, compact: true),
                   const SizedBox(width: 6),
-                  _kpi(title: 'Долги', amount: _debtTotal, color: AppColors.danger, onTap: _showDebts, compact: true),
+                  _kpi(
+                    title: 'Долги',
+                    amount: _debtTotal,
+                    color: AppColors.danger,
+                    onTap: _showDebts,
+                    compact: true,
+                    pulse: isPulseActive(_pulseDebts),
+                  ),
                 ],
               ),
             ),

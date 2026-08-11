@@ -13,6 +13,7 @@ import 'issue_guard.dart';
 import 'master_picker.dart';
 import 'order_defects_sheet.dart';
 import 'order_wrap_films_panel.dart';
+import 'pulse_anchor.dart';
 import 'quick_datetime_picker.dart';
 import 'responsive.dart';
 import 'schedule_conflict.dart';
@@ -77,7 +78,8 @@ class OrderDetailsDialog extends StatefulWidget {
   State<OrderDetailsDialog> createState() => _OrderDetailsDialogState();
 }
 
-class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTickerProviderStateMixin {
+class _OrderDetailsDialogState extends State<OrderDetailsDialog>
+    with SingleTickerProviderStateMixin, PulseHighlightMixin {
   late final AnimationController _enterCtrl;
   late final Animation<double> _fadeAnim;
   late final Animation<double> _scaleAnim;
@@ -486,99 +488,102 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     var list = await DatabaseHelper().getPromocodes();
 
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setInner) {
-            return AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: Text("Промокоды", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-              content: SizedBox(
-                width: AppResponsive.dialogWidth(context, desktop: 420),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (list.isEmpty)
-                      Text("Пока нет промокодов", style: GoogleFonts.manrope(color: AppColors.textDim))
-                    else
-                      ...list.map((p) {
-                        final pct = (p['discount_percent'] as num?)?.toDouble() ?? 0;
-                        final fix = (p['discount_fixed'] as num?)?.toDouble() ?? 0;
-                        final parts = <String>[];
-                        if (pct > 0) parts.add("${_formatMoney(pct)}%");
-                        if (fix > 0) parts.add("${_formatMoney(fix)} ₽");
-                        return ListTile(
-                          contentPadding: EdgeInsets.zero,
-                          dense: true,
-                          title: Text(
-                            p['code']?.toString() ?? "",
-                            style: GoogleFonts.manrope(fontWeight: FontWeight.w700, color: AppColors.text),
+    await runWithPulseHighlight(
+      'od_promo',
+      () => showDialog<void>(
+        context: context,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setInner) {
+              return AlertDialog(
+                backgroundColor: AppColors.surface,
+                title: Text("Промокоды", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                content: SizedBox(
+                  width: AppResponsive.dialogWidth(context, desktop: 420),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (list.isEmpty)
+                        Text("Пока нет промокодов", style: GoogleFonts.manrope(color: AppColors.textDim))
+                      else
+                        ...list.map((p) {
+                          final pct = (p['discount_percent'] as num?)?.toDouble() ?? 0;
+                          final fix = (p['discount_fixed'] as num?)?.toDouble() ?? 0;
+                          final parts = <String>[];
+                          if (pct > 0) parts.add("${_formatMoney(pct)}%");
+                          if (fix > 0) parts.add("${_formatMoney(fix)} ₽");
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            dense: true,
+                            title: Text(
+                              p['code']?.toString() ?? "",
+                              style: GoogleFonts.manrope(fontWeight: FontWeight.w700, color: AppColors.text),
+                            ),
+                            subtitle: Text(
+                              parts.isEmpty ? "Без скидки" : parts.join(" + "),
+                              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 20),
+                              onPressed: () async {
+                                await DatabaseHelper().deletePromocode((p['id'] as num).toInt());
+                                list = await DatabaseHelper().getPromocodes();
+                                setInner(() {});
+                              },
+                            ),
+                          );
+                        }),
+                      const Divider(height: 20),
+                      TextField(
+                        controller: codeCtrl,
+                        decoration: const InputDecoration(labelText: "Код", isDense: true),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: pctCtrl,
+                              decoration: const InputDecoration(labelText: "%", isDense: true),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            ),
                           ),
-                          subtitle: Text(
-                            parts.isEmpty ? "Без скидки" : parts.join(" + "),
-                            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: fixedCtrl,
+                              decoration: const InputDecoration(labelText: "Фикс ₽", isDense: true),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            ),
                           ),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 20),
-                            onPressed: () async {
-                              await DatabaseHelper().deletePromocode((p['id'] as num).toInt());
-                              list = await DatabaseHelper().getPromocodes();
-                              setInner(() {});
-                            },
-                          ),
-                        );
-                      }),
-                    const Divider(height: 20),
-                    TextField(
-                      controller: codeCtrl,
-                      decoration: const InputDecoration(labelText: "Код", isDense: true),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: pctCtrl,
-                            decoration: const InputDecoration(labelText: "%", isDense: true),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: TextField(
-                            controller: fixedCtrl,
-                            decoration: const InputDecoration(labelText: "Фикс ₽", isDense: true),
-                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Закрыть")),
-                ElevatedButton(
-                  onPressed: () async {
-                    final code = codeCtrl.text.trim();
-                    if (code.isEmpty) return;
-                    final pct = double.tryParse(pctCtrl.text.replaceAll(',', '.')) ?? 0;
-                    final fix = double.tryParse(fixedCtrl.text.replaceAll(',', '.')) ?? 0;
-                    await DatabaseHelper().upsertPromocode(code, pct, fix);
-                    list = await DatabaseHelper().getPromocodes();
-                    codeCtrl.clear();
-                    pctCtrl.clear();
-                    fixedCtrl.clear();
-                    setInner(() {});
-                  },
-                  child: const Text("Сохранить"),
-                ),
-              ],
-            );
-          },
-        );
-      },
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(context), child: const Text("Закрыть")),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final code = codeCtrl.text.trim();
+                      if (code.isEmpty) return;
+                      final pct = double.tryParse(pctCtrl.text.replaceAll(',', '.')) ?? 0;
+                      final fix = double.tryParse(fixedCtrl.text.replaceAll(',', '.')) ?? 0;
+                      await DatabaseHelper().upsertPromocode(code, pct, fix);
+                      list = await DatabaseHelper().getPromocodes();
+                      codeCtrl.clear();
+                      pctCtrl.clear();
+                      fixedCtrl.clear();
+                      setInner(() {});
+                    },
+                    child: const Text("Сохранить"),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
     );
   }
   Future<String?> _pickDateTime({String? current}) async {
@@ -1103,24 +1108,27 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     }
 
     if (!mounted) return;
-    final confirmPay = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text('Провести оплату?', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-        content: Text(
-          'Сумма: ${_formatMoney(amount)} ₽\nСпособ: $_paymentMethod\n\n'
-          'Если ошиблись — оплату потом можно отменить в списке ниже.',
-          style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Провести'),
+    final confirmPay = await runWithPulseHighlight(
+      'od_pay',
+      () => showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Провести оплату?', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          content: Text(
+            'Сумма: ${_formatMoney(amount)} ₽\nСпособ: $_paymentMethod\n\n'
+            'Если ошиблись — оплату потом можно отменить в списке ниже.',
+            style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
           ),
-        ],
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.success),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Провести'),
+            ),
+          ],
+        ),
       ),
     );
     if (confirmPay != true || !mounted) return;
@@ -1128,19 +1136,22 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     final shift = await DatabaseHelper().getCurrentShift();
     if (shift == null) {
       if (!mounted) return;
-      final go = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          title: Text('Смена не открыта', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-          content: Text(
-            'Оплата не попадёт в текущую смену. Всё равно провести?',
-            style: GoogleFonts.manrope(color: AppColors.textMuted),
+      final go = await runWithPulseHighlight(
+        'od_pay',
+        () => showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: Text('Смена не открыта', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+            content: Text(
+              'Оплата не попадёт в текущую смену. Всё равно провести?',
+              style: GoogleFonts.manrope(color: AppColors.textMuted),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+              ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Провести')),
+            ],
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Провести')),
-          ],
         ),
       );
       if (go != true) return;
@@ -1466,66 +1477,69 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
       return masterRoleFitsWorkshop(m['role']?.toString(), workshop);
     }).toList();
 
-    await showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: Text(
-                "Мастера · $workshop",
-                style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-              ),
-              content: SizedBox(
-                width: 280,
-                child: filtered.isEmpty
-                    ? Text(
-                        "Нет мастеров с ролью для цеха «$workshop».\nДобавь их в разделе Сотрудники.",
-                        style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
-                      )
-                    : ListView(
-                        shrinkWrap: true,
-                        children: filtered.map((m) {
-                          final mId = (m['id'] as num).toInt();
-                          final isSelected = currentIds.contains(mId);
-                          final role = m['role']?.toString() ?? "";
-                          final fits = masterRoleFitsWorkshop(role, workshop);
-                          return CheckboxListTile(
-                            title: Text(m['name'], style: GoogleFonts.manrope(color: AppColors.text)),
-                            subtitle: Text(
-                              fits ? role : "$role (не по цеху)",
-                              style: GoogleFonts.manrope(
-                                color: fits ? AppColors.textDim : AppColors.danger,
-                                fontSize: 12,
+    await runWithPulseHighlight(
+      'od_masters',
+      () => showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                backgroundColor: AppColors.surface,
+                title: Text(
+                  "Мастера · $workshop",
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                ),
+                content: SizedBox(
+                  width: 280,
+                  child: filtered.isEmpty
+                      ? Text(
+                          "Нет мастеров с ролью для цеха «$workshop».\nДобавь их в разделе Сотрудники.",
+                          style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
+                        )
+                      : ListView(
+                          shrinkWrap: true,
+                          children: filtered.map((m) {
+                            final mId = (m['id'] as num).toInt();
+                            final isSelected = currentIds.contains(mId);
+                            final role = m['role']?.toString() ?? "";
+                            final fits = masterRoleFitsWorkshop(role, workshop);
+                            return CheckboxListTile(
+                              title: Text(m['name'], style: GoogleFonts.manrope(color: AppColors.text)),
+                              subtitle: Text(
+                                fits ? role : "$role (не по цеху)",
+                                style: GoogleFonts.manrope(
+                                  color: fits ? AppColors.textDim : AppColors.danger,
+                                  fontSize: 12,
+                                ),
                               ),
-                            ),
-                            value: isSelected,
-                            onChanged: (val) {
-                              setDialogState(() {
-                                if (val == true) {
-                                  currentIds.add(mId);
-                                } else {
-                                  currentIds.remove(mId);
-                                }
-                              });
-                              DatabaseHelper().updateOrderItemMasters(w['id'] as int, currentIds).then((_) {
-                                setState(() {
-                                  final updatedWork = Map<String, dynamic>.from(w);
-                                  updatedWork['master_ids'] = currentIds.join(',');
-                                  _selectedWorks[index] = updatedWork;
+                              value: isSelected,
+                              onChanged: (val) {
+                                setDialogState(() {
+                                  if (val == true) {
+                                    currentIds.add(mId);
+                                  } else {
+                                    currentIds.remove(mId);
+                                  }
                                 });
-                              });
-                            },
-                          );
-                        }).toList(),
-                      ),
-              ),
-            );
-          },
-        );
-      },
+                                DatabaseHelper().updateOrderItemMasters(w['id'] as int, currentIds).then((_) {
+                                  setState(() {
+                                    final updatedWork = Map<String, dynamic>.from(w);
+                                    updatedWork['master_ids'] = currentIds.join(',');
+                                    _selectedWorks[index] = updatedWork;
+                                  });
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
     String getNames(List<int> ids) {
       return ids.map((id) {
@@ -2295,12 +2309,15 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     final selected = children.map((c) => (c['name'] ?? '').toString()).toSet();
     final price = (header?['price'] as num?)?.toDouble() ?? 0;
 
-    final result = await ZonePackageDialog.open(
-      context,
-      kind: kind,
-      catalogZones: catalog,
-      initiallySelected: selected,
-      initialPrice: price,
+    final result = await runWithPulseHighlight(
+      'od_works',
+      () => ZonePackageDialog.open(
+        context,
+        kind: kind,
+        catalogZones: catalog,
+        initiallySelected: selected,
+        initialPrice: price,
+      ),
     );
     if (result == null || !mounted) return;
 
@@ -2382,62 +2399,65 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
 
     final headerId = (header['id'] as num).toInt();
 
-    await showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: Text(
-                "Мастера · $workshop (пакет)",
-                style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-              ),
-              content: SizedBox(
-                width: 280,
-                child: filtered.isEmpty
-                    ? Text(
-                        "Нет мастеров с ролью для цеха «$workshop».\nДобавь их в разделе Сотрудники.",
-                        style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
-                      )
-                    : ListView(
-                        shrinkWrap: true,
-                        children: filtered.map((m) {
-                          final mId = (m['id'] as num).toInt();
-                          final isSelected = currentIds.contains(mId);
-                          final role = m['role']?.toString() ?? "";
-                          final fits = masterRoleFitsWorkshop(role, workshop);
-                          return CheckboxListTile(
-                            title: Text(m['name'], style: GoogleFonts.manrope(color: AppColors.text)),
-                            subtitle: Text(
-                              fits ? role : "$role (не по цеху)",
-                              style: GoogleFonts.manrope(
-                                color: fits ? AppColors.textDim : AppColors.danger,
-                                fontSize: 12,
+    await runWithPulseHighlight(
+      'od_masters',
+      () => showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                backgroundColor: AppColors.surface,
+                title: Text(
+                  "Мастера · $workshop (пакет)",
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                ),
+                content: SizedBox(
+                  width: 280,
+                  child: filtered.isEmpty
+                      ? Text(
+                          "Нет мастеров с ролью для цеха «$workshop».\nДобавь их в разделе Сотрудники.",
+                          style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
+                        )
+                      : ListView(
+                          shrinkWrap: true,
+                          children: filtered.map((m) {
+                            final mId = (m['id'] as num).toInt();
+                            final isSelected = currentIds.contains(mId);
+                            final role = m['role']?.toString() ?? "";
+                            final fits = masterRoleFitsWorkshop(role, workshop);
+                            return CheckboxListTile(
+                              title: Text(m['name'], style: GoogleFonts.manrope(color: AppColors.text)),
+                              subtitle: Text(
+                                fits ? role : "$role (не по цеху)",
+                                style: GoogleFonts.manrope(
+                                  color: fits ? AppColors.textDim : AppColors.danger,
+                                  fontSize: 12,
+                                ),
                               ),
-                            ),
-                            value: isSelected,
-                            onChanged: (val) {
-                              setDialogState(() {
-                                if (val == true) {
-                                  currentIds.add(mId);
-                                } else {
-                                  currentIds.remove(mId);
-                                }
-                              });
-                              DatabaseHelper().updateWrapPackageMasters(headerId, currentIds).then((_) {
-                                _reloadWorksFromDb();
-                              });
-                            },
-                          );
-                        }).toList(),
-                      ),
-              ),
-            );
-          },
-        );
-      },
+                              value: isSelected,
+                              onChanged: (val) {
+                                setDialogState(() {
+                                  if (val == true) {
+                                    currentIds.add(mId);
+                                  } else {
+                                    currentIds.remove(mId);
+                                  }
+                                });
+                                DatabaseHelper().updateWrapPackageMasters(headerId, currentIds).then((_) {
+                                  _reloadWorksFromDb();
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
 
     String getNames(List<int> ids) {
@@ -2777,66 +2797,69 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
     String? start = _techWashStart;
     String? end = _techWashEnd;
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setLocal) {
-            return AlertDialog(
-              backgroundColor: AppColors.surface,
-              title: Text(
-                'Техническая мойка',
-                style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
-              ),
-              content: SizedBox(
-                width: AppResponsive.dialogWidth(ctx, desktop: 360),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(
-                        'В календарь мойки',
-                        style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
-                      ),
-                      value: enabled,
-                      activeColor: AppColors.primary,
-                      onChanged: (v) => setLocal(() => enabled = v),
-                    ),
-                    if (enabled) ...[
-                      const SizedBox(height: 8),
-                      _timeBadge(
-                        value: start,
-                        emptyLabel: 'Время ОТ',
-                        color: AppColors.primary,
-                        onTap: () async {
-                          final dt = await _pickDateTime(current: start);
-                          if (dt != null) setLocal(() => start = dt);
-                        },
-                      ),
-                      const SizedBox(height: 8),
-                      _timeBadge(
-                        value: end,
-                        emptyLabel: 'Время ДО',
-                        color: AppColors.danger,
-                        onTap: () async {
-                          final dt = await _pickDateTime(current: end ?? start);
-                          if (dt != null) setLocal(() => end = dt);
-                        },
-                      ),
-                    ],
-                  ],
+    final ok = await runWithPulseHighlight(
+      'od_schedule',
+      () => showDialog<bool>(
+        context: context,
+        builder: (ctx) {
+          return StatefulBuilder(
+            builder: (ctx, setLocal) {
+              return AlertDialog(
+                backgroundColor: AppColors.surface,
+                title: Text(
+                  'Техническая мойка',
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
                 ),
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-                ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Готово')),
-              ],
-            );
-          },
-        );
-      },
+                content: SizedBox(
+                  width: AppResponsive.dialogWidth(ctx, desktop: 360),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          'В календарь мойки',
+                          style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
+                        ),
+                        value: enabled,
+                        activeColor: AppColors.primary,
+                        onChanged: (v) => setLocal(() => enabled = v),
+                      ),
+                      if (enabled) ...[
+                        const SizedBox(height: 8),
+                        _timeBadge(
+                          value: start,
+                          emptyLabel: 'Время ОТ',
+                          color: AppColors.primary,
+                          onTap: () async {
+                            final dt = await _pickDateTime(current: start);
+                            if (dt != null) setLocal(() => start = dt);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        _timeBadge(
+                          value: end,
+                          emptyLabel: 'Время ДО',
+                          color: AppColors.danger,
+                          onTap: () async {
+                            final dt = await _pickDateTime(current: end ?? start);
+                            if (dt != null) setLocal(() => end = dt);
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+                  ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Готово')),
+                ],
+              );
+            },
+          );
+        },
+      ),
     );
     if (ok != true || !mounted) return;
 
@@ -2926,8 +2949,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   }
 
   Future<void> _setOrderStartTime() async {
-    final dt = await _pickDateTime(current: _orderStartTime);
-    if (dt == null) return;
+    final dt = await runWithPulseHighlight(
+      'od_schedule',
+      () => _pickDateTime(current: _orderStartTime),
+    );
+    if (dt == null || !mounted) return;
     final end = _orderEndTime ?? '';
     if (end.isNotEmpty) {
       final ok = await confirmNoScheduleConflict(
@@ -2953,8 +2979,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
   }
 
   Future<void> _setOrderEndTime() async {
-    final dt = await _pickDateTime(current: _orderEndTime ?? _orderStartTime);
-    if (dt == null) return;
+    final dt = await runWithPulseHighlight(
+      'od_schedule',
+      () => _pickDateTime(current: _orderEndTime ?? _orderStartTime),
+    );
+    if (dt == null || !mounted) return;
     final start = _orderStartTime ?? '';
     if (start.isNotEmpty) {
       final ok = await confirmNoScheduleConflict(
@@ -2984,44 +3013,48 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
 
   /// Подпись «ГРАФИК» между статусом и полями; времена/техмойка — в одну линию.
   Widget _buildScheduleRow() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'ГРАФИК',
-          style: GoogleFonts.manrope(
-            color: AppColors.textMuted,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.6,
+    return PulseAnchor(
+      active: isPulseActive('od_schedule'),
+      borderRadius: BorderRadius.circular(AppTheme.radius),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'ГРАФИК',
+            style: GoogleFonts.manrope(
+              color: AppColors.textMuted,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.6,
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: _timeBadge(
-                value: _orderStartTime,
-                emptyLabel: 'Приём',
-                color: AppColors.success,
-                onTap: _setOrderStartTime,
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: _timeBadge(
+                  value: _orderStartTime,
+                  emptyLabel: 'Приём',
+                  color: AppColors.success,
+                  onTap: _setOrderStartTime,
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _timeBadge(
-                value: _orderEndTime,
-                emptyLabel: 'Выдача',
-                color: AppColors.danger,
-                onTap: _setOrderEndTime,
+              const SizedBox(width: 8),
+              Expanded(
+                child: _timeBadge(
+                  value: _orderEndTime,
+                  emptyLabel: 'Выдача',
+                  color: AppColors.danger,
+                  onTap: _setOrderEndTime,
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(child: _techWashButton(compact: true)),
-          ],
-        ),
-      ],
+              const SizedBox(width: 8),
+              Expanded(child: _techWashButton(compact: true)),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -3591,11 +3624,14 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
       idSet.addAll(parseMasterIds(w['master_ids']));
     }
 
-    final picked = await pickWorkshopMasters(
-      context,
-      workshop: ws,
-      masters: _masters,
-      initialIds: idSet.toList(),
+    final picked = await runWithPulseHighlight(
+      'od_masters',
+      () => pickWorkshopMasters(
+        context,
+        workshop: ws,
+        masters: _masters,
+        initialIds: idSet.toList(),
+      ),
     );
     if (picked == null) return;
 
@@ -3682,7 +3718,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
 
   Widget _buildWorkshopMastersBlock() {
     final names = _workshopMastersLabel();
-    return Container(
+    return PulseAnchor(
+      active: isPulseActive('od_masters'),
+      child: Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       decoration: AppTheme.panelDecoration,
@@ -3727,6 +3765,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -3930,7 +3969,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
         children: [
           Expanded(
             flex: 5,
-            child: KeyedSubtree(key: TourKeys.orderDetailsWorks, child: _buildWorksColumn()),
+            child: PulseAnchor(
+              active: isPulseActive('od_works') || isPulseActive('od_masters'),
+              child: KeyedSubtree(key: TourKeys.orderDetailsWorks, child: _buildWorksColumn()),
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -4105,7 +4147,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog> with SingleTick
         KeyedSubtree(key: TourKeys.orderDetailsHeader, child: _buildHeader()),
         const Divider(height: 1),
         Expanded(child: _adminColumnsBody()),
-        KeyedSubtree(key: TourKeys.orderDetailsPayment, child: _buildFooter()),
+        PulseAnchor(
+          active: isPulseActive('od_pay') || isPulseActive('od_promo'),
+          child: KeyedSubtree(key: TourKeys.orderDetailsPayment, child: _buildFooter()),
+        ),
       ],
     );
   }
