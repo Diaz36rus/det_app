@@ -30,21 +30,11 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
   String _currentDateTime = "";
   Timer? _timer;
   final ScrollController _kanbanController = ScrollController();
-
-  final Map<String, Color> _statusColors = {
-    "Предварительная запись": AppColors.textDim,
-    "Принят в работу": AppColors.primary,
-    "Мойка": const Color(0xFF22D3EE),
-    "Химчистка": const Color(0xFFA78BFA),
-    "Полировка": const Color(0xFFF59E0B),
-    "Оклейка": AppColors.danger,
-    "Интерьер": const Color(0xFF14B8A6),
-    "Оборудование": const Color(0xFFD97706),
-    "Подготовка к выдаче": const Color(0xFF6366F1),
-    "Выдан": AppColors.success,
-  };
+  final TextEditingController _searchCtrl = TextEditingController();
 
   String _selectedStatusFilter = "Все статусы";
+  bool _debtOnly = false;
+  bool _todayOnly = false;
 
   @override
   void initState() {
@@ -65,7 +55,127 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
   void dispose() {
     _timer?.cancel();
     _kanbanController.dispose();
+    _searchCtrl.dispose();
     super.dispose();
+  }
+
+  static String _dayOf(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return '';
+    final s = raw.replaceAll('T', ' ').trim();
+    return s.length >= 10 ? s.substring(0, 10) : '';
+  }
+
+  bool _isTodayOrder(Map<String, dynamic> o) {
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    return _dayOf(o['start_time']?.toString()) == today ||
+        _dayOf(o['end_time']?.toString()) == today ||
+        _dayOf(o['due_date']?.toString()) == today ||
+        _dayOf(o['end_date']?.toString()) == today;
+  }
+
+  bool _matchesBoardFilters(Map<String, dynamic> o) {
+    if (_debtOnly) {
+      final price = (o['price'] as num?)?.toDouble() ?? 0;
+      final paid = (o['paid_amount'] as num?)?.toDouble() ?? 0;
+      if (price - paid <= 0.01) return false;
+    }
+    if (_todayOnly && !_isTodayOrder(o)) return false;
+
+    final q = _searchCtrl.text.trim().toLowerCase();
+    if (q.isEmpty) return true;
+    final id = o['id']?.toString() ?? '';
+    final hay = [
+      id,
+      '#$id',
+      o['client_name']?.toString() ?? '',
+      o['client_phone']?.toString() ?? '',
+      o['make_model']?.toString() ?? '',
+      o['plate']?.toString() ?? '',
+      o['master_name']?.toString() ?? '',
+      o['notes']?.toString() ?? '',
+    ].join(' ').toLowerCase();
+    return hay.contains(q);
+  }
+
+  bool get _hasExtraFilters =>
+      _debtOnly || _todayOnly || _searchCtrl.text.trim().isNotEmpty;
+
+  Widget _filterChip(String label, bool selected, ValueChanged<bool> onSelected, {Color? accent}) {
+    final activeColor = accent ?? AppColors.primary;
+    return FilterChip(
+      label: Text(
+        label,
+        style: GoogleFonts.manrope(
+          fontWeight: FontWeight.w600,
+          fontSize: 12.5,
+          color: selected ? AppColors.text : AppColors.textMuted,
+        ),
+      ),
+      selected: selected,
+      onSelected: onSelected,
+      selectedColor: activeColor,
+      backgroundColor: AppColors.surface2,
+      side: BorderSide(color: selected ? activeColor : AppColors.border),
+      showCheckmark: false,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    );
+  }
+
+  Widget _statusDropdown({required bool expanded}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: AppTheme.panelDecoration,
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          isExpanded: expanded,
+          value: _selectedStatusFilter,
+          dropdownColor: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppTheme.radius),
+          style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
+          icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted),
+          items: ["Все статусы", ...STATUSES.where((s) => s != "Выдан")].map((status) {
+            return DropdownMenuItem<String>(
+              value: status,
+              child: Text(status, overflow: TextOverflow.ellipsis),
+            );
+          }).toList(),
+          onChanged: (val) {
+            if (val == null) return;
+            setState(() => _selectedStatusFilter = val);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _searchField() {
+    return TextField(
+      controller: _searchCtrl,
+      decoration: InputDecoration(
+        hintText: 'Клиент, номер, #заказа…',
+        prefixIcon: const Icon(Icons.search, color: AppColors.primary, size: 20),
+        suffixIcon: _searchCtrl.text.isNotEmpty
+            ? IconButton(
+                tooltip: 'Очистить',
+                icon: const Icon(Icons.clear, color: AppColors.textDim, size: 18),
+                onPressed: () {
+                  _searchCtrl.clear();
+                  setState(() {});
+                },
+              )
+            : null,
+        isDense: true,
+        filled: true,
+        fillColor: AppColors.surface2.withOpacity(0.92),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radius),
+          borderSide: BorderSide.none,
+        ),
+      ),
+      style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
+      onChanged: (_) => setState(() {}),
+    );
   }
 
   Future<void> _loadOrders() async {
@@ -77,7 +187,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
   }
 
   Widget _buildOrderCard(Map<String, dynamic> o, String status, {bool isFeedback = false}) {
-    final accent = _statusColors[status] ?? AppColors.primary;
+    final accent = kOrderStatusColors[status] ?? AppColors.primary;
     final orderId = (o['id'] as num?)?.toInt();
     return PulseAnchor(
       active: !isFeedback && orderId != null && isPulseActive(orderId),
@@ -263,6 +373,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
 
     final mobile = AppResponsive.isMobile(context);
     final colWidth = mobile ? (MediaQuery.sizeOf(context).width * 0.78).clamp(240.0, 300.0) : 280.0;
+    final filteredOrders = _orders.where(_matchesBoardFilters).toList();
 
     return Scaffold(
       backgroundColor: Colors.transparent,
@@ -273,64 +384,36 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, mobile ? 12 : 20, mobile ? 12 : 24, 12),
-              child: mobile
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (mobile) ...[
+                    _searchField(),
+                    const SizedBox(height: 8),
+                    _statusDropdown(expanded: true),
+                    const SizedBox(height: 8),
+                    Row(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: AppTheme.panelDecoration,
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              isExpanded: true,
-                              value: _selectedStatusFilter,
-                              dropdownColor: AppColors.surface,
-                              borderRadius: BorderRadius.circular(AppTheme.radius),
-                              style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
-                              icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted),
-                              items: ["Все статусы", ...STATUSES.where((s) => s != "Выдан")].map((status) {
-                                return DropdownMenuItem<String>(
-                                  value: status,
-                                  child: Text(status, overflow: TextOverflow.ellipsis),
-                                );
-                              }).toList(),
-                              onChanged: (val) {
-                                setState(() => _selectedStatusFilter = val!);
-                              },
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 6),
+                        _filterChip('С долгом', _debtOnly, (v) => setState(() => _debtOnly = v), accent: AppColors.danger),
+                        const SizedBox(width: 8),
+                        _filterChip('Сегодня', _todayOnly, (v) => setState(() => _todayOnly = v)),
+                        const Spacer(),
                         Text(
                           _currentDateTime,
-                          textAlign: TextAlign.right,
                           style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, fontWeight: FontWeight.w500),
                         ),
                       ],
-                    )
-                  : Row(
+                    ),
+                  ] else
+                    Row(
                       children: [
-                        Flexible(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            decoration: AppTheme.panelDecoration,
-                            child: DropdownButtonHideUnderline(
-                              child: DropdownButton<String>(
-                                value: _selectedStatusFilter,
-                                dropdownColor: AppColors.surface,
-                                borderRadius: BorderRadius.circular(AppTheme.radius),
-                                style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
-                                icon: const Icon(Icons.keyboard_arrow_down, color: AppColors.textMuted),
-                                items: ["Все статусы", ...STATUSES.where((s) => s != "Выдан")].map((status) {
-                                  return DropdownMenuItem<String>(value: status, child: Text(status));
-                                }).toList(),
-                                onChanged: (val) {
-                                  setState(() => _selectedStatusFilter = val!);
-                                },
-                              ),
-                            ),
-                          ),
-                        ),
+                        SizedBox(width: 280, child: _searchField()),
+                        const SizedBox(width: 10),
+                        Flexible(child: _statusDropdown(expanded: true)),
+                        const SizedBox(width: 10),
+                        _filterChip('С долгом', _debtOnly, (v) => setState(() => _debtOnly = v), accent: AppColors.danger),
+                        const SizedBox(width: 8),
+                        _filterChip('Сегодня', _todayOnly, (v) => setState(() => _todayOnly = v)),
                         const SizedBox(width: 12),
                         Text(
                           _currentDateTime,
@@ -338,6 +421,15 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                         ),
                       ],
                     ),
+                  if (_hasExtraFilters) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Показано ${filteredOrders.length} из ${_orders.length}',
+                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ],
+              ),
             ),
             Expanded(
               child: RefreshIndicator(
@@ -365,8 +457,13 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                       return const SizedBox.shrink();
                     }
 
-                    final colOrders = _orders.where((o) => o['status'] == status).toList();
-                    final accent = _statusColors[status] ?? AppColors.primary;
+                    final colOrders = filteredOrders.where((o) => o['status'] == status).toList();
+                    if (_hasExtraFilters &&
+                        _selectedStatusFilter == "Все статусы" &&
+                        colOrders.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    final accent = kOrderStatusColors[status] ?? AppColors.primary;
 
                     return DragTarget<Map<String, dynamic>>(
                       onAcceptWithDetails: (details) async {

@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 40,
+    version: '1.0.1',
+    items: [
+      'Доска: поиск + фильтры «С долгом» и «Сегодня»',
+    ],
+  ),
+  PatchRelease(
     build: 39,
     version: '1.0.1',
     items: [
