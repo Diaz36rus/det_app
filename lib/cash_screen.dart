@@ -5,6 +5,7 @@ import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'cash_catalog.dart';
+import 'cash_csv_export.dart';
 import 'cash_operation_dialog.dart';
 import 'cash_register_tx_dialog.dart';
 import 'cash_shift_panel.dart';
@@ -310,6 +311,29 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
       await DatabaseHelper().voidPayment(id);
     }
     _loadData();
+  }
+
+  Future<void> _exportCsv() async {
+    if (_journal.isEmpty) {
+      if (!mounted) return;
+      showAppToast(context, 'Нет операций за период');
+      return;
+    }
+    try {
+      final path = await CashCsvExport.writeAndOpen(
+        journal: _filteredJournal,
+        startDate: _startDate,
+        endDate: _endDate,
+      );
+      if (!mounted) return;
+      if (path == null) {
+        showAppToast(context, 'Не удалось сохранить CSV');
+      } else {
+        showAppToast(context, 'CSV сохранён и открыт');
+      }
+    } catch (e) {
+      if (mounted) showAppToast(context, 'Ошибка CSV: $e');
+    }
   }
 
   Future<void> _showDebts() async {
@@ -710,6 +734,12 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                     'custom',
                     _period == 'custom' ? '$_startDate — $_endDate' : 'Период',
                   ),
+                  const SizedBox(width: 4),
+                  TextButton.icon(
+                    onPressed: _exportCsv,
+                    icon: const Icon(Icons.table_view_outlined, size: 18),
+                    label: Text('CSV', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                  ),
                 ],
               ),
             ),
@@ -876,6 +906,12 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                 _periodChip('week', 'Неделя'),
                 _periodChip('month', 'Месяц'),
                 _periodChip('custom', _period == 'custom' ? '$_startDate — $_endDate' : 'Период'),
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: _exportCsv,
+                  icon: const Icon(Icons.table_view_outlined, size: 18),
+                  label: Text('CSV', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                ),
                 const SizedBox(width: 8),
                 PulseAnchor(
                   active: isPulseActive(_pulseOp),

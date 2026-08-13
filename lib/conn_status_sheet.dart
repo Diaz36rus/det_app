@@ -152,6 +152,31 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
     }
   }
 
+  Widget _roleChip({
+    required String label,
+    required bool selected,
+    required ValueChanged<bool>? onSelected,
+    Color? accent,
+  }) {
+    final color = accent ?? AppColors.textMuted;
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: GoogleFonts.manrope(
+          fontWeight: FontWeight.w700,
+          fontSize: 13,
+          color: selected ? AppColors.text : AppColors.textMuted,
+        ),
+      ),
+      selected: selected,
+      onSelected: onSelected,
+      selectedColor: color.withOpacity(0.55),
+      backgroundColor: AppColors.surface2,
+      side: BorderSide(color: selected ? color : AppColors.border),
+      showCheckmark: false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final diag = AppDiagnostics.instance;
@@ -187,25 +212,15 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                   const SizedBox(height: 14),
                   Row(
                     children: [
-                      Container(
-                        width: 12,
-                        height: 12,
-                        decoration: BoxDecoration(
-                          color: ok ? AppColors.success : AppColors.danger,
-                          shape: BoxShape.circle,
+                      Text(
+                        'Связь и синхронизация',
+                        style: GoogleFonts.manrope(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 17,
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          ok ? 'Связь в порядке' : 'Проблема / ошибки',
-                          style: GoogleFonts.manrope(
-                            color: AppColors.text,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 17,
-                          ),
-                        ),
-                      ),
+                      const Spacer(),
                       IconButton(
                         tooltip: 'Обновить',
                         onPressed: _busy
@@ -215,13 +230,18 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                       ),
                     ],
                   ),
-                  Text(
-                    diag.statusDetail,
-                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+                  const SizedBox(height: 8),
+                  _SyncStatusBanner(
+                    role: role,
+                    ok: ok,
+                    detail: diag.statusDetail,
+                    hostUrl: hostUrl,
+                    clientUrl: role == SyncRole.client ? sync.config.normalizedBaseUrl : null,
+                    isHosting: sync.isHosting,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
                   Text(
-                    'Режим: ПК-хост + телефон/второй ПК',
+                    'Режим работы',
                     style: GoogleFonts.manrope(
                       color: AppColors.textMuted,
                       fontSize: 12,
@@ -233,27 +253,26 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      ChoiceChip(
-                        label: const Text('Один ПК'),
+                      _roleChip(
+                        label: 'Один ПК',
                         selected: role == SyncRole.local,
                         onSelected: _busy ? null : (_) => _apply(SyncRole.local),
                       ),
-                      ChoiceChip(
-                        label: Text(sync.isHosting ? 'Хост ●' : 'Хост'),
+                      _roleChip(
+                        label: sync.isHosting ? 'Хост ●' : 'Хост',
                         selected: role == SyncRole.host,
                         onSelected: _busy ? null : (_) => _apply(SyncRole.host),
+                        accent: AppColors.primary,
                       ),
-                      ChoiceChip(
-                        label: const Text('Клиент'),
+                      _roleChip(
+                        label: 'Клиент',
                         selected: role == SyncRole.client,
                         onSelected: _busy
                             ? null
                             : (_) {
-                                if (_urlCtrl.text.trim().isEmpty && hostUrl != null) {
-                                  // не подставляем свой URL — пользователь вставит с хоста
-                                }
                                 _apply(SyncRole.client);
                               },
+                        accent: const Color(0xFF22D3EE),
                       ),
                     ],
                   ),
@@ -326,8 +345,8 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                       ),
                       const SizedBox(height: 6),
                       Text(
-                        'Сканируйте камерой телефона: откроется страница → «Открыть Det App». '
-                        'Нужна сборка +22 на телефоне. Либо: связь → «Сканировать QR хоста».',
+                        'Телефон: камера → QR → «Открыть Det App». '
+                        'Или на телефоне: связь → «Сканировать QR хоста» / «Найти хост».',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
                       ),
@@ -557,6 +576,109 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
           ),
         );
       },
+    );
+  }
+}
+
+class _SyncStatusBanner extends StatelessWidget {
+  final SyncRole role;
+  final bool ok;
+  final String detail;
+  final String? hostUrl;
+  final String? clientUrl;
+  final bool isHosting;
+
+  const _SyncStatusBanner({
+    required this.role,
+    required this.ok,
+    required this.detail,
+    required this.hostUrl,
+    required this.clientUrl,
+    required this.isHosting,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    late final Color accent;
+    late final IconData icon;
+    late final String title;
+    late final String subtitle;
+
+    switch (role) {
+      case SyncRole.host:
+        accent = isHosting && ok ? AppColors.success : AppColors.primary;
+        icon = Icons.dns_outlined;
+        title = isHosting ? 'Хост активен — база на этом ПК' : 'Хост (запуск…)';
+        subtitle = hostUrl?.isNotEmpty == true
+            ? 'Клиенты подключаются к $hostUrl'
+            : detail;
+      case SyncRole.client:
+        accent = ok ? AppColors.success : AppColors.danger;
+        icon = ok ? Icons.cloud_done_outlined : Icons.cloud_off_outlined;
+        title = ok ? 'Клиент подключён — заказы общие' : 'Клиент: хост недоступен';
+        subtitle = (clientUrl != null && clientUrl!.isNotEmpty) ? clientUrl! : detail;
+      case SyncRole.local:
+        accent = AppColors.textMuted;
+        icon = Icons.computer_outlined;
+        title = 'Один ПК — данные только здесь';
+        subtitle = detail.isNotEmpty ? detail : 'Телефон/второй ПК не синхронизируются';
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border(
+          left: BorderSide(color: accent.withOpacity(0.9), width: 3.5),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: accent, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.manrope(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            width: 10,
+            height: 10,
+            margin: const EdgeInsets.only(top: 4),
+            decoration: BoxDecoration(
+              color: ok ? AppColors.success : AppColors.danger,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: (ok ? AppColors.success : AppColors.danger).withOpacity(0.45),
+                  blurRadius: 6,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

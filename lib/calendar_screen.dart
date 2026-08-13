@@ -1024,25 +1024,28 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       final titleText = "$timeStr  ${e['title']}";
       final subtitleText = "${e['subtitle']}";
 
-      final subtitleTint = isDone
-          ? AppColors.textDim
-          : (isTech
-              ? const Color(0xFF5EEAD4)
-              : Color.lerp(statusColor, Colors.white, 0.35) ?? const Color(0xFF93C5FD));
-
+      // Белый текст + тень: поверх цветного стекла имя/авто всегда читаются.
+      const textShadow = [
+        Shadow(color: Color(0xE6000000), blurRadius: 8, offset: Offset(0, 1)),
+        Shadow(color: Color(0x99000000), blurRadius: 2, offset: Offset(0, 0)),
+      ];
       final titleStyle = GoogleFonts.manrope(
-        color: isDone ? AppColors.textDim : AppColors.text,
+        color: isDone ? const Color(0xFFCBD5E1) : Colors.white,
         fontSize: groupLanes >= 3 ? 10.5 : 12,
         fontWeight: FontWeight.w800,
         height: 1.15,
         decoration: isDone ? TextDecoration.lineThrough : null,
-        decorationColor: AppColors.textDim,
+        decorationColor: const Color(0xFF94A3B8),
+        shadows: isDone ? null : textShadow,
       );
       final subtitleStyle = GoogleFonts.manrope(
-        color: subtitleTint,
+        color: isDone
+            ? const Color(0xFF94A3B8)
+            : (isTech ? const Color(0xFF99F6E4) : const Color(0xFFE2E8F0)),
         fontSize: groupLanes >= 3 ? 9.5 : 11,
         fontWeight: FontWeight.w600,
         height: 1.15,
+        shadows: isDone ? null : textShadow,
       );
 
       final titleW = _measureTextWidth(titleText, titleStyle);
@@ -1151,23 +1154,20 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
 
       final hasDebt = e['hasDebt'] == true;
       final statusColor = (e['statusColor'] as Color?) ?? AppColors.primary;
-      // Полоска слева = статус; долг — иконка + тонкая красная линия сверху.
       final accent = isDone
           ? AppColors.success
-          : (isTech ? const Color(0xFF14B8A6) : statusColor);
-      final fillBase = isDone
-          ? AppColors.surface2
-          : (isTech
-              ? const Color(0xFF0F2E2A)
-              : (Color.lerp(AppColors.surface2, statusColor, 0.22) ?? const Color(0xFF152A4A)));
-      final fill = isDone ? fillBase.withOpacity(0.9) : fillBase;
+          : (isTech ? const Color(0xFF14B8A6) : (dragging ? AppColors.primary : statusColor));
+      final gradTop = Color.lerp(const Color(0xFF0F172A), accent, isDone ? 0.22 : 0.55)!
+          .withOpacity(isDone ? 0.55 : 0.78);
+      final gradBottom = Color.lerp(const Color(0xFF020617), accent, isDone ? 0.12 : 0.28)!
+          .withOpacity(isDone ? 0.4 : 0.52);
 
       final cardBody = Opacity(
-        opacity: isDone ? 0.6 : (dragging ? 0.92 : 1),
+        opacity: isDone ? 0.72 : (dragging ? 0.94 : 1),
         child: Material(
           color: Colors.transparent,
-          elevation: dragging ? 8 : 0,
-          borderRadius: BorderRadius.circular(10),
+          elevation: dragging ? 10 : 0,
+          borderRadius: BorderRadius.circular(12),
           child: GestureDetector(
             onTap: dragging ? null : () => _openOrder(orderId),
             onLongPressStart: !canDrag
@@ -1208,62 +1208,107 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                   },
             child: Container(
               width: cardW,
-              padding: const EdgeInsets.fromLTRB(8, 6, 7, 6),
               decoration: BoxDecoration(
-                color: fill,
-                borderRadius: BorderRadius.circular(10),
-                border: Border(
-                  left: BorderSide(
-                    color: (dragging ? AppColors.primary : accent).withOpacity(0.9),
-                    width: 3,
-                  ),
-                  top: hasDebt && !isDone && !isTech
-                      ? BorderSide(color: AppColors.danger.withOpacity(0.75), width: 1.5)
-                      : BorderSide.none,
+                borderRadius: BorderRadius.circular(12),
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [gradTop, gradBottom],
                 ),
-                boxShadow: isDone && !dragging
-                    ? null
-                    : [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(dragging ? 0.45 : 0.28),
-                          blurRadius: dragging ? 14 : 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      if (isDone) ...[
-                        const Icon(Icons.check_circle, size: 12, color: AppColors.success),
-                        const SizedBox(width: 3),
-                      ] else if (hasDebt) ...[
-                        const Icon(Icons.payments_outlined, size: 12, color: AppColors.danger),
-                        const SizedBox(width: 3),
-                      ],
-                      Expanded(
-                        child: Text(
-                          titleText,
-                          maxLines: 1,
-                          softWrap: false,
-                          overflow: TextOverflow.ellipsis,
-                          style: titleStyle,
-                        ),
-                      ),
-                    ],
+                border: Border.all(
+                  color: accent.withOpacity(dragging ? 0.95 : 0.55),
+                  width: dragging ? 1.5 : 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: accent.withOpacity(dragging ? 0.35 : 0.18),
+                    blurRadius: dragging ? 16 : 10,
+                    offset: const Offset(0, 3),
                   ),
-                  if (height >= 40 && subtitleText.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        subtitleText,
-                        maxLines: height >= 56 ? 2 : 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: subtitleStyle,
+                  BoxShadow(
+                    color: Colors.black.withOpacity(dragging ? 0.4 : 0.22),
+                    blurRadius: dragging ? 12 : 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Stack(
+                children: [
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 3.5,
+                    child: ColoredBox(color: accent.withOpacity(0.95)),
+                  ),
+                  if (hasDebt && !isDone && !isTech)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      height: 2,
+                      child: ColoredBox(color: AppColors.danger.withOpacity(0.85)),
+                    ),
+                  // Затемнение сверху — читаемый заголовок на длинных слотах.
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    height: height.clamp(36.0, 72.0),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withOpacity(0.55),
+                            Colors.black.withOpacity(0.18),
+                            Colors.transparent,
+                          ],
+                          stops: const [0, 0.55, 1],
+                        ),
                       ),
                     ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 6, 7, 6),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            if (isDone) ...[
+                              const Icon(Icons.check_circle, size: 12, color: AppColors.success),
+                              const SizedBox(width: 3),
+                            ] else if (hasDebt) ...[
+                              const Icon(Icons.payments_outlined, size: 12, color: AppColors.danger),
+                              const SizedBox(width: 3),
+                            ],
+                            Expanded(
+                              child: Text(
+                                titleText,
+                                maxLines: 1,
+                                softWrap: false,
+                                overflow: TextOverflow.ellipsis,
+                                style: titleStyle,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (height >= 40 && subtitleText.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              subtitleText,
+                              maxLines: height >= 56 ? 2 : 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: subtitleStyle,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),

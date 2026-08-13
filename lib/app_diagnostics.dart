@@ -327,34 +327,54 @@ class ConnStatusDot extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: AppDiagnostics.instance,
+      listenable: Listenable.merge([AppDiagnostics.instance, SyncController.instance]),
       builder: (context, _) {
         final ok = AppDiagnostics.instance.isOk;
+        final role = SyncController.instance.config.role;
         final color = ok ? AppColors.success : AppColors.danger;
+        final roleLabel = switch (role) {
+          SyncRole.host => 'Хост',
+          SyncRole.client => 'Клиент',
+          SyncRole.local => 'Локально',
+        };
         final tip = ok
-            ? 'Связь OK · ${AppDiagnostics.instance.statusDetail}'
-            : 'Нет связи / ошибки · ${AppDiagnostics.instance.statusDetail}';
+            ? '$roleLabel · OK · ${AppDiagnostics.instance.statusDetail}'
+            : '$roleLabel · нет связи · ${AppDiagnostics.instance.statusDetail}';
         return Tooltip(
           message: tip,
           child: InkWell(
             onTap: onTap,
-            customBorder: const CircleBorder(),
+            borderRadius: BorderRadius.circular(20),
             child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Container(
-                width: size,
-                height: size,
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: color.withOpacity(0.45),
-                      blurRadius: 6,
-                      spreadRadius: 0.5,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: size,
+                    height: size,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: color.withOpacity(0.45),
+                          blurRadius: 6,
+                          spreadRadius: 0.5,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    roleLabel,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

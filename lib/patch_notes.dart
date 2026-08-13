@@ -29,6 +29,15 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 42,
+    version: '1.0.1',
+    items: [
+      'Календарь: читаемый текст + стеклянный градиент карточек',
+      'Касса: экспорт журнала в CSV (Excel)',
+      'Связь: понятный статус Хост/Клиент + подпись у индикатора',
+    ],
+  ),
+  PatchRelease(
     build: 41,
     version: '1.0.1',
     items: [
