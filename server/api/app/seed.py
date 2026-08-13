@@ -1,0 +1,104 @@
+from sqlalchemy import delete, select
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.models import Branch, Company, Permission, Role, RolePermission, User, UserBranch, UserRole
+from app.permissions_catalog import COMPANY_ROLE_PRESETS, PERMISSIONS
+from app.security import hash_password
+
+
+def _ensure_permissions(db: Session) -> dict[str, Permission]:
+    by_code: dict[str, Permission] = {
+        p.code: p for p in db.scalars(select(Permission)).all()
+    }
+    for code, title, group in PERMISSIONS:
+        if code in by_code:
+            continue
+        row = Permission(code=code, title=title, group_name=group)
+        db.add(row)
+        by_code[code] = row
+    db.flush()
+    return by_code
+
+
+def _set_role_permissions(
+    db: Session,
+    role: Role,
+    codes: list[str],
+    by_code: dict[str, Permission],
+) -> None:
+    db.execute(delete(RolePermission).where(RolePermission.role_id == role.id))
+    for code in codes:
+        perm = by_code.get(code)
+        if perm is None:
+            continue
+        db.add(RolePermission(role_id=role.id, permission_id=perm.id))
+
+
+def seed_database(db: Session) -> None:
+    by_code = _ensure_permissions(db)
+
+    admin = db.scalar(select(User).where(User.email == settings.platform_admin_email.lower()))
+    if admin is None:
+        db.add(
+            User(
+                email=settings.platform_admin_email.lower().strip(),
+                password_hash=hash_password(settings.platform_admin_password),
+                full_name=settings.platform_admin_name,
+                is_platform_admin=True,
+                is_active=True,
+            )
+        )
+    else:
+        admin.is_platform_admin = True
+        admin.is_active = True
+
+    company = db.scalar(select(Company).where(Company.slug == "demo"))
+    admin_role: Role | None = None
+    main_branch: Branch | None = None
+    if company is None:
+        company = Company(name="Demo Detailing", slug="demo", is_active=True)
+        db.add(company)
+        db.flush()
+        main_branch = Branch(company_id=company.id, name="Основной филиал", is_active=True)
+        db.add(main_branch)
+        db.flush()
+
+        for role_name, codes in COMPANY_ROLE_PRESETS.items():
+            role = Role(company_id=company.id, name=role_name, is_system=True)
+            db.add(role)
+            db.flush()
+            _set_role_permissions(db, role, codes, by_code)
+            if role_name == "Администратор компании":
+                admin_role = role
+    else:
+        main_branch = db.scalar(
+            select(Branch).where(Branch.company_id == company.id).order_by(Branch.id)
+        )
+        admin_role = db.scalar(
+            select(Role).where(
+                Role.company_id == company.id,
+                Role.name == "Администратор компании",
+            )
+        )
+
+    # Владелец демо-компании (для проверки ролей /users)
+    owner_email = "owner@demo.det-app.ru"
+    owner = db.scalar(select(User).where(User.email == owner_email))
+    if owner is None and company is not None:
+        owner = User(
+            email=owner_email,
+            password_hash=hash_password(settings.platform_admin_password),
+            full_name="Demo Owner",
+            company_id=company.id,
+            is_active=True,
+            is_platform_admin=False,
+        )
+        db.add(owner)
+        db.flush()
+        if admin_role is not None:
+            db.add(UserRole(user_id=owner.id, role_id=admin_role.id))
+        if main_branch is not None:
+            db.add(UserBranch(user_id=owner.id, branch_id=main_branch.id))
+
+    db.commit()

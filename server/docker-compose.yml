@@ -20,6 +20,10 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://detapp:${POSTGRES_PASSWORD}@db:5432/detapp
       APP_ENV: production
+      JWT_SECRET: ${JWT_SECRET}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@det-app.ru}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD}
+      PLATFORM_ADMIN_NAME: ${PLATFORM_ADMIN_NAME:-Platform Admin}
     depends_on:
       db:
         condition: service_healthy
