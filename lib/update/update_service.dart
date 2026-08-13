@@ -67,16 +67,10 @@ class UpdateService {
     await AppVersion.ensureLoaded();
     final channel = await UpdateChannel.load();
     if (channel == null) {
-      return UpdateCheckResult(
+      return const UpdateCheckResult(
         status: UpdateCheckStatus.noChannel,
-        message: Platform.isAndroid
-            ? 'Не задан канал обновлений.\n'
-                'Укажите URL вида http://192.168.x.x:8080/latest.json\n'
-                '(не :7878 — это синхронизация).\n'
-                'ПК в той же Wi‑Fi раздаёт папку обновлений.'
-            : 'Не задан канал обновлений.\n'
-                'Создайте update_channel.json рядом с папкой app '
-                '(см. update_channel.example.json).',
+        message: 'Не задан канал обновлений.\n'
+            'По умолчанию: http://api.det-app.ru/updates/latest.json',
       );
     }
 

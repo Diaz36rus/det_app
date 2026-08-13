@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     platform_admin_email: str = "admin@det-app.ru"
     platform_admin_password: str = "ChangeMeNow123!"
     platform_admin_name: str = "Platform Admin"
+    releases_dir: str = "/data/releases"
+    public_base_url: str = "http://api.det-app.ru"
+    release_upload_token: str = ""
 
 
 settings = Settings()

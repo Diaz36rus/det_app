@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.db import Base, SessionLocal, engine
-from app.routers import auth, company, platform
+from app.routers import auth, company, platform, updates
 from app.seed import seed_database
 
 
@@ -18,15 +18,16 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Det App API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Det App API", version="0.3.0", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(platform.router)
 app.include_router(company.router)
+app.include_router(updates.router)
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "det-app-api", "version": "0.2.0"}
+    return {"ok": True, "service": "det-app-api", "version": "0.3.0"}
 
 
 @app.get("/")
@@ -36,4 +37,5 @@ def root():
         "docs": "/docs",
         "health": "/health",
         "auth": "/auth/login",
+        "updates": "/updates/latest.json",
     }

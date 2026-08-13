@@ -87,12 +87,12 @@ class _UpdateDialogState extends State<UpdateDialog> {
   Future<void> _bootstrap() async {
     await AppVersion.ensureLoaded();
     final ch = await UpdateChannel.load();
-    var url = ch?.manifestUrl ?? '';
+    var url = ch?.manifestUrl ?? UpdateChannel.cloudManifestUrl;
     if (url.isEmpty) {
       final sync = SyncController.instance;
       url = UpdateChannel.suggestFromSyncBaseUrl(sync.config.normalizedBaseUrl) ??
           UpdateChannel.suggestFromSyncBaseUrl(sync.suggestedClientUrl) ??
-          '';
+          UpdateChannel.cloudManifestUrl;
     }
     _urlCtrl.text = url;
     await _check();

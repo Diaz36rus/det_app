@@ -24,6 +24,13 @@ DNS A (@ и api) → 135.106.186.90
     password из .env PLATFORM_ADMIN_PASSWORD
   Demo company owner: owner@demo.det-app.ru (тот же пароль, что PLATFORM_ADMIN_PASSWORD)
 
+Канал обновлений:
+  Манифест: http://api.det-app.ru/updates/latest.json
+  Выгрузка с ПК:
+    powershell -ExecutionPolicy Bypass -File tools\publish_cloud.ps1 -Token "ТОКЕН" -Build
+  В .env на сервере: RELEASE_UPLOAD_TOKEN=...
+  В приложении канал по умолчанию — облако (можно сменить в диалоге обновления).
+
 
 
 ШАГ 1. РЕГИСТРАЦИЯ И СЕРВЕР

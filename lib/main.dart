@@ -17,15 +17,16 @@ import 'bug_report_dialog.dart';
 import 'conn_status_sheet.dart';
 import 'tour_keys.dart';
 import 'update/update_dialog.dart';
+import 'update/update_service.dart';
 import 'calendar_screen.dart';
-import 'preview/preview_screen.dart';
 import 'cash_screen.dart';
 import 'clients_screen.dart';
 import 'completed_orders_screen.dart';
 import 'database.dart';
 import 'dev_guard.dart';
-import 'inventory_screen.dart';
 import 'kanban_screen.dart';
+import 'services_screen.dart';
+import 'warehouse_screen.dart';
 import 'masters_screen.dart';
 import 'menu_backgrounds.dart';
 import 'orders_screen.dart';
@@ -171,8 +172,15 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     {"id": AppMenuIds.cash, "icon": Icons.account_balance_wallet_outlined, "label": "Касса"},
     {"id": AppMenuIds.stats, "icon": Icons.insights_outlined, "label": "Статистика"},
     {"id": AppMenuIds.staff, "icon": Icons.engineering_outlined, "label": "Сотрудники"},
-    {"id": AppMenuIds.inventory, "icon": Icons.inventory_2_outlined, "label": "Услуги и Склад"},
-    {"id": AppMenuIds.preview, "icon": Icons.directions_car_filled_outlined, "label": "Превью"},
+    {"id": AppMenuIds.services, "icon": Icons.home_repair_service_outlined, "label": "Прайс"},
+    {"id": AppMenuIds.inventory, "icon": Icons.inventory_2_outlined, "label": "Склад"},
+    {
+      "id": AppMenuIds.preview,
+      "icon": Icons.directions_car_filled_outlined,
+      "label": "Превью",
+      "disabled": true,
+      "subtitle": "В разработке",
+    },
     {"id": AppMenuIds.completed, "icon": Icons.task_alt_outlined, "label": "Завершённые"},
   ];
 
@@ -192,12 +200,51 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       await SyncDeepLink.instance.flushPending(context);
       if (!mounted) return;
       await _maybeShowPatchNotes();
+      await _maybeOfferCloudUpdate();
     });
   }
 
   Future<void> _maybeShowPatchNotes() async {
     if (!mounted) return;
     await maybeShowPatchNotes(context);
+  }
+
+  /// Тихая проверка облачного канала; диалог только если есть более новый build.
+  Future<void> _maybeOfferCloudUpdate() async {
+    if (!mounted) return;
+    try {
+      final result = await UpdateService.instance.check();
+      if (!mounted) return;
+      if (result.status != UpdateCheckStatus.available) return;
+      final ver = result.manifest == null
+          ? ''
+          : '${result.manifest!.version}+${result.manifest!.build}';
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text(
+            'Доступно обновление',
+            style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+          ),
+          content: Text(
+            ver.isEmpty
+                ? 'На сервере есть новая версия Det App.'
+                : 'На сервере версия $ver.\nУстановить сейчас?',
+            style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.4),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Позже')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Обновить')),
+          ],
+        ),
+      );
+      if (go == true && mounted) {
+        await UpdateDialog.open(context);
+      }
+    } catch (e) {
+      debugPrint('cloud update check: $e');
+    }
   }
 
   Future<void> _loadMobileMenuMode() async {
@@ -384,10 +431,15 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         return const StatsScreen(key: ValueKey(AppMenuIds.stats));
       case AppMenuIds.staff:
         return const MastersScreen(key: ValueKey(AppMenuIds.staff));
+      case AppMenuIds.services:
+        return const ServicesScreen(key: ValueKey(AppMenuIds.services));
       case AppMenuIds.inventory:
-        return const InventoryScreen(key: ValueKey(AppMenuIds.inventory));
+        return const WarehouseScreen(key: ValueKey(AppMenuIds.inventory));
       case AppMenuIds.preview:
-        return const PreviewScreen(key: ValueKey(AppMenuIds.preview));
+        return const Center(
+          key: ValueKey(AppMenuIds.preview),
+          child: Text("Превью — в разработке", style: TextStyle(color: AppColors.textMuted)),
+        );
       case AppMenuIds.completed:
         return const CompletedOrdersScreen(key: ValueKey(AppMenuIds.completed));
       default:
@@ -418,22 +470,30 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     required bool active,
     required VoidCallback onTap,
     bool compact = false,
+    bool disabled = false,
+    String? subtitle,
     Key? key,
   }) {
+    final fg = disabled
+        ? AppColors.textDim
+        : (active ? AppColors.primary : AppColors.textMuted);
+    final titleColor = disabled
+        ? AppColors.textDim
+        : (active ? AppColors.text : AppColors.textMuted);
     return Padding(
       key: key,
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: onTap,
+          onTap: disabled ? null : onTap,
           borderRadius: BorderRadius.circular(12),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOut,
             padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 8 : 11),
             decoration: BoxDecoration(
-              color: active ? AppColors.primarySoft.withOpacity(0.55) : Colors.transparent,
+              color: active && !disabled ? AppColors.primarySoft.withOpacity(0.55) : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -444,20 +504,34 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                   height: 22,
                   margin: const EdgeInsets.only(right: 10),
                   decoration: BoxDecoration(
-                    color: active ? AppColors.primary : Colors.transparent,
+                    color: active && !disabled ? AppColors.primary : Colors.transparent,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                Icon(icon, size: 20, color: active ? AppColors.primary : AppColors.textMuted),
+                Icon(icon, size: 20, color: fg),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    label,
-                    style: GoogleFonts.manrope(
-                      color: active ? AppColors.text : AppColors.textMuted,
-                      fontSize: compact ? 13.5 : 14.5,
-                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: GoogleFonts.manrope(
+                          color: titleColor,
+                          fontSize: compact ? 13.5 : 14.5,
+                          fontWeight: active && !disabled ? FontWeight.w700 : FontWeight.w500,
+                        ),
+                      ),
+                      if (subtitle != null && subtitle.isNotEmpty)
+                        Text(
+                          subtitle,
+                          style: GoogleFonts.manrope(
+                            color: AppColors.textDim,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
               ],
@@ -598,10 +672,13 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         ),
       ...items.map((item) {
         final id = item["id"] as int;
+        final disabled = item["disabled"] == true || AppMenuIds.disabled.contains(id);
         return _navItem(
           key: TourKeys.menuKeyForIndex(id),
           icon: item["icon"] as IconData,
           label: item["label"] as String,
+          subtitle: item["subtitle"] as String?,
+          disabled: disabled,
           active: _selectedIndex == id,
           onTap: () {
             _selectMenu(id);

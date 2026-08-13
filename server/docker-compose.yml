@@ -24,6 +24,11 @@ services:
       PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-admin@det-app.ru}
       PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD}
       PLATFORM_ADMIN_NAME: ${PLATFORM_ADMIN_NAME:-Platform Admin}
+      RELEASES_DIR: /data/releases
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://api.det-app.ru}
+      RELEASE_UPLOAD_TOKEN: ${RELEASE_UPLOAD_TOKEN}
+    volumes:
+      - releases_data:/data/releases
     depends_on:
       db:
         condition: service_healthy
@@ -45,3 +50,4 @@ volumes:
   pgdata:
   caddy_data:
   caddy_config:
+  releases_data:
