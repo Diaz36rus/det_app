@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 41,
+    version: '1.0.1',
+    items: [
+      'WhatsApp «готов к выдаче»: с доски и из чек-листа выдачи',
+    ],
+  ),
+  PatchRelease(
     build: 40,
     version: '1.0.1',
     items: [

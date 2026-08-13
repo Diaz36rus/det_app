@@ -15,6 +15,7 @@ import 'order_defects_sheet.dart';
 import 'order_wrap_films_panel.dart';
 import 'pulse_anchor.dart';
 import 'quick_datetime_picker.dart';
+import 'ready_notify_actions.dart';
 import 'responsive.dart';
 import 'schedule_conflict.dart';
 import 'service_category_browser.dart';
@@ -1808,6 +1809,28 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     return false;
   }
 
+  Future<void> _notifyReadyWhatsApp() async {
+    final order = <String, dynamic>{
+      'id': widget.order['id'],
+      'client_name': widget.order['client_name'],
+      'client_phone': widget.order['client_phone'],
+      'make_model': widget.order['make_model'],
+      'plate': widget.order['plate'],
+      'price': _initialPrice,
+      'paid_amount': _paidAmount,
+    };
+    final ok = await ReadyNotifyActions.notifyOrder(
+      context,
+      order: order,
+      markHandoverNotified: false,
+    );
+    if (!ok || !mounted) return;
+    await _setHandoverValue('handover_notified', true);
+    await DatabaseHelper().addOrderEvent(widget.order['id'], 'WhatsApp: уведомление о готовности');
+    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (mounted) setState(() {});
+  }
+
   /// Порядок = реальный сценарий выдачи (до визита → QC → осмотр → оплата → ключи).
   static const _handoverItems = <String, String>{
     'handover_notified': 'Клиент уведомлён о готовности',
@@ -1910,23 +1933,30 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
               child: Column(
-                children: _handoverItems.entries
-                    .map(
-                      (entry) => CheckboxListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-                        dense: true,
-                        visualDensity: VisualDensity.compact,
-                        controlAffinity: ListTileControlAffinity.leading,
-                        activeColor: AppColors.primary,
-                        title: Text(
-                          entry.value,
-                          style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
-                        ),
-                        value: _handoverValue(entry.key),
-                        onChanged: (value) => _setHandoverValue(entry.key, value ?? false),
-                      ),
-                    )
-                    .toList(),
+                children: _handoverItems.entries.map((entry) {
+                  final isNotify = entry.key == 'handover_notified';
+                  return CheckboxListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    activeColor: AppColors.primary,
+                    title: Text(
+                      entry.value,
+                      style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
+                    ),
+                    secondary: isNotify
+                        ? IconButton(
+                            tooltip: 'WhatsApp: готов к выдаче',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.chat_outlined, color: AppColors.success, size: 20),
+                            onPressed: _notifyReadyWhatsApp,
+                          )
+                        : null,
+                    value: _handoverValue(entry.key),
+                    onChanged: (value) => _setHandoverValue(entry.key, value ?? false),
+                  );
+                }).toList(),
               ),
             ),
           ],

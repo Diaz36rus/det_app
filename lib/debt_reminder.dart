@@ -3,11 +3,18 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
-/// Текст напоминания о долге + копирование / попытка открыть WhatsApp.
+/// Тексты клиенту + копирование / попытка открыть WhatsApp.
 class DebtReminder {
   DebtReminder._();
 
   static final _money = NumberFormat('#,##0.##', 'ru_RU');
+
+  static String _carBit(String? plate, String? car) {
+    return [
+      if ((car ?? '').trim().isNotEmpty) car!.trim(),
+      if ((plate ?? '').trim().isNotEmpty) plate!.trim(),
+    ].join(' · ');
+  }
 
   static String buildText({
     required String clientName,
@@ -17,16 +24,35 @@ class DebtReminder {
     String? car,
   }) {
     final who = clientName.trim().isEmpty ? 'Клиент' : clientName.trim();
-    final carBit = [
-      if ((car ?? '').trim().isNotEmpty) car!.trim(),
-      if ((plate ?? '').trim().isNotEmpty) plate!.trim(),
-    ].join(' · ');
+    final carBit = _carBit(plate, car);
     final buf = StringBuffer();
     buf.writeln('Здравствуйте, $who!');
     buf.writeln('Напоминаем о задолженности по заказу #$orderId');
     if (carBit.isNotEmpty) buf.writeln(carBit);
     buf.writeln('Сумма: ${_money.format(debt)} ₽');
     buf.write('Ждём вас в студии.');
+    return buf.toString();
+  }
+
+  /// Сообщение «автомобиль готов к выдаче» (+ долг, если есть).
+  static String buildReadyText({
+    required String clientName,
+    required int orderId,
+    String? plate,
+    String? car,
+    double debt = 0,
+  }) {
+    final who = clientName.trim().isEmpty ? 'Клиент' : clientName.trim();
+    final carBit = _carBit(plate, car);
+    final buf = StringBuffer();
+    buf.writeln('Здравствуйте, $who!');
+    buf.writeln('Ваш автомобиль готов к выдаче.');
+    buf.writeln('Заказ #$orderId');
+    if (carBit.isNotEmpty) buf.writeln(carBit);
+    if (debt > 0.01) {
+      buf.writeln('К оплате: ${_money.format(debt)} ₽');
+    }
+    buf.write('Ждём вас в студии!');
     return buf.toString();
   }
 

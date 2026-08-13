@@ -9,6 +9,7 @@ import 'issue_guard.dart';
 import 'order_details_dialog.dart';
 import 'pulse_anchor.dart';
 import 'quick_payment_dialog.dart';
+import 'ready_notify_actions.dart';
 import 'responsive.dart';
 import 'tour_keys.dart';
 import 'work_order_actions.dart';
@@ -303,6 +304,18 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                                 if (ok == true) _loadOrders();
                               },
                             ),
+                          IconButton(
+                            visualDensity: VisualDensity.compact,
+                            tooltip: 'WhatsApp: готов к выдаче',
+                            icon: const Icon(Icons.chat_outlined, color: AppColors.success, size: 18),
+                            onPressed: () async {
+                              final id = (o['id'] as num).toInt();
+                              await runWithPulseHighlight(
+                                id,
+                                () => ReadyNotifyActions.notifyOrder(context, order: o),
+                              );
+                            },
+                          ),
                           IconButton(
                             visualDensity: VisualDensity.compact,
                             tooltip: 'Заказ-наряд PDF',
