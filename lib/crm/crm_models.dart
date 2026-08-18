@@ -74,7 +74,7 @@ class CrmOrderItem {
         name: j['name']?.toString() ?? '',
         price: (j['price'] as num?)?.toDouble() ?? 0,
         workshop: j['workshop']?.toString() ?? '',
-        isDone: j['is_done'] == true,
+        isDone: j['is_done'] == true || j['is_done'] == 1,
       );
 
   Map<String, dynamic> toJson() => {

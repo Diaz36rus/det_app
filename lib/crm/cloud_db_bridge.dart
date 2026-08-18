@@ -477,7 +477,20 @@ class CloudDbBridge {
         'handover_inspect': 0,
         'handover_payment': 0,
         'handover_keys': 0,
+        'handover_notified': 0,
+        'handover_ready': 0,
       };
+
+  Future<void> saveOrderHandover(int orderId, Map<String, dynamic> values) async {}
+
+  Future<void> setTechWash(int orderId, String? startDate, String? endDate) async {}
+
+  Future<void> syncZonePackage({
+    required int orderId,
+    required String kind,
+    required List<String> zoneNames,
+    required double packagePrice,
+  }) async {}
 
   Future<int> addOrderWithItems(
     int clientId,
@@ -508,9 +521,307 @@ class CloudDbBridge {
       items: crmItems,
       status: resolved,
       dueDate: dueDate.isNotEmpty ? dueDate : DateTime.now().toIso8601String().substring(0, 10),
+      masterIds: const [],
     );
+    // start/end через patch
+    if (startTime.isNotEmpty || endTime.isNotEmpty || dueDate.isNotEmpty) {
+      final patched = await _crm.patchOrder(order.id, {
+        if (dueDate.isNotEmpty) 'due_date': dueDate,
+        if (startTime.isNotEmpty) 'start_time': startTime,
+        if (endTime.isNotEmpty) 'end_time': endTime,
+      });
+      _orders[patched.id] = patched;
+      return patched.id;
+    }
     _orders[order.id] = order;
     return order.id;
+  }
+
+  Future<CrmOrder?> _orderByItemId(int itemId) async {
+    await _ensureOrders();
+    for (final o in _orders.values) {
+      if (o.items.any((i) => i.id == itemId)) return o;
+    }
+    final list = await _crm.listOrders();
+    _orders
+      ..clear()
+      ..addEntries(list.map((o) => MapEntry(o.id, o)));
+    for (final o in _orders.values) {
+      if (o.items.any((i) => i.id == itemId)) return o;
+    }
+    return null;
+  }
+
+  Future<void> _pushItems(int orderId, List<CrmOrderItem> items) async {
+    final updated = await _crm.patchOrder(orderId, {
+      'items': items.map((e) => e.toJson()).toList(),
+    });
+    _orders[orderId] = updated;
+  }
+
+  Future<void> syncOrderFromItems(int orderId) async {
+    final o = _orders[orderId];
+    if (o == null) {
+      await getOrderById(orderId);
+    }
+    final cur = _orders[orderId];
+    if (cur == null) return;
+    await _pushItems(orderId, cur.items);
+  }
+
+  Future<void> updateOrderItemSchedule(
+    int itemId,
+    String? startTime,
+    String? endTime,
+    String? workshop,
+  ) async {
+    if (itemId <= 0) return;
+    final o = await _orderByItemId(itemId);
+    if (o == null) return;
+    final items = o.items.map((it) {
+      if (it.id != itemId) return it;
+      return CrmOrderItem(
+        id: it.id,
+        name: it.name,
+        price: it.price,
+        workshop: workshop ?? it.workshop,
+        isDone: it.isDone,
+      );
+    }).toList();
+    await _pushItems(o.id, items);
+  }
+
+  Future<int> addOrderItem(
+    int orderId,
+    String name,
+    double price, {
+    bool sync = true,
+    String? workshop,
+    String? category,
+    String? startTime,
+    String? endTime,
+  }) async {
+    await getOrderById(orderId);
+    final o = _orders[orderId];
+    if (o == null) return 0;
+    final items = [
+      ...o.items,
+      CrmOrderItem(name: name, price: price, workshop: workshop ?? ''),
+    ];
+    await _pushItems(orderId, items);
+    final refreshed = _orders[orderId];
+    if (refreshed == null || refreshed.items.isEmpty) return 0;
+    // новый — последний с таким именем
+    final match = refreshed.items.where((i) => i.name == name).toList();
+    return match.isEmpty ? (refreshed.items.last.id ?? 0) : (match.last.id ?? 0);
+  }
+
+  Future<void> deleteOrderItem(int itemId) async {
+    if (itemId <= 0) return;
+    final o = await _orderByItemId(itemId);
+    if (o == null) return;
+    await _pushItems(o.id, o.items.where((i) => i.id != itemId).toList());
+  }
+
+  Future<List<String>> updateOrderItemDone(int itemId, bool isDone) async {
+    if (itemId <= 0) return [];
+    final o = await _orderByItemId(itemId);
+    if (o == null) return [];
+    final items = o.items
+        .map(
+          (it) => it.id == itemId
+              ? CrmOrderItem(
+                  id: it.id,
+                  name: it.name,
+                  price: it.price,
+                  workshop: it.workshop,
+                  isDone: isDone,
+                )
+              : it,
+        )
+        .toList();
+    await _pushItems(o.id, items);
+    return [];
+  }
+
+  Future<void> updateOrderItemComment(int itemId, String comment) async {
+    // В API нет comment у item — no-op.
+  }
+
+  Future<void> updateOrderItemMasters(int itemId, List<int> masterIds) async {
+    // Мастера на уровне заказа; привязка к item пока no-op.
+  }
+
+  Future<void> updateOrderItemPrice(int itemId, double price) async {
+    if (itemId <= 0) return;
+    final o = await _orderByItemId(itemId);
+    if (o == null) return;
+    final items = o.items
+        .map(
+          (it) => it.id == itemId
+              ? CrmOrderItem(
+                  id: it.id,
+                  name: it.name,
+                  price: price,
+                  workshop: it.workshop,
+                  isDone: it.isDone,
+                )
+              : it,
+        )
+        .toList();
+    await _pushItems(o.id, items);
+  }
+
+  Future<void> updateOrderPrice(int orderId, double price) async {
+    // Цена считается из items на сервере; принудительно через notes-only не трогаем.
+    await getOrderById(orderId);
+  }
+
+  Future<void> updateOrderDiscount(
+    int orderId, {
+    double? discountPercent,
+    double? discountFixed,
+    String? promoCode,
+  }) async {
+    // Скидки в CRM API пока нет — no-op.
+  }
+
+  Future<void> updateOrderMaster(int orderId, int? masterId) async {
+    await _crm.patchOrder(orderId, {
+      'master_ids': masterId == null ? <int>[] : [masterId],
+    }).then((o) => _orders[o.id] = o);
+  }
+
+  Future<void> updateOrderSchedule(
+    int orderId,
+    String dueDate,
+    String startTime,
+    String endTime,
+    String endDate,
+  ) async {
+    final o = await _crm.patchOrder(orderId, {
+      'due_date': dueDate.isNotEmpty ? dueDate : endDate,
+      'start_time': startTime,
+      'end_time': endTime,
+    });
+    _orders[o.id] = o;
+  }
+
+  Future<void> updateOrderNotes(int orderId, String notes) async {
+    final o = await _crm.patchOrder(orderId, {'notes': notes});
+    _orders[o.id] = o;
+  }
+
+  Future<void> updateOrderClientNotes(int orderId, String notes) async {
+    await updateOrderNotes(orderId, notes);
+  }
+
+  Future<void> updateOrderClientVisibleNotes(int orderId, String notes) async {}
+
+  Future<void> updateOrderMasterNotes(int orderId, String notes) async {}
+
+  Future<void> updateOrderPaymentMethod(int orderId, String method) async {}
+
+  Future<void> reassignOrderCar(int orderId, int carId) async {
+    // car_id в patch пока нет — no-op.
+  }
+
+  Future<Map<String, dynamic>?> getClientByPhone(String phone) async {
+    await _ensureClients();
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    final tail = digits.length >= 10 ? digits.substring(digits.length - 10) : digits;
+    for (final c in _clients.values) {
+      final p = c.phone.replaceAll(RegExp(r'\D'), '');
+      final t = p.length >= 10 ? p.substring(p.length - 10) : p;
+      if (t == tail && tail.isNotEmpty) {
+        return {'id': c.id, 'name': c.name, 'phone': c.phone, 'is_vip': c.isVip ? 1 : 0};
+      }
+      if (c.phone == phone.trim()) {
+        return {'id': c.id, 'name': c.name, 'phone': c.phone, 'is_vip': c.isVip ? 1 : 0};
+      }
+    }
+    return null;
+  }
+
+  Future<int?> getCarId(int clientId, String plate) async {
+    await _ensureCars();
+    final p = plate.trim().toLowerCase();
+    for (final c in _cars.values) {
+      if (c.clientId == clientId && c.plate.trim().toLowerCase() == p) return c.id;
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>> getClientCarsForDropdown(String phone) async {
+    final client = await getClientByPhone(phone);
+    if (client == null) return [];
+    return getClientCars(client['id'] as int);
+  }
+
+  Future<void> updateCar(
+    int carId, {
+    String? makeModel,
+    String? plate,
+    String? vin,
+    String? category,
+  }) async {
+    // PATCH /crm/cars пока нет — no-op.
+  }
+
+  Future<int?> resolveRegisterIdForMethod(String method) async {
+    final regs = await _cash.listRegisters();
+    for (final r in regs) {
+      if (r.isActive && r.moneyType == method) return r.id;
+    }
+    return regs.isEmpty ? null : regs.first.id;
+  }
+
+  Future<void> addPayment(
+    int orderId,
+    double amount,
+    String method, {
+    int? shiftId,
+    int? registerId,
+  }) async {
+    var shift = await _cash.currentShift();
+    if (shift == null || !shift.isOpen) {
+      await _cash.openShift();
+    }
+    await _cash.createPayment(
+      orderId: orderId,
+      amount: amount,
+      method: method,
+      registerId: registerId,
+    );
+    final list = await _crm.listOrders();
+    _orders
+      ..clear()
+      ..addEntries(list.map((o) => MapEntry(o.id, o)));
+  }
+
+  Future<Map<String, dynamic>?> voidPayment(int paymentId) async {
+    // void через API есть — при необходимости расширим; пока null
+    return null;
+  }
+
+  Future<int> openCashShift(double openingCash, {String note = '', Map<int, double>? openings}) async {
+    final existing = await _cash.currentShift();
+    if (existing != null && existing.isOpen) return existing.id;
+    final s = await _cash.openShift(openings: openings, note: note);
+    return s.id;
+  }
+
+  // Wrap / zone — безопасные no-op, чтобы карточка не падала
+  Future<List<String>> updateWrapPackageDone(int headerId, bool isDone) async => [];
+
+  Future<void> updateWrapPackageSchedule(int headerId, String? startTime, String? endTime) async {}
+
+  Future<void> updateWrapPackageMasters(int headerId, List<int> masterIds) async {}
+
+  Future<void> assignMastersToWorkshop(int orderId, String workshop, List<int> masterIds) async {
+    if (masterIds.isNotEmpty) {
+      await updateOrderMaster(orderId, masterIds.first);
+    }
   }
 
   Future<List<String>> getRolesList() async =>

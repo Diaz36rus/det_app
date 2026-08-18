@@ -1282,6 +1282,10 @@ class DatabaseHelper {
   }
 
   Future<void> updateCar(int carId, {String? makeModel, String? plate, String? vin, String? category}) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateCar(carId, makeModel: makeModel, plate: plate, vin: vin, category: category);
+      return;
+    }
     final db = await database;
     final data = <String, dynamic>{};
     if (makeModel != null) data['make_model'] = makeModel;
@@ -1371,6 +1375,11 @@ class DatabaseHelper {
 
   /// Денормализует notes и price заказа из order_items (+ скидка заказа).
   Future<void> syncOrderFromItems(int orderId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.syncOrderFromItems(orderId);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final items = await db.query('order_items', where: 'order_id = ?', whereArgs: [orderId]);
     final notes = items.map((i) => i['name'] as String).join(", ");
@@ -1397,6 +1406,15 @@ class DatabaseHelper {
     double? discountFixed,
     String? promoCode,
   }) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderDiscount(
+        orderId,
+        discountPercent: discountPercent,
+        discountFixed: discountFixed,
+        promoCode: promoCode,
+      );
+      return;
+    }
     final db = await database;
     final data = <String, dynamic>{};
     if (discountPercent != null) data['discount_percent'] = discountPercent;
@@ -1453,6 +1471,7 @@ class DatabaseHelper {
 
   /// Совпадение по `+7…` или по 10 цифрам (разные форматы в БД / mobile-ввод).
   Future<Map<String, dynamic>?> getClientByPhone(String phone) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getClientByPhone(phone);
     final db = await database;
     final digits = phoneDigits10(phone);
     final canon = digits.isEmpty ? phone.trim() : '+7$digits';
@@ -1477,6 +1496,7 @@ class DatabaseHelper {
   }
 
   Future<int?> getCarId(int clientId, String plate) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCarId(clientId, plate);
     final db = await database;
     List<Map> res = await db.query('cars', where: 'client_id = ? AND plate = ?', whereArgs: [clientId, plate]);
     return res.isNotEmpty ? res.first['id'] as int? : null;
@@ -1721,6 +1741,16 @@ class DatabaseHelper {
     required List<String> zoneNames,
     required double packagePrice,
   }) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.syncZonePackage(
+        orderId: orderId,
+        kind: kind,
+        zoneNames: zoneNames,
+        packagePrice: packagePrice,
+      );
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final headerId = await ensureZonePackage(orderId, kind);
     final workshop = zonePackageWorkshop(kind);
@@ -1781,6 +1811,15 @@ class DatabaseHelper {
     String? startTime,
     String? endTime,
   }) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addOrderItem(
+        orderId, name, price,
+        sync: sync, workshop: workshop, category: category,
+        startTime: startTime, endTime: endTime,
+      );
+      bumpDataRevision();
+      return id;
+    }
     final db = await database;
     final ws = workshop ?? workshopForService(category: category, name: name);
 
@@ -1865,6 +1904,10 @@ class DatabaseHelper {
   }
 
   Future<void> updateOrderItemComment(int itemId, String comment) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderItemComment(itemId, comment);
+      return;
+    }
     final db = await database;
     await db.update(
       'order_items',
@@ -1875,6 +1918,11 @@ class DatabaseHelper {
   }
 
   Future<void> updateOrderItemPrice(int itemId, double price) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderItemPrice(itemId, price);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final rows = await db.query(
       'order_items',
@@ -1894,6 +1942,11 @@ class DatabaseHelper {
 
   /// Возвращает предупреждения о нехватке склада (списание не блокируется).
   Future<List<String>> updateOrderItemDone(int itemId, bool isDone) async {
+    if (CloudDbBridge.active) {
+      final w = await CloudDbBridge.instance.updateOrderItemDone(itemId, isDone);
+      bumpDataRevision();
+      return w;
+    }
     final db = await database;
     final rows = await db.query(
       'order_items',
@@ -1955,6 +2008,11 @@ class DatabaseHelper {
   }
 
   Future<void> deleteOrderItem(int itemId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteOrderItem(itemId);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final rows = await db.query(
       'order_items',
@@ -1991,6 +2049,10 @@ class DatabaseHelper {
   }
 
   Future<void> updateOrderItemMasters(int itemId, List<int> masterIds) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderItemMasters(itemId, masterIds);
+      return;
+    }
     final db = await database;
     await db.update('order_items', {'master_ids': masterIds.join(',')}, where: 'id = ?', whereArgs: [itemId]);
   }
@@ -2042,6 +2104,11 @@ class DatabaseHelper {
 
   /// Сохраняет время и цех одной услуги (сразу в базу).
   Future<void> updateOrderItemSchedule(int itemId, String? startTime, String? endTime, String? workshop) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderItemSchedule(itemId, startTime, endTime, workshop);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.update('order_items', {
       'start_time': startTime,
@@ -2051,16 +2118,31 @@ class DatabaseHelper {
   }
 
   Future<void> updateOrderPrice(int orderId, double price) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderPrice(orderId, price);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.update('orders', {'price': price}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<void> updateOrderNotes(int orderId, String notes) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderNotes(orderId, notes);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.update('orders', {'notes': notes}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<void> updateOrderSchedule(int orderId, String dueDate, String startTime, String endTime, String endDate) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderSchedule(orderId, dueDate, startTime, endTime, endDate);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final prev = await db.query(
       'orders',
@@ -2106,6 +2188,10 @@ class DatabaseHelper {
   }
 
   Future<void> setTechWash(int orderId, String? startDate, String? endDate) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.setTechWash(orderId, startDate, endDate);
+      return;
+    }
     final db = await database;
     await db.update('orders', {
       'tech_wash_start': startDate,
@@ -2245,6 +2331,11 @@ class DatabaseHelper {
   }
 
   Future<void> saveOrderHandover(int orderId, Map<String, dynamic> values) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.saveOrderHandover(orderId, values);
+      bumpDataRevision();
+      return;
+    }
     final allowed = {
       'handover_ready', 'handover_works', 'handover_payment',
       'handover_keys', 'handover_inspect', 'handover_notified',
@@ -2509,6 +2600,11 @@ class DatabaseHelper {
 
   /// Новая оплата только в открытую смену (иначе касса «теряет» проводки).
   Future<void> addPayment(int orderId, double amount, String method, {int? shiftId, int? registerId}) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.addPayment(orderId, amount, method, shiftId: shiftId, registerId: registerId);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     final sid = shiftId ?? (await getCurrentShift())?['id'] as int?;
@@ -2542,6 +2638,7 @@ class DatabaseHelper {
   /// Отмена оплаты: удаляет платёж и уменьшает paid_amount (не ниже 0).
   /// Возвращает данные платежа или null, если не найден.
   Future<Map<String, dynamic>?> voidPayment(int paymentId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.voidPayment(paymentId);
     final db = await database;
     final rows = await db.query('payments', where: 'id = ?', whereArgs: [paymentId], limit: 1);
     if (rows.isEmpty) return null;
@@ -2970,6 +3067,7 @@ class DatabaseHelper {
   }
 
   Future<int?> resolveRegisterIdForMethod(String method) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.resolveRegisterIdForMethod(method);
     final db = await database;
     final rows = await db.query(
       'cash_registers',
@@ -2984,6 +3082,11 @@ class DatabaseHelper {
 
   /// Открыть смену. [openings] — registerId → стартовый остаток.
   Future<int> openCashShift(double openingCash, {String note = '', Map<int, double>? openings}) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.openCashShift(openingCash, note: note, openings: openings);
+      bumpDataRevision();
+      return id;
+    }
     final existing = await getCurrentShift();
     if (existing != null) return (existing['id'] as num).toInt();
     final db = await database;
@@ -4347,36 +4450,62 @@ class DatabaseHelper {
   }
 
   Future<void> updateOrderClientNotes(int orderId, String clientNotes) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderClientNotes(orderId, clientNotes);
+      return;
+    }
     final db = await database;
     await db.update('orders', {'client_notes': clientNotes}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<void> updateOrderClientVisibleNotes(int orderId, String notes) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderClientVisibleNotes(orderId, notes);
+      return;
+    }
     final db = await database;
     await db.update('orders', {'client_visible_notes': notes}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<void> updateOrderMasterNotes(int orderId, String notes) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderMasterNotes(orderId, notes);
+      return;
+    }
     final db = await database;
     await db.update('orders', {'master_notes': notes}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<void> updateOrderPaymentMethod(int orderId, String method) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderPaymentMethod(orderId, method);
+      return;
+    }
     final db = await database;
     await db.update('orders', {'payment_method': method}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<void> reassignOrderCar(int orderId, int carId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.reassignOrderCar(orderId, carId);
+      return;
+    }
     final db = await database;
     await db.update('orders', {'car_id': carId}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<void> updateOrderMaster(int orderId, int? masterId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderMaster(orderId, masterId);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.update('orders', {'master_id': masterId}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<List<Map<String, dynamic>>> getClientCarsForDropdown(String phone) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getClientCarsForDropdown(phone);
     final client = await getClientByPhone(phone);
     if (client == null) return [];
     final db = await database;

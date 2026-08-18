@@ -8,6 +8,7 @@ import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'cash_catalog.dart';
+import 'crm/cloud_db_bridge.dart';
 import 'database.dart';
 import 'issue_guard.dart';
 import 'master_picker.dart';
@@ -275,88 +276,89 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   Future<void> _loadData() async {
-    _masters = await DatabaseHelper().getAllMastersFull();
-    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-    _selectedMasterId = widget.order['master_id'];
-    // Подгружаем все авто этого клиента
-    _clientCars = await DatabaseHelper().getClientCars(widget.order['client_id']);
-    _selectedCarId = widget.order['car_id'];
-    
-    // Определяем класс выбранного авто
-    if (_selectedCarId != null) {
-      var car = _clientCars.firstWhere((c) => c['id'] == _selectedCarId, orElse: () => {});
-      if (car.isNotEmpty) _currentCarCategory = car['category'] ?? "1";
-    }
-    
-    // Загружаем услуги
-    _services = await DatabaseHelper().getAllServices();
-    _cashRegisters = await DatabaseHelper().getCashRegisters();
-    _handover = await DatabaseHelper().getOrderHandover(widget.order['id'] as int);
-    _payments = await DatabaseHelper().getOrderPayments(widget.order['id'] as int);
-    _syncRegisterForMethod(_paymentMethod, preferKeep: false);
+    try {
+      _masters = await DatabaseHelper().getAllMastersFull();
+      _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+      _selectedMasterId = widget.order['master_id'];
+      _clientCars = await DatabaseHelper().getClientCars(widget.order['client_id']);
+      _selectedCarId = widget.order['car_id'];
 
-    // Загружаем работы из order_items
-    final dbItems = await DatabaseHelper().getOrderItems(widget.order['id']);
-    _selectedWorks = dbItems.map((item) => Map<String, dynamic>.from(item)).toList();
-    // Автопривязка цеха для старых услуг без workshop
-    for (var i = 0; i < _selectedWorks.length; i++) {
-      final w = _selectedWorks[i];
-      final current = (w['workshop'] as String?)?.trim() ?? "";
-      if (current.isNotEmpty && WORKSHOPS.contains(current)) continue;
-      final auto = workshopForService(name: w['name']?.toString());
-      if (auto == null) continue;
-      await DatabaseHelper().updateOrderItemSchedule(
-        w['id'] as int,
-        w['start_time'] as String?,
-        w['end_time'] as String?,
-        auto,
-      );
-      _selectedWorks[i] = {...w, 'workshop': auto};
-    }
-    if (_selectedWorks.isEmpty) {
-      // Миграция: notes "Услуга1, Услуга2" → отдельные order_items
-      String notes = widget.order['notes'] ?? "";
-      double oldPrice = (widget.order['price'] as num?)?.toDouble() ?? 0;
-      if (notes.isNotEmpty) {
-        List<String> names = notes.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
-        if (names.length == 1) {
-          final ws = workshopForService(name: names.first);
-          int newId = await DatabaseHelper().addOrderItem(widget.order['id'], names.first, oldPrice, sync: false, workshop: ws);
-          _selectedWorks.add({"id": newId, "name": names.first, "price": oldPrice, "master_ids": "", "workshop": ws});
-        } else {
-          for (var name in names) {
-            final ws = workshopForService(name: name);
-            int newId = await DatabaseHelper().addOrderItem(widget.order['id'], name, 0, sync: false, workshop: ws);
-            _selectedWorks.add({"id": newId, "name": name, "price": 0.0, "master_ids": "", "workshop": ws});
-          }
+      if (_selectedCarId != null) {
+        var car = _clientCars.firstWhere((c) => c['id'] == _selectedCarId, orElse: () => {});
+        if (car.isNotEmpty) _currentCarCategory = car['category'] ?? "1";
+      }
+
+      _services = await DatabaseHelper().getAllServices();
+      _cashRegisters = await DatabaseHelper().getCashRegisters();
+      _handover = await DatabaseHelper().getOrderHandover(widget.order['id'] as int);
+      _payments = await DatabaseHelper().getOrderPayments(widget.order['id'] as int);
+      _syncRegisterForMethod(_paymentMethod, preferKeep: false);
+
+      final dbItems = await DatabaseHelper().getOrderItems(widget.order['id']);
+      _selectedWorks = dbItems.map((item) => Map<String, dynamic>.from(item)).toList();
+      final cloud = CloudDbBridge.active;
+      for (var i = 0; i < _selectedWorks.length; i++) {
+        final w = _selectedWorks[i];
+        final current = (w['workshop'] as String?)?.trim() ?? "";
+        if (current.isNotEmpty && WORKSHOPS.contains(current)) continue;
+        final auto = workshopForService(name: w['name']?.toString());
+        if (auto == null) continue;
+        if (!cloud && (w['id'] as num?)?.toInt() != null && (w['id'] as num).toInt() > 0) {
+          await DatabaseHelper().updateOrderItemSchedule(
+            w['id'] as int,
+            w['start_time'] as String?,
+            w['end_time'] as String?,
+            auto,
+          );
         }
-        await DatabaseHelper().syncOrderFromItems(widget.order['id']);
-        if (names.length > 1 && oldPrice > 0 && _worksTotal == 0) {
-          // Старые заказы: услуги без цен — оставляем прежнюю сумму заказа
-          await DatabaseHelper().updateOrderPrice(widget.order['id'], oldPrice);
-          _initialPrice = oldPrice;
-          _priceController.text = _initialPrice.toString();
-          _syncAutoPayField();
+        _selectedWorks[i] = {...w, 'workshop': auto};
+      }
+      if (_selectedWorks.isEmpty) {
+        String notes = widget.order['notes'] ?? "";
+        double oldPrice = (widget.order['price'] as num?)?.toDouble() ?? 0;
+        if (notes.isNotEmpty) {
+          List<String> names = notes.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+          if (names.length == 1) {
+            final ws = workshopForService(name: names.first);
+            int newId = await DatabaseHelper().addOrderItem(widget.order['id'], names.first, oldPrice, sync: false, workshop: ws);
+            _selectedWorks.add({"id": newId, "name": names.first, "price": oldPrice, "master_ids": "", "workshop": ws});
+          } else {
+            for (var name in names) {
+              final ws = workshopForService(name: name);
+              int newId = await DatabaseHelper().addOrderItem(widget.order['id'], name, 0, sync: false, workshop: ws);
+              _selectedWorks.add({"id": newId, "name": name, "price": 0.0, "master_ids": "", "workshop": ws});
+            }
+          }
+          await DatabaseHelper().syncOrderFromItems(widget.order['id']);
+          if (names.length > 1 && oldPrice > 0 && _worksTotal == 0) {
+            await DatabaseHelper().updateOrderPrice(widget.order['id'], oldPrice);
+            _initialPrice = oldPrice;
+            _priceController.text = _initialPrice.toString();
+            _syncAutoPayField();
+          } else {
+            await _recalcOrderTotal(writeDb: false);
+          }
         } else {
-          await _recalcOrderTotal(writeDb: false);
+          await _recalcOrderTotal(writeDb: !cloud);
         }
       } else {
-        await _recalcOrderTotal(writeDb: true);
+        await _recalcOrderTotal(writeDb: !cloud);
       }
-    } else {
-      await _recalcOrderTotal(writeDb: true);
+      final rawMethod = widget.order['payment_method']?.toString() ?? CashMethods.cash;
+      _paymentMethod = rawMethod == 'Не указан' || rawMethod.isEmpty ? CashMethods.cash : rawMethod;
+      _paymentMethodController.text = _paymentMethod;
+      _syncRegisterForMethod(_paymentMethod, preferKeep: false);
+    } catch (e, st) {
+      debugPrint('OrderDetails._loadData: $e\n$st');
+    } finally {
+      if (mounted) {
+        _enterCtrl.value = 0;
+        setState(() => _isLoading = false);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_closing) _enterCtrl.forward();
+        });
+      }
     }
-    final rawMethod = widget.order['payment_method']?.toString() ?? CashMethods.cash;
-    _paymentMethod = rawMethod == 'Не указан' || rawMethod.isEmpty ? CashMethods.cash : rawMethod;
-    _paymentMethodController.text = _paymentMethod;
-    _syncRegisterForMethod(_paymentMethod, preferKeep: false);
-    if (!mounted) return;
-    _enterCtrl.value = 0;
-    setState(() => _isLoading = false);
-    // Запускаем открытие на кадре с уже готовым контентом
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_closing) _enterCtrl.forward();
-    });
   }
 
   // --- ФУНКЦИИ РАБОТЫ С УСЛУГАМИ ---
