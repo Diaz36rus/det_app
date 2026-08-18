@@ -8,8 +8,10 @@ class TokenResponse(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    """login — email или телефон; email оставлен для совместимости."""
     password: str = Field(min_length=6)
+    login: str | None = Field(default=None, min_length=3, max_length=255)
+    email: EmailStr | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -76,6 +78,7 @@ class CompanyCreate(BaseModel):
 class UserOut(BaseModel):
     id: int
     email: EmailStr
+    phone: str | None = None
     full_name: str
     is_active: bool
     is_platform_admin: bool
@@ -89,5 +92,6 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6)
     full_name: str = Field(default="", max_length=200)
+    phone: str | None = Field(default=None, max_length=32)
     role_ids: list[int] = []
     branch_ids: list[int] = []

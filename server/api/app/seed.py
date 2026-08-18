@@ -1,10 +1,25 @@
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.db import engine
 from app.models import Branch, Company, Permission, Role, RolePermission, User, UserBranch, UserRole
 from app.permissions_catalog import COMPANY_ROLE_PRESETS, PERMISSIONS
 from app.security import hash_password
+
+
+def ensure_user_phone_column() -> None:
+    """Добавляет users.phone на уже существующей БД (create_all новые колонки не добавляет)."""
+    with engine.begin() as conn:
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)")
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_phone_unique "
+                "ON users (phone) WHERE phone IS NOT NULL"
+            )
+        )
 
 
 def _ensure_permissions(db: Session) -> dict[str, Permission]:
@@ -40,18 +55,20 @@ def seed_database(db: Session) -> None:
 
     admin = db.scalar(select(User).where(User.email == settings.platform_admin_email.lower()))
     if admin is None:
-        db.add(
-            User(
-                email=settings.platform_admin_email.lower().strip(),
-                password_hash=hash_password(settings.platform_admin_password),
-                full_name=settings.platform_admin_name,
-                is_platform_admin=True,
-                is_active=True,
-            )
+        admin = User(
+            email=settings.platform_admin_email.lower().strip(),
+            phone="9000000001",
+            password_hash=hash_password(settings.platform_admin_password),
+            full_name=settings.platform_admin_name,
+            is_platform_admin=True,
+            is_active=True,
         )
+        db.add(admin)
     else:
         admin.is_platform_admin = True
         admin.is_active = True
+        if not admin.phone:
+            admin.phone = "9000000001"
 
     company = db.scalar(select(Company).where(Company.slug == "demo"))
     admin_role: Role | None = None
@@ -82,12 +99,12 @@ def seed_database(db: Session) -> None:
             )
         )
 
-    # Владелец демо-компании (для проверки ролей /users)
     owner_email = "owner@demo.det-app.ru"
     owner = db.scalar(select(User).where(User.email == owner_email))
     if owner is None and company is not None:
         owner = User(
             email=owner_email,
+            phone="9000000002",
             password_hash=hash_password(settings.platform_admin_password),
             full_name="Demo Owner",
             company_id=company.id,
@@ -100,5 +117,7 @@ def seed_database(db: Session) -> None:
             db.add(UserRole(user_id=owner.id, role_id=admin_role.id))
         if main_branch is not None:
             db.add(UserBranch(user_id=owner.id, branch_id=main_branch.id))
+    elif owner is not None and not owner.phone:
+        owner.phone = "9000000002"
 
     db.commit()

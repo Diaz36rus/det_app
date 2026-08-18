@@ -4,12 +4,13 @@ from fastapi import FastAPI
 
 from app.db import Base, SessionLocal, engine
 from app.routers import auth, company, platform, updates
-from app.seed import seed_database
+from app.seed import ensure_user_phone_column, seed_database
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_user_phone_column()
     db = SessionLocal()
     try:
         seed_database(db)
@@ -18,7 +19,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Det App API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Det App API", version="0.4.0", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(platform.router)
 app.include_router(company.router)
@@ -27,7 +28,7 @@ app.include_router(updates.router)
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "det-app-api", "version": "0.3.0"}
+    return {"ok": True, "service": "det-app-api", "version": "0.4.0"}
 
 
 @app.get("/")

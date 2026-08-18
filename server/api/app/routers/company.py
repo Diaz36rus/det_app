@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.db import get_db
 from app.deps import get_current_user, require_permissions
 from app.models import Branch, Permission, Role, User, UserBranch, UserRole
+from app.phone_util import phone_digits10
 from app.schemas import (
     PermissionOut,
     RoleCreate,
@@ -151,6 +152,7 @@ def list_users(
             UserOut(
                 id=u.id,
                 email=u.email,
+                phone=u.phone,
                 full_name=u.full_name,
                 is_active=u.is_active,
                 is_platform_admin=u.is_platform_admin,
@@ -173,9 +175,13 @@ def create_user(
     email = body.email.lower().strip()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=400, detail="Email уже занят")
+    phone = phone_digits10(body.phone)
+    if phone and db.scalar(select(User).where(User.phone == phone)):
+        raise HTTPException(status_code=400, detail="Телефон уже занят")
 
     new_user = User(
         email=email,
+        phone=phone,
         password_hash=hash_password(body.password),
         full_name=body.full_name.strip(),
         company_id=company_id,
@@ -212,6 +218,7 @@ def create_user(
     return UserOut(
         id=created.id,
         email=created.email,
+        phone=created.phone,
         full_name=created.full_name,
         is_active=created.is_active,
         is_platform_admin=created.is_platform_admin,

@@ -7,6 +7,7 @@ from app.db import get_db
 from app.deps import get_current_user, user_permission_codes
 from app.models import Role, User
 from app.permissions_catalog import PERMISSIONS
+from app.phone_util import looks_like_email, phone_digits10
 from app.schemas import LoginRequest, RefreshRequest, TokenResponse, UserOut
 from app.security import (
     create_access_token,
@@ -25,6 +26,7 @@ def _user_out(user: User) -> UserOut:
     return UserOut(
         id=user.id,
         email=user.email,
+        phone=user.phone,
         full_name=user.full_name,
         is_active=user.is_active,
         is_platform_admin=user.is_platform_admin,
@@ -35,12 +37,27 @@ def _user_out(user: User) -> UserOut:
     )
 
 
+def _find_user_by_login(db: Session, raw: str) -> User | None:
+    ident = (raw or "").strip()
+    if not ident:
+        return None
+    if looks_like_email(ident):
+        return db.scalar(select(User).where(User.email == ident.lower()))
+    phone = phone_digits10(ident)
+    if phone:
+        return db.scalar(select(User).where(User.phone == phone))
+    # fallback: try as email anyway
+    return db.scalar(select(User).where(User.email == ident.lower()))
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)):
-    email = body.email.lower().strip()
-    user = db.scalar(select(User).where(User.email == email))
+    raw = (body.login or (str(body.email) if body.email else "") or "").strip()
+    if not raw:
+        raise HTTPException(status_code=422, detail="Укажите email или телефон")
+    user = _find_user_by_login(db, raw)
     if user is None or not verify_password(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Неверный email или пароль")
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Пользователь отключён")
     return TokenResponse(

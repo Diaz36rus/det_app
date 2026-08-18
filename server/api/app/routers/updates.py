@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from app.config import settings
 
@@ -50,7 +50,31 @@ def download_pack(filename: str):
     path = _releases_root() / "packs" / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Файл не найден")
-    return FileResponse(path, filename=filename)
+    media = "application/vnd.android.package-archive" if filename.lower().endswith(".apk") else None
+    if filename.lower().endswith(".zip"):
+        media = "application/zip"
+    return FileResponse(path, filename=filename, media_type=media)
+
+
+@router.get("/android")
+def latest_android_apk():
+    """Постоянная ссылка/QR: всегда отдаёт актуальный APK из latest.json."""
+    path = _releases_root() / "latest.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Релизов ещё нет. Загрузите первый билд.")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    android_url = (data.get("android_url") or "").strip()
+    if not android_url:
+        raise HTTPException(status_code=404, detail="APK ещё не загружен")
+    name = Path(android_url).name
+    local = _releases_root() / "packs" / name
+    if local.is_file() and _SAFE_NAME.match(name):
+        return FileResponse(
+            local,
+            filename=name,
+            media_type="application/vnd.android.package-archive",
+        )
+    return RedirectResponse(android_url, status_code=302)
 
 
 @router.post("/publish")
@@ -73,6 +97,14 @@ async def publish_release(
     if windows_zip is None and android_apk is None:
         raise HTTPException(status_code=400, detail="Нужен windows_zip и/или android_apk")
 
+    notes_clean = (notes or "").strip()
+    # Чинит типичный mojibake: UTF-8 «Сборка» прочитали как cp1251 → «РЎР±РѕСЂРєР°».
+    if "РЎР±" in notes_clean or "РсР" in notes_clean:
+        try:
+            notes_clean = notes_clean.encode("cp1251").decode("utf-8")
+        except Exception:
+            pass
+
     root = _releases_root()
     packs = root / "packs"
     base = _public_base()
@@ -80,7 +112,7 @@ async def publish_release(
         "version": version.strip(),
         "build": int(build),
         "min_build": int(min_build),
-        "notes": notes.strip(),
+        "notes": notes_clean,
         "db_version": int(db_version),
         "critical": bool(critical),
         "url": "",
