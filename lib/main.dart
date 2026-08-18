@@ -17,15 +17,7 @@ import 'auth/auth_gate.dart';
 import 'backup_helper.dart';
 import 'bug_report_dialog.dart';
 import 'conn_status_sheet.dart';
-import 'crm/cloud_board_screen.dart';
-import 'crm/cloud_clients_screen.dart';
-import 'crm/cloud_inventory_screen.dart';
 import 'crm/cloud_mode.dart';
-import 'crm/cloud_ops_screens.dart';
-import 'crm/cloud_search_dialog.dart';
-import 'crm/cloud_services_screen.dart';
-import 'crm/cloud_staff_screen.dart';
-import 'cash_cloud/cloud_cash_screen.dart';
 import 'tour_keys.dart';
 import 'update/update_dialog.dart';
 import 'update/update_service.dart';
@@ -435,59 +427,8 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   }
 
   Widget _buildContent() {
-    // Company signed-in: все операционные экраны с сервера.
-    if (CloudMode.enabled) {
-      if (_selectedIndex == AppMenuIds.workshop) {
-        return CloudWorkshopScreen(
-          key: ValueKey('cloud_ws_$_selectedWorkshop'),
-          workshop: _selectedWorkshop,
-        );
-      }
-      switch (_selectedIndex) {
-        case AppMenuIds.board:
-        case AppMenuIds.newOrder:
-          return const CloudBoardScreen(key: ValueKey('cloud_board'));
-        case AppMenuIds.calendar:
-          final cal = _selectedCalendarDate;
-          return CloudCalendarScreen(
-            key: ValueKey('cloud_cal_${cal.year}-${cal.month}-${cal.day}'),
-            selectedDate: DateTime(cal.year, cal.month, cal.day),
-            onDateChanged: (date) {
-              setState(() {
-                _selectedCalendarDate = DateTime(date.year, date.month, date.day);
-              });
-            },
-            onCreate: () => _selectMenu(AppMenuIds.newOrder),
-          );
-        case AppMenuIds.clients:
-          return const CloudClientsScreen(key: ValueKey('cloud_clients'));
-        case AppMenuIds.cash:
-          return const CloudCashScreen(key: ValueKey('cloud_cash'));
-        case AppMenuIds.stats:
-          return Center(
-            key: const ValueKey('cloud_stats'),
-            child: Text(
-              'Статистика с сервера — скоро',
-              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 16),
-            ),
-          );
-        case AppMenuIds.staff:
-          return const CloudStaffScreen(key: ValueKey('cloud_staff'));
-        case AppMenuIds.services:
-          return const CloudServicesScreen(key: ValueKey('cloud_services'));
-        case AppMenuIds.inventory:
-          return const CloudInventoryScreen(key: ValueKey('cloud_inv'));
-        case AppMenuIds.completed:
-          return const CloudCompletedScreen(key: ValueKey('cloud_done'));
-        case AppMenuIds.preview:
-          return const Center(
-            key: ValueKey('cloud_preview'),
-            child: Text('Превью — в разработке', style: TextStyle(color: AppColors.textMuted)),
-          );
-        default:
-          return const CloudBoardScreen(key: ValueKey('cloud_board_fallback'));
-      }
-    }
+    // При CloudMode данные идут через CloudDbBridge в DatabaseHelper —
+    // визуал и экраны те же, что локально.
     if (_selectedIndex == AppMenuIds.workshop) {
       return WorkshopsScreen(selectedWorkshop: _selectedWorkshop, key: ValueKey("ws_$_selectedWorkshop"));
     }
@@ -529,6 +470,15 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       case AppMenuIds.cash:
         return const CashScreen(key: ValueKey(AppMenuIds.cash));
       case AppMenuIds.stats:
+        if (CloudMode.enabled) {
+          return Center(
+            key: const ValueKey('cloud_stats'),
+            child: Text(
+              'Статистика с сервера — скоро',
+              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 16),
+            ),
+          );
+        }
         return const StatsScreen(key: ValueKey(AppMenuIds.stats));
       case AppMenuIds.staff:
         return const MastersScreen(key: ValueKey(AppMenuIds.staff));
@@ -715,12 +665,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
               afterTap?.call();
               await runWithPulseHighlight(
                 _pulseSearch,
-                () => showDialog(
-                  context: context,
-                  builder: (context) => CloudMode.enabled
-                      ? const CloudSearchDialog()
-                      : const SearchDialog(),
-                ),
+                () => showDialog(context: context, builder: (context) => const SearchDialog()),
               );
             },
             borderRadius: BorderRadius.circular(12),
@@ -1510,12 +1455,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             ConnStatusDot(onTap: () => showConnStatusSheet(context)),
             IconButton(
               tooltip: 'Поиск',
-              onPressed: () => showDialog(
-                context: context,
-                builder: (_) => CloudMode.enabled
-                    ? const CloudSearchDialog()
-                    : const SearchDialog(),
-              ),
+              onPressed: () => showDialog(context: context, builder: (_) => const SearchDialog()),
               icon: const Icon(Icons.search, color: AppColors.primary),
             ),
           ],

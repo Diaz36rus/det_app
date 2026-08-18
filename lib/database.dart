@@ -10,6 +10,7 @@ import 'package:sqflite/sqflite.dart';
 import 'sync/remote_database.dart';
 import 'sync/sync_config.dart';
 import 'cash_catalog.dart';
+import 'crm/cloud_db_bridge.dart';
 import 'inventory_catalog.dart';
 import 'wrap_catalog.dart';
 
@@ -1116,6 +1117,7 @@ class DatabaseHelper {
 
   // --- ЗАКАЗЫ ---
   Future<List<Map<String, dynamic>>> getAllOrders() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getAllOrders();
     final db = await database;
     return await db.rawQuery('''
       SELECT orders.*, clients.name as client_name, clients.phone as client_phone, cars.make_model, cars.plate, m.name as master_name,
@@ -1128,6 +1130,7 @@ class DatabaseHelper {
   }
 
   Future<Map<String, dynamic>?> getOrderById(int orderId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderById(orderId);
     final db = await database;
     List<Map> res = await db.rawQuery('''
       SELECT orders.*, clients.name as client_name, clients.phone as client_phone, clients.is_vip,
@@ -1146,6 +1149,7 @@ class DatabaseHelper {
 
   /// Завершённые заказы (Выдан). Опциональный поиск по клиенту/авто/id.
   Future<List<Map<String, dynamic>>> getCompletedOrders([String query = ""]) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCompletedOrders(query);
     final db = await database;
     final q = query.trim();
     if (q.isEmpty) {
@@ -1258,11 +1262,21 @@ class DatabaseHelper {
   }
 
   Future<int> addClient(String name, String phone, {int isVip = 0}) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addClient(name, phone, isVip: isVip);
+      bumpDataRevision();
+      return id;
+    }
     final db = await database;
     return await db.insert('clients', {'name': name, 'phone': phone, 'is_vip': isVip});
   }
 
   Future<int> addCar(int clientId, String makeModel, String plate, {String vin = "", String category = "1"}) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addCar(clientId, makeModel, plate, vin: vin, category: category);
+      bumpDataRevision();
+      return id;
+    }
     final db = await database;
     return await db.insert('cars', {'client_id': clientId, 'make_model': makeModel, 'plate': plate, 'vin': vin, 'category': category});
   }
@@ -1301,6 +1315,20 @@ class DatabaseHelper {
     String endTime = "",
     String endDate = "",
   }) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addOrderWithItems(
+        clientId,
+        carId,
+        items,
+        status: status,
+        dueDate: dueDate,
+        startTime: startTime,
+        endTime: endTime,
+        endDate: endDate,
+      );
+      bumpDataRevision();
+      return id;
+    }
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     String notes = items.map((i) => i['name'] as String).join(", ");
@@ -1456,6 +1484,7 @@ class DatabaseHelper {
 
   /// Причины, почему нельзя поставить «Выдан». Пустой список = можно.
   Future<List<String>> validateIssueOrder(int orderId) async {
+    if (CloudDbBridge.active) return [];
     final db = await database;
     // Подтянуть шапки пакетов по зонам (старые заказы могли «висеть» незакрытыми).
     final packageHeaders = await db.query(
@@ -1540,6 +1569,11 @@ class DatabaseHelper {
   /// Обновляет статус. Для «Выдан» сначала проверка долга и незакрытых работ.
   /// Возвращает `false`, если выдача запрещена (БД не менялась).
   Future<bool> updateStatus(int orderId, String newStatus) async {
+    if (CloudDbBridge.active) {
+      final ok = await CloudDbBridge.instance.updateStatus(orderId, newStatus);
+      if (ok) bumpDataRevision();
+      return ok;
+    }
     if (newStatus == "Выдан") {
       final reasons = await validateIssueOrder(orderId);
       if (reasons.isNotEmpty) return false;
@@ -1558,6 +1592,11 @@ class DatabaseHelper {
 
     // --- УДАЛЕНИЕ ЗАКАЗА ---
   Future<void> deleteOrder(int orderId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteOrder(orderId);
+      bumpDataRevision();
+      return;
+    }
     // Вернуть метры на рулоны и очистить order_wrap_films (дельта-учёт).
     await setOrderWrapFilms(orderId, const []);
     final db = await database;
@@ -1575,6 +1614,7 @@ class DatabaseHelper {
 
   // --- РАБОТЫ ЗАКАЗА (ORDER ITEMS) ---
   Future<List<Map<String, dynamic>>> getOrderItems(int orderId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderItems(orderId);
     final db = await database;
     await _reattachOrphanZoneLines(db, orderId);
     final headers = await db.query(
@@ -2089,12 +2129,17 @@ class DatabaseHelper {
   }
 
   Future<void> addOrderEvent(int orderId, String text) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.addOrderEvent(orderId, text);
+      return;
+    }
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     await db.insert('order_events', {'order_id': orderId, 'event_text': text, 'created_at': now});
   }
 
   Future<List<Map<String, dynamic>>> getOrderEvents(int orderId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderEvents(orderId);
     final db = await database;
     return await db.query('order_events', where: 'order_id = ?', whereArgs: [orderId], orderBy: 'id DESC');
   }
@@ -2185,6 +2230,7 @@ class DatabaseHelper {
   }
 
   Future<Map<String, dynamic>> getOrderHandover(int orderId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderHandover(orderId);
     final db = await database;
     final rows = await db.query(
       'orders',
@@ -2483,6 +2529,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getOrderPayments(int orderId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderPayments(orderId);
     final db = await database;
     return db.query(
       'payments',
@@ -2572,11 +2619,13 @@ class DatabaseHelper {
 
   // --- КЛИЕНТЫ И АВТО ---
   Future<List<Map<String, dynamic>>> getClientsList() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getClientsList();
     final db = await database;
     return await db.query('clients', orderBy: 'id DESC');
   }
 
   Future<List<Map<String, dynamic>>> searchClients(String query) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.searchClients(query);
     final db = await database;
     String q = "%$query%";
     return await db.rawQuery('''
@@ -2589,6 +2638,7 @@ class DatabaseHelper {
   }
 
   Future<Map<String, List<Map<String, dynamic>>>> searchGlobal(String query) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.searchGlobal(query);
     final db = await database;
     String q = "%$query%";
     
@@ -2619,6 +2669,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getClientCars(int clientId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getClientCars(clientId);
     final db = await database;
     return await db.query('cars', where: 'client_id = ?', whereArgs: [clientId]);
   }
@@ -2701,6 +2752,11 @@ class DatabaseHelper {
   }
 
   Future<void> updateClientVip(int clientId, int isVip) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateClientVip(clientId, isVip);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.update('clients', {'is_vip': isVip}, where: 'id = ?', whereArgs: [clientId]);
   }
@@ -2717,6 +2773,7 @@ class DatabaseHelper {
 
   // --- МАСТЕРА И РОЛИ ---
   Future<List<Map<String, dynamic>>> getAllMastersFull() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getAllMastersFull();
     final db = await database;
     return await db.query('masters', orderBy: 'id ASC');
   }
@@ -2733,11 +2790,21 @@ class DatabaseHelper {
   }
 
   Future<void> addMaster(String name, String role) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.addMaster(name, role);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.insert('masters', {'name': name, 'role': role});
   }
 
   Future<void> updateMaster(int id, {String? name, String? role}) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateMaster(id, name: name, role: role);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final data = <String, dynamic>{};
     if (name != null) data['name'] = name;
@@ -2826,6 +2893,7 @@ class DatabaseHelper {
   }
 
   Future<List<String>> getRolesList() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getRolesList();
     final db = await database;
     List<Map> res = await db.query('roles', orderBy: 'id ASC');
     return res.map((r) => r['name'] as String).toList();
@@ -2844,6 +2912,7 @@ class DatabaseHelper {
   // --- КАССА И СТАТИСТИКА ---
 
   Future<Map<String, dynamic>?> getCurrentShift() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCurrentShift();
     final db = await database;
     final rows = await db.query(
       'cash_shifts',
@@ -2855,6 +2924,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getCashRegisters({bool activeOnly = true}) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCashRegisters();
     final db = await database;
     return await db.query(
       'cash_registers',
@@ -2986,6 +3056,7 @@ class DatabaseHelper {
 
   /// Карточки касс для смены: name, money_type, opening, expected (+ fact/Δ после закрытия).
   Future<List<Map<String, dynamic>>> getShiftRegisterSnapshots(int shiftId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getShiftRegisterSnapshots(shiftId);
     final registers = await getCashRegisters();
     final out = <Map<String, dynamic>>[];
     final db = await database;
@@ -3414,6 +3485,7 @@ class DatabaseHelper {
 
   /// Единый журнал: оплаты заказов + сторонние операции.
   Future<List<Map<String, dynamic>>> getCashJournal(String startDate, String endDate) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCashJournal(startDate, endDate);
     final db = await database;
     return await db.rawQuery('''
       SELECT
@@ -3463,6 +3535,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getOrderDebts({int limit = 50}) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderDebts(limit: limit);
     final db = await database;
     return await db.rawQuery('''
       SELECT orders.id, orders.price, orders.paid_amount, orders.status,
@@ -3490,6 +3563,7 @@ class DatabaseHelper {
   }
 
   Future<double> getTotalDebt() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getTotalDebt();
     final db = await database;
     final rows = await db.rawQuery('''
       SELECT COALESCE(SUM(CASE WHEN price - paid_amount > 0.01 THEN price - paid_amount ELSE 0 END), 0) as debt
@@ -3580,6 +3654,7 @@ class DatabaseHelper {
 
   // --- СКЛАД И УСЛУГИ ---
   Future<List<Map<String, dynamic>>> getInventory() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getInventory();
     final db = await database;
     return await db.rawQuery('''
       SELECT inventory.*,
@@ -4235,11 +4310,17 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getAllServices() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getAllServices();
     final db = await database;
     return await db.query('services', orderBy: 'id ASC');
   }
 
   Future<void> updateServicePrice(String name, String field, double price) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateServicePrice(name, field, price);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.update('services', {field: price}, where: 'name = ?', whereArgs: [name]);
   }
