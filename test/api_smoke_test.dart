@@ -532,10 +532,16 @@ void main() {
           body: jsonEncode({
             'client_id': clientId,
             'car_id': carId,
-            'start_time': '${day}T10:00',
-            'end_time': '${day}T12:00',
+            'start_time': '${day}T10:00:00',
+            'end_time': '${day}T12:30:00',
             'items': [
-              {'name': 'Мойка', 'price': 1500, 'workshop': 'Мойка', 'start_time': '${day}T10:00', 'end_time': '${day}T11:00'},
+              {
+                'name': 'Мойка',
+                'price': 1500,
+                'workshop': 'Мойка',
+                'start_time': '${day}T10:00:00',
+                'end_time': '${day}T11:00:00',
+              },
             ],
           }),
         )
@@ -551,8 +557,8 @@ void main() {
             'tech_wash_start': day,
             'tech_wash_end': day,
             'is_workshop_completed': true,
-            'start_time': '${day}T10:00',
-            'end_time': '${day}T14:00',
+            'start_time': '${day}T10:00:00',
+            'end_time': '${day}T14:30:00',
           }),
         )
         .timeout(const Duration(seconds: 15));
@@ -560,6 +566,7 @@ void main() {
     final patched = jsonDecode(utf8.decode(patch.bodyBytes)) as Map<String, dynamic>;
     expect(patched['tech_wash_start'], day);
     expect(patched['is_workshop_completed'], true);
-    expect((patched['start_time'] as String).length, greaterThan(16));
+    expect(patched['start_time'], '${day}T10:00:00');
+    expect(patched['end_time'], '${day}T14:30:00');
   });
 }
