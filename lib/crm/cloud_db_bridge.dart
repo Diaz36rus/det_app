@@ -375,10 +375,101 @@ class CloudDbBridge {
             'quantity': i.quantity,
             'unit': i.unit,
             'category': i.category,
-            'min_qty': 0,
+            'min_qty': i.minQty,
+            'meters_per_roll': i.metersPerRoll,
           },
         )
         .toList();
+  }
+
+  Future<int> addInventoryItem(
+    String name,
+    double quantity,
+    String unit, {
+    double minQty = 0,
+    String category = 'Прочее',
+    double metersPerRoll = 0,
+  }) async {
+    final item = await _crm.createInventory(
+      name: name,
+      quantity: quantity,
+      unit: unit,
+      category: category,
+      minQty: minQty,
+      metersPerRoll: metersPerRoll,
+    );
+    _inventory = await _crm.listInventory();
+    return item.id;
+  }
+
+  Future<void> updateInventoryItem(
+    int id, {
+    String? name,
+    double? quantity,
+    String? unit,
+    double? minQty,
+    String? category,
+    double? metersPerRoll,
+  }) async {
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (quantity != null) body['quantity'] = quantity;
+    if (unit != null) body['unit'] = unit;
+    if (minQty != null) body['min_qty'] = minQty;
+    if (category != null) body['category'] = category;
+    if (metersPerRoll != null) body['meters_per_roll'] = metersPerRoll;
+    if (body.isEmpty) return;
+    await _crm.patchInventory(id, body);
+    _inventory = await _crm.listInventory();
+  }
+
+  Future<void> adjustInventoryQuantity(
+    int id,
+    double delta, {
+    String reason = 'manual',
+    int? orderId,
+    String note = '',
+  }) async {
+    await _crm.inventoryMove(
+      itemId: id,
+      delta: delta,
+      reason: reason,
+      orderId: orderId,
+      note: note,
+    );
+    _inventory = await _crm.listInventory();
+  }
+
+  Future<List<Map<String, dynamic>>> getInventoryMoves({int? itemId, int limit = 100}) async {
+    return _crm.listInventoryMoves(itemId: itemId, limit: limit);
+  }
+
+  Future<List<Map<String, dynamic>>> getRecipesForService(String serviceName) async {
+    return _crm.listRecipes(serviceName);
+  }
+
+  Future<void> setRecipeLine(String serviceName, int inventoryId, double qty) async {
+    await _crm.upsertRecipe(serviceName: serviceName, inventoryId: inventoryId, qty: qty);
+  }
+
+  Future<void> deleteRecipeLine(int recipeId) async {
+    await _crm.deleteRecipe(recipeId);
+  }
+
+  Future<List<String>> deductRecipeForService(
+    String serviceName, {
+    int? orderId,
+    int? orderItemId,
+  }) async {
+    return _crm.deductRecipe(serviceName: serviceName, orderId: orderId);
+  }
+
+  Future<void> restoreRecipeForService(
+    String serviceName, {
+    int? orderId,
+    int? orderItemId,
+  }) async {
+    await _crm.restoreRecipe(serviceName: serviceName, orderId: orderId);
   }
 
   Future<Map<String, List<Map<String, dynamic>>>> searchGlobal(String q) async {
@@ -988,13 +1079,20 @@ class CloudDbBridge {
       }
     }
     if (item == null) return [];
+    final wasDone = item.isDone;
     await _crm.patchOrderItem(o.id, itemId, {'is_done': isDone});
     await _refreshOrder(o.id);
+    final warnings = <String>[];
+    if (isDone && !wasDone) {
+      warnings.addAll(await deductRecipeForService(item.name, orderId: o.id, orderItemId: itemId));
+    } else if (!isDone && wasDone) {
+      await restoreRecipeForService(item.name, orderId: o.id, orderItemId: itemId);
+    }
     final parentId = item.parentId;
     if (parentId != null) {
       await _syncZoneHeaderDone(o.id, parentId);
     }
-    return [];
+    return warnings;
   }
 
   Future<void> _syncZoneHeaderDone(int orderId, int headerId) async {

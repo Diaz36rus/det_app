@@ -339,6 +339,21 @@ class CrmInventoryMove(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class CrmServiceRecipe(Base):
+    __tablename__ = "crm_service_recipes"
+    __table_args__ = (
+        UniqueConstraint("company_id", "service_name", "inventory_id", name="uq_recipe_svc_inv"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    service_name: Mapped[str] = mapped_column(String(300), nullable=False, index=True)
+    inventory_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_inventory_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    qty: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
+
+
 class CashRegister(Base):
     __tablename__ = "cash_registers"
     __table_args__ = (UniqueConstraint("company_id", "money_type", name="uq_cash_reg_company_type"),)

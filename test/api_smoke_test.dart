@@ -788,4 +788,102 @@ void main() {
         .firstWhere((e) => e['id'] == rollId);
     expect((restored['meters_left'] as num).toDouble(), 15);
   });
+
+  test('CRM recipes deduct/restore on inventory (needs API 0.14+)', () async {
+    final ver = await apiVersion();
+    if (!_atLeast(ver, 0, 14)) {
+      print('SKIP recipes: API $ver');
+      return;
+    }
+    final token = await ownerToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+
+    final inv = await http
+        .post(
+          Uri.parse('$base/crm/inventory'),
+          headers: headers,
+          body: jsonEncode({
+            'name': 'Shampoo $stamp',
+            'quantity': 10,
+            'unit': 'мл',
+            'category': 'Мойка',
+            'min_qty': 2,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(inv.statusCode, 200, reason: utf8.decode(inv.bodyBytes));
+    final invId = (jsonDecode(utf8.decode(inv.bodyBytes))['id'] as num).toInt();
+
+    final upsert = await http
+        .put(
+          Uri.parse('$base/crm/recipes'),
+          headers: headers,
+          body: jsonEncode({
+            'service_name': 'Мойка кузова $stamp',
+            'inventory_id': invId,
+            'qty': 3,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(upsert.statusCode, 200, reason: utf8.decode(upsert.bodyBytes));
+
+    final listed = await http
+        .get(
+          Uri.parse('$base/crm/recipes?service_name=${Uri.encodeQueryComponent('Мойка кузова $stamp')}'),
+          headers: headers,
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(listed.statusCode, 200);
+    final recipes = jsonDecode(utf8.decode(listed.bodyBytes)) as List;
+    expect(recipes.length, 1);
+    expect((recipes.first as Map)['qty'], 3);
+
+    final deduct = await http
+        .post(
+          Uri.parse('$base/crm/recipes/deduct'),
+          headers: headers,
+          body: jsonEncode({'service_name': 'Мойка кузова $stamp'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(deduct.statusCode, 200, reason: utf8.decode(deduct.bodyBytes));
+
+    final after = await http
+        .get(Uri.parse('$base/crm/inventory'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final items = jsonDecode(utf8.decode(after.bodyBytes)) as List;
+    final row = items.cast<Map>().firstWhere((e) => e['id'] == invId);
+    expect((row['quantity'] as num).toDouble(), 7);
+
+    final restore = await http
+        .post(
+          Uri.parse('$base/crm/recipes/restore'),
+          headers: headers,
+          body: jsonEncode({'service_name': 'Мойка кузова $stamp'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(restore.statusCode, 200, reason: utf8.decode(restore.bodyBytes));
+
+    final after2 = await http
+        .get(Uri.parse('$base/crm/inventory'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final items2 = jsonDecode(utf8.decode(after2.bodyBytes)) as List;
+    final row2 = items2.cast<Map>().firstWhere((e) => e['id'] == invId);
+    expect((row2['quantity'] as num).toDouble(), 10);
+
+    final patch = await http
+        .patch(
+          Uri.parse('$base/crm/inventory/$invId'),
+          headers: headers,
+          body: jsonEncode({'min_qty': 5, 'quantity': 4}),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(patch.statusCode, 200, reason: utf8.decode(patch.bodyBytes));
+    final patched = jsonDecode(utf8.decode(patch.bodyBytes)) as Map<String, dynamic>;
+    expect((patched['quantity'] as num).toDouble(), 4);
+    expect((patched['min_qty'] as num).toDouble(), 5);
+  });
 }

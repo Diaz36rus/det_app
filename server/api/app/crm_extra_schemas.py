@@ -162,5 +162,40 @@ class CrmOrderWrapFilmsPutResult(BaseModel):
     films: list[CrmOrderWrapFilmOut] = []
 
 
+class CrmInventoryUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    quantity: float | None = None
+    unit: str | None = Field(default=None, max_length=20)
+    category: str | None = Field(default=None, max_length=80)
+    min_qty: float | None = None
+    meters_per_roll: float | None = None
+
+
+class CrmRecipeOut(BaseModel):
+    id: int
+    service_name: str
+    inventory_id: int
+    qty: float
+    inventory_name: str = ""
+    unit: str = "шт"
+    stock: float = 0
+
+
+class CrmRecipeUpsert(BaseModel):
+    service_name: str = Field(min_length=1, max_length=300)
+    inventory_id: int
+    qty: float = 1
+
+
+class CrmRecipeApply(BaseModel):
+    service_name: str = Field(min_length=1, max_length=300)
+    order_id: int | None = None
+    order_item_id: int | None = None
+
+
+class CrmRecipeApplyResult(BaseModel):
+    warnings: list[str] = []
+
+
 class CrmImportClients(BaseModel):
     clients: list[dict] = []

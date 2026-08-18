@@ -14,12 +14,17 @@ from app.crm_extra_schemas import (
     CrmInventoryMoveCreate,
     CrmInventoryMoveOut,
     CrmInventoryOut,
+    CrmInventoryUpdate,
     CrmMasterCreate,
     CrmMasterOut,
     CrmMasterUpdate,
     CrmOrderWrapFilmOut,
     CrmOrderWrapFilmsPut,
     CrmOrderWrapFilmsPutResult,
+    CrmRecipeApply,
+    CrmRecipeApplyResult,
+    CrmRecipeOut,
+    CrmRecipeUpsert,
     CrmServiceCreate,
     CrmServiceOut,
     CrmServiceUpdate,
@@ -38,6 +43,7 @@ from app.models import (
     CrmOrder,
     CrmOrderWrapFilm,
     CrmService,
+    CrmServiceRecipe,
     User,
 )
 from app.routers.crm import _company_id
@@ -255,6 +261,66 @@ def create_inventory(
     return row
 
 
+@router.patch("/inventory/{item_id}", response_model=CrmInventoryOut)
+def update_inventory(
+    item_id: int,
+    body: CrmInventoryUpdate,
+    user: User = Depends(require_permissions("inventory.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    item = db.scalar(
+        select(CrmInventoryItem).where(
+            CrmInventoryItem.id == item_id, CrmInventoryItem.company_id == cid
+        )
+    )
+    if item is None:
+        raise HTTPException(404, "Позиция не найдена")
+    old_qty = float(item.quantity or 0)
+    if body.name is not None:
+        item.name = body.name.strip()
+    if body.unit is not None:
+        item.unit = body.unit
+    if body.category is not None:
+        item.category = body.category
+    if body.min_qty is not None:
+        item.min_qty = float(body.min_qty)
+    if body.meters_per_roll is not None:
+        item.meters_per_roll = float(body.meters_per_roll)
+    if body.quantity is not None:
+        item.quantity = float(body.quantity)
+        delta = float(body.quantity) - old_qty
+        if abs(delta) > 0.0001:
+            db.add(
+                CrmInventoryMove(
+                    company_id=cid,
+                    item_id=item.id,
+                    delta=delta,
+                    balance_after=float(item.quantity),
+                    reason="inventory_count",
+                    note="Инвентаризация / правка остатка",
+                )
+            )
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.get("/inventory/moves", response_model=list[CrmInventoryMoveOut])
+def list_inventory_moves(
+    item_id: int | None = None,
+    limit: int = 100,
+    user: User = Depends(require_permissions("inventory.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    q = select(CrmInventoryMove).where(CrmInventoryMove.company_id == cid)
+    if item_id is not None:
+        q = q.where(CrmInventoryMove.item_id == item_id)
+    rows = db.scalars(q.order_by(CrmInventoryMove.id.desc()).limit(max(1, min(limit, 500)))).all()
+    return list(rows)
+
+
 @router.post("/inventory/moves", response_model=CrmInventoryMoveOut)
 def create_inventory_move(
     body: CrmInventoryMoveCreate,
@@ -284,6 +350,175 @@ def create_inventory_move(
     db.commit()
     db.refresh(move)
     return move
+
+
+# --- Recipes ---
+
+
+def _recipe_out(row: CrmServiceRecipe, inv: CrmInventoryItem | None) -> CrmRecipeOut:
+    return CrmRecipeOut(
+        id=row.id,
+        service_name=row.service_name,
+        inventory_id=row.inventory_id,
+        qty=float(row.qty or 0),
+        inventory_name=inv.name if inv else "",
+        unit=(inv.unit if inv else "шт") or "шт",
+        stock=float(inv.quantity) if inv else 0.0,
+    )
+
+
+@router.get("/recipes", response_model=list[CrmRecipeOut])
+def list_recipes(
+    service_name: str,
+    user: User = Depends(require_permissions("inventory.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    name = (service_name or "").strip()
+    rows = db.scalars(
+        select(CrmServiceRecipe)
+        .where(CrmServiceRecipe.company_id == cid, CrmServiceRecipe.service_name == name)
+        .order_by(CrmServiceRecipe.id)
+    ).all()
+    return [_recipe_out(r, db.get(CrmInventoryItem, r.inventory_id)) for r in rows]
+
+
+@router.put("/recipes")
+def upsert_recipe(
+    body: CrmRecipeUpsert,
+    user: User = Depends(require_permissions("inventory.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    name = body.service_name.strip()
+    inv = db.scalar(
+        select(CrmInventoryItem).where(
+            CrmInventoryItem.id == body.inventory_id, CrmInventoryItem.company_id == cid
+        )
+    )
+    if inv is None:
+        raise HTTPException(404, "Позиция не найдена")
+    existing = db.scalar(
+        select(CrmServiceRecipe).where(
+            CrmServiceRecipe.company_id == cid,
+            CrmServiceRecipe.service_name == name,
+            CrmServiceRecipe.inventory_id == inv.id,
+        )
+    )
+    qty = float(body.qty or 0)
+    if qty <= 0:
+        if existing is not None:
+            db.delete(existing)
+            db.commit()
+        return {"ok": True, "deleted": True}
+    if existing is None:
+        existing = CrmServiceRecipe(
+            company_id=cid,
+            service_name=name,
+            inventory_id=inv.id,
+            qty=qty,
+        )
+        db.add(existing)
+    else:
+        existing.qty = qty
+    db.commit()
+    db.refresh(existing)
+    return _recipe_out(existing, inv)
+
+
+@router.delete("/recipes/{recipe_id}")
+def delete_recipe(
+    recipe_id: int,
+    user: User = Depends(require_permissions("inventory.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmServiceRecipe).where(
+            CrmServiceRecipe.id == recipe_id, CrmServiceRecipe.company_id == cid
+        )
+    )
+    if row is None:
+        raise HTTPException(404, "Рецепт не найден")
+    db.delete(row)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/recipes/deduct", response_model=CrmRecipeApplyResult)
+def deduct_recipe(
+    body: CrmRecipeApply,
+    user: User = Depends(require_permissions("inventory.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    name = body.service_name.strip()
+    warnings: list[str] = []
+    rows = db.scalars(
+        select(CrmServiceRecipe).where(
+            CrmServiceRecipe.company_id == cid, CrmServiceRecipe.service_name == name
+        )
+    ).all()
+    for r in rows:
+        qty = float(r.qty or 0)
+        if qty <= 0:
+            continue
+        inv = db.get(CrmInventoryItem, r.inventory_id)
+        if inv is None or inv.company_id != cid:
+            continue
+        stock = float(inv.quantity or 0)
+        if stock + 0.001 < qty:
+            warnings.append(f"{inv.name}: нужно {qty}, есть {stock}")
+        inv.quantity = stock - qty
+        db.add(
+            CrmInventoryMove(
+                company_id=cid,
+                item_id=inv.id,
+                delta=-qty,
+                balance_after=float(inv.quantity),
+                reason="recipe_deduct",
+                order_id=body.order_id,
+                note=f"Рецепт: {name}",
+            )
+        )
+    db.commit()
+    return CrmRecipeApplyResult(warnings=warnings)
+
+
+@router.post("/recipes/restore", response_model=CrmRecipeApplyResult)
+def restore_recipe(
+    body: CrmRecipeApply,
+    user: User = Depends(require_permissions("inventory.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    name = body.service_name.strip()
+    rows = db.scalars(
+        select(CrmServiceRecipe).where(
+            CrmServiceRecipe.company_id == cid, CrmServiceRecipe.service_name == name
+        )
+    ).all()
+    for r in rows:
+        qty = float(r.qty or 0)
+        if qty <= 0:
+            continue
+        inv = db.get(CrmInventoryItem, r.inventory_id)
+        if inv is None or inv.company_id != cid:
+            continue
+        inv.quantity = float(inv.quantity or 0) + qty
+        db.add(
+            CrmInventoryMove(
+                company_id=cid,
+                item_id=inv.id,
+                delta=qty,
+                balance_after=float(inv.quantity),
+                reason="recipe_restore",
+                order_id=body.order_id,
+                note=f"Возврат рецепта: {name}",
+            )
+        )
+    db.commit()
+    return CrmRecipeApplyResult(warnings=[])
 
 
 # --- Film rolls / wrap films ---

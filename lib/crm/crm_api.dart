@@ -267,6 +267,8 @@ class CrmApi {
     double quantity = 0,
     String unit = 'шт',
     String category = 'Прочее',
+    double minQty = 0,
+    double metersPerRoll = 0,
   }) async {
     final r = await http
         .post(
@@ -277,6 +279,8 @@ class CrmApi {
             'quantity': quantity,
             'unit': unit,
             'category': category,
+            'min_qty': minQty,
+            'meters_per_roll': metersPerRoll,
           }),
         )
         .timeout(const Duration(seconds: 15));
@@ -284,14 +288,118 @@ class CrmApi {
     return CrmInventoryItem.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
-  Future<void> inventoryMove({required int itemId, required double delta, String reason = 'adjust'}) async {
+  Future<CrmInventoryItem> patchInventory(int id, Map<String, dynamic> body) async {
+    final r = await http
+        .patch(_u('/crm/inventory/$id'), headers: _headers(), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmInventoryItem.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<List<Map<String, dynamic>>> listInventoryMoves({int? itemId, int limit = 100}) async {
+    final q = <String, String>{
+      if (itemId != null) 'item_id': '$itemId',
+      'limit': '$limit',
+    };
+    final uri = _u('/crm/inventory/moves').replace(queryParameters: q);
+    final r = await http.get(uri, headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<void> inventoryMove({
+    required int itemId,
+    required double delta,
+    String reason = 'adjust',
+    int? orderId,
+    String note = '',
+  }) async {
     final r = await http
         .post(
           _u('/crm/inventory/moves'),
           headers: _headers(),
-          body: jsonEncode({'item_id': itemId, 'delta': delta, 'reason': reason}),
+          body: jsonEncode({
+            'item_id': itemId,
+            'delta': delta,
+            'reason': reason,
+            if (orderId != null) 'order_id': orderId,
+            if (note.isNotEmpty) 'note': note,
+          }),
         )
         .timeout(const Duration(seconds: 15));
+    _ensure(r);
+  }
+
+  Future<List<Map<String, dynamic>>> listRecipes(String serviceName) async {
+    final uri = _u('/crm/recipes').replace(queryParameters: {'service_name': serviceName});
+    final r = await http.get(uri, headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<void> upsertRecipe({
+    required String serviceName,
+    required int inventoryId,
+    required double qty,
+  }) async {
+    final r = await http
+        .put(
+          _u('/crm/recipes'),
+          headers: _headers(),
+          body: jsonEncode({
+            'service_name': serviceName,
+            'inventory_id': inventoryId,
+            'qty': qty,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+  }
+
+  Future<void> deleteRecipe(int recipeId) async {
+    final r = await http
+        .delete(_u('/crm/recipes/$recipeId'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+  }
+
+  Future<List<String>> deductRecipe({
+    required String serviceName,
+    int? orderId,
+  }) async {
+    final r = await http
+        .post(
+          _u('/crm/recipes/deduct'),
+          headers: _headers(),
+          body: jsonEncode({
+            'service_name': serviceName,
+            if (orderId != null) 'order_id': orderId,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    _ensure(r);
+    final map = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+    return ((map['warnings'] as List?) ?? const []).map((e) => e.toString()).toList();
+  }
+
+  Future<void> restoreRecipe({
+    required String serviceName,
+    int? orderId,
+  }) async {
+    final r = await http
+        .post(
+          _u('/crm/recipes/restore'),
+          headers: _headers(),
+          body: jsonEncode({
+            'service_name': serviceName,
+            if (orderId != null) 'order_id': orderId,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
     _ensure(r);
   }
 

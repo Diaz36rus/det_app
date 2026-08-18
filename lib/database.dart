@@ -3894,6 +3894,18 @@ class DatabaseHelper {
     String category = InventoryCategories.other,
     double metersPerRoll = 0,
   }) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addInventoryItem(
+        name,
+        quantity,
+        unit,
+        minQty: minQty,
+        category: category,
+        metersPerRoll: metersPerRoll,
+      );
+      bumpDataRevision();
+      return id;
+    }
     final db = await database;
     final cat = InventoryCategories.all.contains(category) ? category : InventoryCategories.other;
     final resolvedUnit = unit.trim().isEmpty
@@ -3932,6 +3944,19 @@ class DatabaseHelper {
     String? category,
     double? metersPerRoll,
   }) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateInventoryItem(
+        id,
+        name: name,
+        quantity: quantity,
+        unit: unit,
+        minQty: minQty,
+        category: category,
+        metersPerRoll: metersPerRoll,
+      );
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final prev = await db.query('inventory', where: 'id = ?', whereArgs: [id], limit: 1);
     if (prev.isEmpty) return;
@@ -3985,6 +4010,17 @@ class DatabaseHelper {
 
   /// Позиции с остатком ≤ мин. (или ≤ 0, если мин. не задан).
   Future<List<Map<String, dynamic>>> getLowStockInventory() async {
+    if (CloudDbBridge.active) {
+      final all = await CloudDbBridge.instance.getInventory();
+      return all.where((i) {
+        final qty = (i['quantity'] as num?)?.toDouble() ?? 0;
+        final min = (i['min_qty'] as num?)?.toDouble() ?? 0;
+        final threshold = min > 0 ? min : 0;
+        return qty <= threshold;
+      }).toList()
+        ..sort((a, b) => ((a['quantity'] as num?)?.toDouble() ?? 0)
+            .compareTo((b['quantity'] as num?)?.toDouble() ?? 0));
+    }
     final db = await database;
     return await db.rawQuery('''
       SELECT * FROM inventory
@@ -4003,6 +4039,9 @@ class DatabaseHelper {
     int? inventoryId,
     bool logisticsOnly = true,
   }) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.getInventoryMoves(itemId: inventoryId, limit: limit);
+    }
     final db = await database;
     final where = <String>[];
     final args = <Object>[];
@@ -4313,6 +4352,17 @@ class DatabaseHelper {
     String brand = '',
     bool logMove = true,
   }) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.adjustInventoryQuantity(
+        id,
+        delta,
+        reason: reason,
+        orderId: orderId,
+        note: note,
+      );
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final brandName = delta > 0 ? await ensureInventoryBrand(brand) : InventoryBrands.normalize(brand);
     await db.rawUpdate(
@@ -4357,6 +4407,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getRecipesForService(String serviceName) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getRecipesForService(serviceName);
     final db = await database;
     return await db.rawQuery('''
       SELECT r.id, r.service_name, r.inventory_id, r.qty, i.name as inventory_name, i.unit, i.quantity as stock
@@ -4368,6 +4419,11 @@ class DatabaseHelper {
   }
 
   Future<void> setRecipeLine(String serviceName, int inventoryId, double qty) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.setRecipeLine(serviceName, inventoryId, qty);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final existing = await db.query(
       'service_recipes',
@@ -4401,6 +4457,11 @@ class DatabaseHelper {
   }
 
   Future<void> deleteRecipeLine(int recipeId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteRecipeLine(recipeId);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.delete('service_recipes', where: 'id = ?', whereArgs: [recipeId]);
     bumpDataRevision();
@@ -4412,6 +4473,13 @@ class DatabaseHelper {
     int? orderId,
     int? orderItemId,
   }) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.deductRecipeForService(
+        serviceName,
+        orderId: orderId,
+        orderItemId: orderItemId,
+      );
+    }
     final name = serviceName.trim();
     if (name.isEmpty) return const [];
     final warnings = <String>[];
@@ -4443,6 +4511,14 @@ class DatabaseHelper {
     int? orderId,
     int? orderItemId,
   }) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.restoreRecipeForService(
+        serviceName,
+        orderId: orderId,
+        orderItemId: orderItemId,
+      );
+      return;
+    }
     final name = serviceName.trim();
     if (name.isEmpty) return;
     final recipes = await getRecipesForService(name);

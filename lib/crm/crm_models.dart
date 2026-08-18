@@ -289,6 +289,7 @@ class CrmInventoryItem {
   final double quantity;
   final String unit;
   final String category;
+  final double minQty;
   final double metersPerRoll;
   const CrmInventoryItem({
     required this.id,
@@ -296,6 +297,7 @@ class CrmInventoryItem {
     required this.quantity,
     required this.unit,
     required this.category,
+    this.minQty = 0,
     this.metersPerRoll = 0,
   });
   factory CrmInventoryItem.fromJson(Map<String, dynamic> j) => CrmInventoryItem(
@@ -304,6 +306,7 @@ class CrmInventoryItem {
         quantity: (j['quantity'] as num?)?.toDouble() ?? 0,
         unit: j['unit']?.toString() ?? 'шт',
         category: j['category']?.toString() ?? '',
+        minQty: (j['min_qty'] as num?)?.toDouble() ?? 0,
         metersPerRoll: (j['meters_per_roll'] as num?)?.toDouble() ?? 0,
       );
 }
