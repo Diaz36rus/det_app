@@ -2066,6 +2066,11 @@ class DatabaseHelper {
 
   /// Общее время пакета оклейки — на шапку и всех детей.
   Future<void> updateWrapPackageSchedule(int headerId, String? startTime, String? endTime) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateWrapPackageSchedule(headerId, startTime, endTime);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final header = await db.query(
       'order_items',
@@ -2086,6 +2091,11 @@ class DatabaseHelper {
 
   /// Общие мастера пакета оклейки — на шапку и всех детей.
   Future<void> updateWrapPackageMasters(int headerId, List<int> masterIds) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateWrapPackageMasters(headerId, masterIds);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     final csv = masterIds.join(',');
     await db.update('order_items', {'master_ids': csv}, where: 'id = ?', whereArgs: [headerId]);
@@ -2094,6 +2104,11 @@ class DatabaseHelper {
 
   /// Отметка выполнения пакета — шапка и все зоны (списание склада по зонам).
   Future<List<String>> updateWrapPackageDone(int headerId, bool isDone) async {
+    if (CloudDbBridge.active) {
+      final w = await CloudDbBridge.instance.updateWrapPackageDone(headerId, isDone);
+      bumpDataRevision();
+      return w;
+    }
     final db = await database;
     final children = await db.query(
       'order_items',

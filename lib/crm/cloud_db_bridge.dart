@@ -686,7 +686,109 @@ class CloudDbBridge {
     required String kind,
     required List<String> zoneNames,
     required double packagePrice,
-  }) async {}
+  }) async {
+    await _ensureOrders();
+    final workshop = 'Оклейка';
+    final headerName = kind == 'tint' ? 'Тонировка' : 'Оклейка';
+    final wanted = zoneNames.map((n) => n.trim()).where((n) => n.isNotEmpty).toSet();
+
+    if (wanted.isEmpty) {
+      final order = _orders[orderId];
+      if (order != null) {
+        CrmOrderItem? header;
+        for (final it in order.items) {
+          if (it.name.trim() == headerName && it.parentId == null) {
+            header = it;
+            break;
+          }
+        }
+        if (header?.id != null) {
+          await _crm.deleteOrderItem(orderId, header!.id!);
+        }
+      }
+      await _refreshOrder(orderId);
+      return;
+    }
+
+    final headerId = await _ensureZonePackage(orderId, kind);
+    await _crm.patchOrderItem(orderId, headerId, {
+      'price': packagePrice,
+      'workshop': workshop,
+    });
+
+    await _refreshOrder(orderId);
+    final order = _orders[orderId];
+    if (order == null) return;
+    final children = order.items.where((it) => it.parentId == headerId).toList();
+    final byName = {for (final c in children) c.name.trim(): c};
+
+    for (final name in wanted) {
+      if (byName.containsKey(name)) continue;
+      await _crm.createOrderItem(
+        orderId,
+        CrmOrderItem(
+          name: name,
+          price: 0,
+          workshop: workshop,
+          parentId: headerId,
+        ),
+      );
+    }
+    for (final entry in byName.entries) {
+      if (wanted.contains(entry.key)) continue;
+      final id = entry.value.id;
+      if (id != null) await _crm.deleteOrderItem(orderId, id);
+    }
+    await _refreshOrder(orderId);
+  }
+
+  Future<int> _ensureZonePackage(int orderId, String kind) async {
+    await _ensureOrders();
+    var order = _orders[orderId];
+    if (order == null) {
+      await _refreshOrder(orderId);
+      order = _orders[orderId];
+    }
+    if (order == null) throw StateError('Заказ $orderId не найден');
+    final headerName = kind == 'tint' ? 'Тонировка' : 'Оклейка';
+    for (final it in order.items) {
+      if (it.name.trim() == headerName && it.parentId == null && it.id != null) {
+        return it.id!;
+      }
+    }
+    final created = await _crm.createOrderItem(
+      orderId,
+      CrmOrderItem(
+        name: headerName,
+        price: 0,
+        workshop: 'Оклейка',
+      ),
+    );
+    await _refreshOrder(orderId);
+    return created.id ?? 0;
+  }
+
+  bool _isWrapHeader(String? name) => (name ?? '').trim() == 'Оклейка';
+  bool _isTintHeader(String? name) => (name ?? '').trim() == 'Тонировка';
+  bool _isZoneHeader(String? name) => _isWrapHeader(name) || _isTintHeader(name);
+
+  bool _isWrapLine({String? category, String? name}) {
+    final n = (name ?? '').trim();
+    if (n.isEmpty || _isWrapHeader(n)) return false;
+    if (n.startsWith('Тонировка')) return false;
+    if (n.startsWith('Оклейка ·')) return true;
+    if ((category ?? '').trim() == 'Оклейка (Пленка)') return true;
+    if (n == 'Оклейка капота' || n == 'Оклейка крыши' || n == 'Полная оклейка кузова') return true;
+    return false;
+  }
+
+  bool _isTintLine({String? category, String? name}) {
+    final n = (name ?? '').trim();
+    if (n.isEmpty || _isTintHeader(n)) return false;
+    if (n.startsWith('Тонировка ·') || n.startsWith('Тонировка ')) return true;
+    if ((category ?? '').trim() == 'Тонировка') return true;
+    return false;
+  }
 
   Future<int> addOrderWithItems(
     int clientId,
@@ -787,6 +889,47 @@ class CloudDbBridge {
     String? startTime,
     String? endTime,
   }) async {
+    final asWrap = _isWrapLine(category: category, name: name);
+    final asTint = _isTintLine(category: category, name: name);
+    if (asWrap || asTint) {
+      final kind = asTint ? 'tint' : 'wrap';
+      final parentId = await _ensureZonePackage(orderId, kind);
+      await _refreshOrder(orderId);
+      final order = _orders[orderId];
+      CrmOrderItem? header;
+      if (order != null) {
+        for (final it in order.items) {
+          if (it.id == parentId) {
+            header = it;
+            break;
+          }
+        }
+        for (final it in order.items) {
+          if (it.parentId == parentId && it.name.trim() == name.trim()) {
+            if (sync) await _refreshOrder(orderId);
+            return it.id ?? 0;
+          }
+        }
+      }
+      final created = await _crm.createOrderItem(
+        orderId,
+        CrmOrderItem(
+          name: name,
+          price: 0,
+          workshop: workshop ?? header?.workshop ?? 'Оклейка',
+          masterIds: header?.masterIds ?? '',
+          startTime: (header?.startTime.isNotEmpty == true) ? header!.startTime : (startTime ?? ''),
+          endTime: (header?.endTime.isNotEmpty == true) ? header!.endTime : (endTime ?? ''),
+          parentId: parentId,
+        ),
+      );
+      if (price > 0 && (header?.price ?? 0) == 0) {
+        await _crm.patchOrderItem(orderId, parentId, {'price': price});
+      }
+      await _refreshOrder(orderId);
+      return created.id ?? 0;
+    }
+
     final created = await _crm.createOrderItem(
       orderId,
       CrmOrderItem(
@@ -805,17 +948,68 @@ class CloudDbBridge {
     if (itemId <= 0) return;
     final o = await _orderByItemId(itemId);
     if (o == null) return;
+    final item = o.items.firstWhere((i) => i.id == itemId);
+    if (_isZoneHeader(item.name) && item.parentId == null) {
+      // CASCADE на сервере удалит детей
+      await _crm.deleteOrderItem(o.id, itemId);
+      await _refreshOrder(o.id);
+      return;
+    }
+    final parentId = item.parentId;
     await _crm.deleteOrderItem(o.id, itemId);
     await _refreshOrder(o.id);
+    if (parentId != null) {
+      final refreshed = _orders[o.id];
+      final left = refreshed?.items.where((i) => i.parentId == parentId).toList() ?? [];
+      if (left.isEmpty) {
+        await _crm.deleteOrderItem(o.id, parentId);
+        await _refreshOrder(o.id);
+      } else {
+        await _syncZoneHeaderDone(o.id, parentId);
+      }
+    }
   }
 
   Future<List<String>> updateOrderItemDone(int itemId, bool isDone) async {
     if (itemId <= 0) return [];
     final o = await _orderByItemId(itemId);
     if (o == null) return [];
+    CrmOrderItem? item;
+    for (final i in o.items) {
+      if (i.id == itemId) {
+        item = i;
+        break;
+      }
+    }
+    if (item == null) return [];
     await _crm.patchOrderItem(o.id, itemId, {'is_done': isDone});
     await _refreshOrder(o.id);
+    final parentId = item.parentId;
+    if (parentId != null) {
+      await _syncZoneHeaderDone(o.id, parentId);
+    }
     return [];
+  }
+
+  Future<void> _syncZoneHeaderDone(int orderId, int headerId) async {
+    await _refreshOrder(orderId);
+    final order = _orders[orderId];
+    if (order == null) return;
+    CrmOrderItem? header;
+    for (final it in order.items) {
+      if (it.id == headerId) {
+        header = it;
+        break;
+      }
+    }
+    if (header == null || header.parentId != null || !_isZoneHeader(header.name)) return;
+    final children = order.items.where((it) => it.parentId == headerId).toList();
+    if (children.isEmpty) return;
+    final allDone = children.every((c) => c.isDone);
+    if (header.isDone != allDone) {
+      await _crm.patchOrderItem(orderId, headerId, {'is_done': allDone});
+      await _refreshOrder(orderId);
+    }
   }
 
   Future<void> updateOrderItemComment(int itemId, String comment) async {
@@ -1014,12 +1208,49 @@ class CloudDbBridge {
     return s.id;
   }
 
-  // Wrap / zone — безопасные no-op, чтобы карточка не падала
-  Future<List<String>> updateWrapPackageDone(int headerId, bool isDone) async => [];
+  // Wrap / tint packages
+  Future<List<String>> updateWrapPackageDone(int headerId, bool isDone) async {
+    final o = await _orderByItemId(headerId);
+    if (o == null) return [];
+    final children = o.items.where((it) => it.parentId == headerId).toList();
+    final warnings = <String>[];
+    warnings.addAll(await updateOrderItemDone(headerId, isDone));
+    for (final c in children) {
+      if (c.id == null) continue;
+      warnings.addAll(await updateOrderItemDone(c.id!, isDone));
+    }
+    return warnings;
+  }
 
-  Future<void> updateWrapPackageSchedule(int headerId, String? startTime, String? endTime) async {}
+  Future<void> updateWrapPackageSchedule(int headerId, String? startTime, String? endTime) async {
+    final o = await _orderByItemId(headerId);
+    if (o == null) return;
+    final header = o.items.firstWhere((it) => it.id == headerId);
+    final workshop = header.workshop.isNotEmpty ? header.workshop : 'Оклейка';
+    final body = {
+      'start_time': startTime ?? '',
+      'end_time': endTime ?? '',
+      'workshop': workshop,
+    };
+    await _crm.patchOrderItem(o.id, headerId, body);
+    for (final c in o.items.where((it) => it.parentId == headerId)) {
+      if (c.id == null) continue;
+      await _crm.patchOrderItem(o.id, c.id!, body);
+    }
+    await _refreshOrder(o.id);
+  }
 
-  Future<void> updateWrapPackageMasters(int headerId, List<int> masterIds) async {}
+  Future<void> updateWrapPackageMasters(int headerId, List<int> masterIds) async {
+    final o = await _orderByItemId(headerId);
+    if (o == null) return;
+    final csv = masterIds.join(',');
+    await _crm.patchOrderItem(o.id, headerId, {'master_ids': csv});
+    for (final c in o.items.where((it) => it.parentId == headerId)) {
+      if (c.id == null) continue;
+      await _crm.patchOrderItem(o.id, c.id!, {'master_ids': csv});
+    }
+    await _refreshOrder(o.id);
+  }
 
   Future<int> assignMastersToWorkshop(int orderId, String workshop, List<int> masterIds) async {
     await _ensureOrders();

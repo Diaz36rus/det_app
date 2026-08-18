@@ -18,7 +18,10 @@ is_workshop_completed, календарь/цеха через bridge, start/end 
 Деплой: tools\deploy_cali.ps1
 Автотесты: tools\run_regression.ps1 (local + api smoke)
 
-Дальше (этапы 3–7): пакеты оклейки, рулоны, рецепты/склад, касса 1:1, статистика.
+Дальше (этапы 4–7): рулоны, рецепты/склад, касса 1:1, статистика.
+
+API 0.11.0 + этап 3 (клиент): пакеты оклейки/тонировки через parent_id —
+syncZonePackage, wrap done/schedule/masters в CloudDbBridge.
 
 Блок A — как гонять
 -------------------

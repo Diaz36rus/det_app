@@ -569,4 +569,102 @@ void main() {
     expect(patched['start_time'], '${day}T10:00:00');
     expect(patched['end_time'], '${day}T14:30:00');
   });
+
+  test('CRM zone package parent_id wrap/tint (needs API 0.9+)', () async {
+    final ver = await apiVersion();
+    if (!_atLeast(ver, 0, 9)) {
+      print('SKIP zone-package: API $ver');
+      return;
+    }
+    final token = await ownerToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final c = await http
+        .post(
+          Uri.parse('$base/crm/clients'),
+          headers: headers,
+          body: jsonEncode({'name': 'Pkg $stamp', 'phone': '900888${stamp % 10000}'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final clientId = (jsonDecode(utf8.decode(c.bodyBytes))['id'] as num).toInt();
+    final carR = await http
+        .post(
+          Uri.parse('$base/crm/cars'),
+          headers: headers,
+          body: jsonEncode({'client_id': clientId, 'make_model': 'Pkg Car', 'plate': 'P$stamp'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final carId = (jsonDecode(utf8.decode(carR.bodyBytes))['id'] as num).toInt();
+    final o = await http
+        .post(
+          Uri.parse('$base/crm/orders'),
+          headers: headers,
+          body: jsonEncode({
+            'client_id': clientId,
+            'car_id': carId,
+            'items': [
+              {'name': 'Оклейка', 'price': 25000, 'workshop': 'Оклейка'},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(o.statusCode, 200, reason: utf8.decode(o.bodyBytes));
+    final order = jsonDecode(utf8.decode(o.bodyBytes)) as Map<String, dynamic>;
+    final orderId = (order['id'] as num).toInt();
+    final headerId = ((order['items'] as List).first as Map)['id'] as num;
+
+    final z1 = await http
+        .post(
+          Uri.parse('$base/crm/orders/$orderId/items'),
+          headers: headers,
+          body: jsonEncode({
+            'name': 'Оклейка · Капот',
+            'price': 0,
+            'workshop': 'Оклейка',
+            'parent_id': headerId.toInt(),
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(z1.statusCode, 200, reason: utf8.decode(z1.bodyBytes));
+    final zone = jsonDecode(utf8.decode(z1.bodyBytes)) as Map<String, dynamic>;
+    expect(zone['parent_id'], headerId);
+
+    final z2 = await http
+        .post(
+          Uri.parse('$base/crm/orders/$orderId/items'),
+          headers: headers,
+          body: jsonEncode({
+            'name': 'Оклейка · Крыша',
+            'price': 0,
+            'workshop': 'Оклейка',
+            'parent_id': headerId.toInt(),
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(z2.statusCode, 200, reason: utf8.decode(z2.bodyBytes));
+
+    final got = await http
+        .get(Uri.parse('$base/crm/orders/$orderId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final full = jsonDecode(utf8.decode(got.bodyBytes)) as Map<String, dynamic>;
+    expect((full['price'] as num).toDouble(), 25000);
+    final items = full['items'] as List;
+    expect(items.length, 3);
+    final kids = items.where((e) => (e as Map)['parent_id'] == headerId).length;
+    expect(kids, 2);
+
+    // Удаление шапки каскадом убирает зоны
+    final del = await http
+        .delete(Uri.parse('$base/crm/orders/$orderId/items/$headerId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(del.statusCode, 200, reason: utf8.decode(del.bodyBytes));
+    final after = await http
+        .get(Uri.parse('$base/crm/orders/$orderId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final afterItems = (jsonDecode(utf8.decode(after.bodyBytes)) as Map)['items'] as List;
+    expect(afterItems, isEmpty);
+  });
 }
