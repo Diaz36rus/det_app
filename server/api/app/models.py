@@ -182,3 +182,85 @@ class CrmOrderItem(Base):
     is_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     order: Mapped[CrmOrder] = relationship(back_populates="items")
+
+
+class CashRegister(Base):
+    __tablename__ = "cash_registers"
+    __table_args__ = (UniqueConstraint("company_id", "money_type", name="uq_cash_reg_company_type"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    money_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CashShift(Base):
+    __tablename__ = "cash_shifts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="open", nullable=False)  # open|closed
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    opened_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    balances: Mapped[list[CashShiftBalance]] = relationship(
+        back_populates="shift", cascade="all, delete-orphan"
+    )
+
+
+class CashShiftBalance(Base):
+    __tablename__ = "cash_shift_balances"
+    __table_args__ = (UniqueConstraint("shift_id", "register_id", name="uq_shift_register"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    shift_id: Mapped[int] = mapped_column(
+        ForeignKey("cash_shifts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    register_id: Mapped[int] = mapped_column(ForeignKey("cash_registers.id"), nullable=False)
+    opening: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    expected: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fact: Mapped[float | None] = mapped_column(Float, nullable=True)
+    difference: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    shift: Mapped[CashShift] = relationship(back_populates="balances")
+
+
+class CashFlow(Base):
+    __tablename__ = "cash_flows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), nullable=False, index=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("cash_shifts.id"), nullable=False, index=True)
+    register_id: Mapped[int] = mapped_column(ForeignKey("cash_registers.id"), nullable=False)
+    # Приход | Расход
+    type: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="Прочее", nullable=False)
+    method: Mapped[str] = mapped_column(String(40), default="Наличные", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+
+class CashPayment(Base):
+    __tablename__ = "cash_payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), nullable=False, index=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("cash_shifts.id"), nullable=False, index=True)
+    register_id: Mapped[int] = mapped_column(ForeignKey("cash_registers.id"), nullable=False)
+    crm_order_id: Mapped[int] = mapped_column(ForeignKey("crm_orders.id"), nullable=False, index=True)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)
+    method: Mapped[str] = mapped_column(String(40), default="Наличные", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

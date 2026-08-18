@@ -3,9 +3,26 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import engine
-from app.models import Branch, Company, Permission, Role, RolePermission, User, UserBranch, UserRole
+from app.models import (
+    Branch,
+    CashRegister,
+    Company,
+    Permission,
+    Role,
+    RolePermission,
+    User,
+    UserBranch,
+    UserRole,
+)
 from app.permissions_catalog import COMPANY_ROLE_PRESETS, PERMISSIONS
 from app.security import hash_password
+
+_DEFAULT_CASH_REGISTERS = [
+    ("Касса наличные", "Наличные", 0),
+    ("Терминал", "Карта", 1),
+    ("Перевод", "Перевод", 2),
+    ("Счёт", "Счёт", 3),
+]
 
 
 def ensure_user_phone_column() -> None:
@@ -119,5 +136,22 @@ def seed_database(db: Session) -> None:
             db.add(UserBranch(user_id=owner.id, branch_id=main_branch.id))
     elif owner is not None and not owner.phone:
         owner.phone = "9000000002"
+
+    # Кассы компании (C2)
+    if company is not None:
+        existing = db.scalars(
+            select(CashRegister).where(CashRegister.company_id == company.id).limit(1)
+        ).first()
+        if existing is None:
+            for name, money_type, sort_order in _DEFAULT_CASH_REGISTERS:
+                db.add(
+                    CashRegister(
+                        company_id=company.id,
+                        name=name,
+                        money_type=money_type,
+                        is_active=True,
+                        sort_order=sort_order,
+                    )
+                )
 
     db.commit()
