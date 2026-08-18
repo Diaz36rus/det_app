@@ -441,6 +441,23 @@ def create_payment(
     return row
 
 
+@router.get("/payments", response_model=list[CashPaymentOut])
+def list_payments(
+    order_id: int | None = None,
+    include_voided: bool = False,
+    user: User = Depends(require_permissions("cash.read")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    q = select(CashPayment).where(CashPayment.company_id == company_id)
+    if order_id is not None:
+        q = q.where(CashPayment.crm_order_id == order_id)
+    if not include_voided:
+        q = q.where(CashPayment.is_voided.is_(False))
+    rows = db.scalars(q.order_by(CashPayment.id.desc())).all()
+    return list(rows)
+
+
 @router.delete("/payments/{payment_id}", response_model=CashPaymentOut)
 def void_payment(
     payment_id: int,

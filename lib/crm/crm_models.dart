@@ -144,6 +144,20 @@ class CrmOrder {
   final String dueDate;
   final String startTime;
   final String endTime;
+  final String endDate;
+  final String clientNotes;
+  final String clientVisibleNotes;
+  final String masterNotes;
+  final String paymentMethod;
+  final double discountPercent;
+  final double discountFixed;
+  final String promoCode;
+  final bool handoverReady;
+  final bool handoverWorks;
+  final bool handoverPayment;
+  final bool handoverKeys;
+  final bool handoverInspect;
+  final bool handoverNotified;
   final List<int> masterIds;
   final List<CrmOrderItem> items;
   final String? clientName;
@@ -162,6 +176,20 @@ class CrmOrder {
     required this.dueDate,
     this.startTime = '',
     this.endTime = '',
+    this.endDate = '',
+    this.clientNotes = '',
+    this.clientVisibleNotes = '',
+    this.masterNotes = '',
+    this.paymentMethod = 'Наличные',
+    this.discountPercent = 0,
+    this.discountFixed = 0,
+    this.promoCode = '',
+    this.handoverReady = false,
+    this.handoverWorks = false,
+    this.handoverPayment = false,
+    this.handoverKeys = false,
+    this.handoverInspect = false,
+    this.handoverNotified = false,
     this.masterIds = const [],
     this.items = const [],
     this.clientName,
@@ -183,6 +211,20 @@ class CrmOrder {
         dueDate: j['due_date']?.toString() ?? '',
         startTime: j['start_time']?.toString() ?? '',
         endTime: j['end_time']?.toString() ?? '',
+        endDate: j['end_date']?.toString() ?? '',
+        clientNotes: j['client_notes']?.toString() ?? '',
+        clientVisibleNotes: j['client_visible_notes']?.toString() ?? '',
+        masterNotes: j['master_notes']?.toString() ?? '',
+        paymentMethod: j['payment_method']?.toString() ?? 'Наличные',
+        discountPercent: (j['discount_percent'] as num?)?.toDouble() ?? 0,
+        discountFixed: (j['discount_fixed'] as num?)?.toDouble() ?? 0,
+        promoCode: j['promo_code']?.toString() ?? '',
+        handoverReady: j['handover_ready'] == true,
+        handoverWorks: j['handover_works'] == true,
+        handoverPayment: j['handover_payment'] == true,
+        handoverKeys: j['handover_keys'] == true,
+        handoverInspect: j['handover_inspect'] == true,
+        handoverNotified: j['handover_notified'] == true,
         masterIds: (j['master_ids'] as List?)?.map((e) => (e as num).toInt()).toList() ?? const [],
         items: (j['items'] as List?)
                 ?.map((e) => CrmOrderItem.fromJson(e as Map<String, dynamic>))
@@ -252,4 +294,31 @@ class CrmInventoryItem {
         unit: j['unit']?.toString() ?? 'шт',
         category: j['category']?.toString() ?? '',
       );
+}
+
+class CrmOrderEvent {
+  final int id;
+  final int orderId;
+  final String eventText;
+  final String createdAt;
+
+  const CrmOrderEvent({
+    required this.id,
+    required this.orderId,
+    required this.eventText,
+    required this.createdAt,
+  });
+
+  factory CrmOrderEvent.fromJson(Map<String, dynamic> j) {
+    var created = j['created_at']?.toString() ?? '';
+    if (created.length >= 16) {
+      created = created.substring(0, 16).replaceFirst('T', ' ');
+    }
+    return CrmOrderEvent(
+      id: (j['id'] as num).toInt(),
+      orderId: (j['order_id'] as num).toInt(),
+      eventText: j['event_text']?.toString() ?? '',
+      createdAt: created,
+    );
+  }
 }

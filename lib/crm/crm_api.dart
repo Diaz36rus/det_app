@@ -295,6 +295,28 @@ class CrmApi {
     _ensure(r);
   }
 
+  Future<List<CrmOrderEvent>> listOrderEvents(int orderId) async {
+    final r = await http
+        .get(_u('/crm/orders/$orderId/events'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => CrmOrderEvent.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<CrmOrderEvent> createOrderEvent(int orderId, String text) async {
+    final r = await http
+        .post(
+          _u('/crm/orders/$orderId/events'),
+          headers: _headers(),
+          body: jsonEncode({'event_text': text}),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmOrderEvent.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
   void _ensure(http.Response r) {
     if (r.statusCode >= 200 && r.statusCode < 300) return;
     var msg = 'Ошибка CRM (${r.statusCode})';

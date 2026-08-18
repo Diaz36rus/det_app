@@ -9,6 +9,7 @@ from app.models import (
     CrmCar,
     CrmClient,
     CrmOrder,
+    CrmOrderEvent,
     CrmOrderItem,
     CrmOrderMaster,
     User,
@@ -21,6 +22,8 @@ from app.schemas import (
     CrmClientOut,
     CrmClientUpdate,
     CrmOrderCreate,
+    CrmOrderEventCreate,
+    CrmOrderEventOut,
     CrmOrderItemIn,
     CrmOrderItemOut,
     CrmOrderItemPatch,
@@ -70,7 +73,17 @@ def _fill_item_from_in(row: CrmOrderItem, body: CrmOrderItemIn) -> None:
 
 
 def _recalc_order_price(order: CrmOrder) -> None:
-    order.price = sum(float(it.price or 0) for it in (order.items or []))
+    works = sum(float(it.price or 0) for it in (order.items or []))
+    pct = float(getattr(order, "discount_percent", 0) or 0)
+    fixed = float(getattr(order, "discount_fixed", 0) or 0)
+    if pct < 0:
+        pct = 0
+    if fixed < 0:
+        fixed = 0
+    disc = works * (pct / 100.0) + fixed
+    if disc > works:
+        disc = works
+    order.price = works - disc
 
 
 def _get_company_order(db: Session, order_id: int, company_id: int) -> CrmOrder:
@@ -114,6 +127,20 @@ def _order_out(order: CrmOrder, client: CrmClient | None = None, car: CrmCar | N
         due_date=order.due_date or "",
         start_time=getattr(order, "start_time", None) or "",
         end_time=getattr(order, "end_time", None) or "",
+        end_date=getattr(order, "end_date", None) or "",
+        client_notes=getattr(order, "client_notes", None) or "",
+        client_visible_notes=getattr(order, "client_visible_notes", None) or "",
+        master_notes=getattr(order, "master_notes", None) or "",
+        payment_method=getattr(order, "payment_method", None) or "Наличные",
+        discount_percent=float(getattr(order, "discount_percent", 0) or 0),
+        discount_fixed=float(getattr(order, "discount_fixed", 0) or 0),
+        promo_code=getattr(order, "promo_code", None) or "",
+        handover_ready=bool(getattr(order, "handover_ready", False)),
+        handover_works=bool(getattr(order, "handover_works", False)),
+        handover_payment=bool(getattr(order, "handover_payment", False)),
+        handover_keys=bool(getattr(order, "handover_keys", False)),
+        handover_inspect=bool(getattr(order, "handover_inspect", False)),
+        handover_notified=bool(getattr(order, "handover_notified", False)),
         master_ids=master_ids,
         items=[_item_out(it) for it in (order.items or [])],
         client_name=client.name if client else None,
@@ -301,6 +328,14 @@ def create_order(
         due_date=body.due_date or "",
         start_time=getattr(body, "start_time", None) or "",
         end_time=getattr(body, "end_time", None) or "",
+        end_date=getattr(body, "end_date", None) or "",
+        client_notes=getattr(body, "client_notes", None) or "",
+        client_visible_notes=getattr(body, "client_visible_notes", None) or "",
+        master_notes=getattr(body, "master_notes", None) or "",
+        payment_method=getattr(body, "payment_method", None) or "Наличные",
+        discount_percent=float(getattr(body, "discount_percent", 0) or 0),
+        discount_fixed=float(getattr(body, "discount_fixed", 0) or 0),
+        promo_code=getattr(body, "promo_code", None) or "",
         price=total,
         paid_amount=0,
     )
@@ -312,6 +347,9 @@ def create_order(
         db.add(row)
     for mid in getattr(body, "master_ids", None) or []:
         db.add(CrmOrderMaster(order_id=order.id, master_id=int(mid)))
+    db.flush()
+    db.refresh(order)
+    _recalc_order_price(order)
     db.commit()
     order = db.scalar(
         select(CrmOrder)
@@ -346,6 +384,36 @@ def update_order(
         order.start_time = body.start_time
     if body.end_time is not None:
         order.end_time = body.end_time
+    if body.end_date is not None:
+        order.end_date = body.end_date
+    if body.client_notes is not None:
+        order.client_notes = body.client_notes
+    if body.client_visible_notes is not None:
+        order.client_visible_notes = body.client_visible_notes
+    if body.master_notes is not None:
+        order.master_notes = body.master_notes
+    if body.payment_method is not None:
+        order.payment_method = body.payment_method
+    discount_changed = False
+    if body.discount_percent is not None:
+        order.discount_percent = float(body.discount_percent)
+        discount_changed = True
+    if body.discount_fixed is not None:
+        order.discount_fixed = float(body.discount_fixed)
+        discount_changed = True
+    if body.promo_code is not None:
+        order.promo_code = body.promo_code
+    for hand_key in (
+        "handover_ready",
+        "handover_works",
+        "handover_payment",
+        "handover_keys",
+        "handover_inspect",
+        "handover_notified",
+    ):
+        val = getattr(body, hand_key, None)
+        if val is not None:
+            setattr(order, hand_key, bool(val))
     if body.paid_amount is not None:
         order.paid_amount = float(body.paid_amount)
     if body.car_id is not None:
@@ -384,6 +452,8 @@ def update_order(
                 db.delete(old)
         db.flush()
         db.refresh(order)
+        _recalc_order_price(order)
+    elif discount_changed:
         _recalc_order_price(order)
     db.commit()
     order = db.scalar(
@@ -496,3 +566,51 @@ def delete_order_item(
     _recalc_order_price(order)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/orders/{order_id}/events", response_model=list[CrmOrderEventOut])
+def list_order_events(
+    order_id: int,
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    _get_company_order(db, order_id, company_id)
+    rows = db.scalars(
+        select(CrmOrderEvent)
+        .where(CrmOrderEvent.order_id == order_id, CrmOrderEvent.company_id == company_id)
+        .order_by(CrmOrderEvent.id.desc())
+    ).all()
+    return [
+        CrmOrderEventOut(
+            id=r.id,
+            order_id=r.order_id,
+            event_text=r.event_text,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+
+
+@router.post("/orders/{order_id}/events", response_model=CrmOrderEventOut)
+def create_order_event(
+    order_id: int,
+    body: CrmOrderEventCreate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    _get_company_order(db, order_id, company_id)
+    text = (body.event_text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Пустое событие")
+    row = CrmOrderEvent(company_id=company_id, order_id=order_id, event_text=text)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return CrmOrderEventOut(
+        id=row.id,
+        order_id=row.order_id,
+        event_text=row.event_text,
+        created_at=row.created_at,
+    )

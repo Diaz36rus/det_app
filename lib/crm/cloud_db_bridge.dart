@@ -113,7 +113,7 @@ class CloudDbBridge {
       'due_date': o.dueDate,
       'start_time': o.startTime,
       'end_time': o.endTime,
-      'end_date': o.dueDate,
+      'end_date': o.endDate.isNotEmpty ? o.endDate : o.dueDate,
       'client_name': o.clientName ?? client?.name ?? '',
       'client_phone': client?.phone ?? '',
       'is_vip': client?.isVip == true ? 1 : 0,
@@ -126,8 +126,19 @@ class CloudDbBridge {
       'works_total': worksTotal,
       'works_done': worksDone,
       'is_completed': o.status == 'Выдан' ? 1 : 0,
-      'discount_percent': 0,
-      'discount_fixed': 0,
+      'discount_percent': o.discountPercent,
+      'discount_fixed': o.discountFixed,
+      'promo_code': o.promoCode,
+      'client_notes': o.clientNotes,
+      'client_visible_notes': o.clientVisibleNotes,
+      'master_notes': o.masterNotes,
+      'payment_method': o.paymentMethod,
+      'handover_ready': o.handoverReady ? 1 : 0,
+      'handover_works': o.handoverWorks ? 1 : 0,
+      'handover_payment': o.handoverPayment ? 1 : 0,
+      'handover_keys': o.handoverKeys ? 1 : 0,
+      'handover_inspect': o.handoverInspect ? 1 : 0,
+      'handover_notified': o.handoverNotified ? 1 : 0,
     };
   }
 
@@ -465,15 +476,48 @@ class CloudDbBridge {
   }
 
   Future<List<Map<String, dynamic>>> getOrderPayments(int orderId) async {
-    // отдельного списка нет — пусто, оплата через cloud cash
-    return [];
+    final list = await _cash.listPayments(orderId: orderId);
+    return list.map(_paymentToLocal).toList();
   }
 
-  Future<List<Map<String, dynamic>>> getOrderEvents(int orderId) async => [];
+  Map<String, dynamic> _paymentToLocal(Map<String, dynamic> p) {
+    var created = p['created_at']?.toString() ?? '';
+    if (created.length >= 16) {
+      created = created.substring(0, 16).replaceFirst('T', ' ');
+    }
+    return {
+      'id': (p['id'] as num).toInt(),
+      'order_id': (p['crm_order_id'] as num?)?.toInt() ?? (p['order_id'] as num?)?.toInt(),
+      'amount': (p['amount'] as num?)?.toDouble() ?? 0,
+      'method': p['method']?.toString() ?? '',
+      'created_at': created,
+      'shift_id': (p['shift_id'] as num?)?.toInt(),
+      'register_id': (p['register_id'] as num?)?.toInt(),
+    };
+  }
 
-  Future<void> addOrderEvent(int orderId, String text) async {}
+  Future<List<Map<String, dynamic>>> getOrderEvents(int orderId) async {
+    final list = await _crm.listOrderEvents(orderId);
+    return list
+        .map(
+          (e) => {
+            'id': e.id,
+            'order_id': e.orderId,
+            'event_text': e.eventText,
+            'created_at': e.createdAt,
+          },
+        )
+        .toList();
+  }
 
-  Future<Map<String, dynamic>> getOrderHandover(int orderId) async => {
+  Future<void> addOrderEvent(int orderId, String text) async {
+    await _crm.createOrderEvent(orderId, text);
+  }
+
+  Future<Map<String, dynamic>> getOrderHandover(int orderId) async {
+    final o = await getOrderById(orderId);
+    if (o == null) {
+      return {
         'handover_works': 0,
         'handover_inspect': 0,
         'handover_payment': 0,
@@ -481,8 +525,36 @@ class CloudDbBridge {
         'handover_notified': 0,
         'handover_ready': 0,
       };
+    }
+    return {
+      'handover_works': o['handover_works'] ?? 0,
+      'handover_inspect': o['handover_inspect'] ?? 0,
+      'handover_payment': o['handover_payment'] ?? 0,
+      'handover_keys': o['handover_keys'] ?? 0,
+      'handover_notified': o['handover_notified'] ?? 0,
+      'handover_ready': o['handover_ready'] ?? 0,
+    };
+  }
 
-  Future<void> saveOrderHandover(int orderId, Map<String, dynamic> values) async {}
+  Future<void> saveOrderHandover(int orderId, Map<String, dynamic> values) async {
+    final body = <String, dynamic>{};
+    for (final k in const [
+      'handover_ready',
+      'handover_works',
+      'handover_payment',
+      'handover_keys',
+      'handover_inspect',
+      'handover_notified',
+    ]) {
+      if (values.containsKey(k)) {
+        final v = values[k];
+        body[k] = v == true || v == 1 || v == '1';
+      }
+    }
+    if (body.isEmpty) return;
+    final o = await _crm.patchOrder(orderId, body);
+    _orders[o.id] = o;
+  }
 
   Future<void> setTechWash(int orderId, String? startDate, String? endDate) async {}
 
@@ -658,7 +730,13 @@ class CloudDbBridge {
     double? discountFixed,
     String? promoCode,
   }) async {
-    // Скидки в CRM API пока нет — no-op.
+    final body = <String, dynamic>{};
+    if (discountPercent != null) body['discount_percent'] = discountPercent;
+    if (discountFixed != null) body['discount_fixed'] = discountFixed;
+    if (promoCode != null) body['promo_code'] = promoCode;
+    if (body.isEmpty) return;
+    final o = await _crm.patchOrder(orderId, body);
+    _orders[o.id] = o;
   }
 
   Future<void> updateOrderMaster(int orderId, int? masterId) async {
@@ -678,6 +756,7 @@ class CloudDbBridge {
       'due_date': dueDate.isNotEmpty ? dueDate : endDate,
       'start_time': startTime,
       'end_time': endTime,
+      'end_date': endDate.isNotEmpty ? endDate : dueDate,
     });
     _orders[o.id] = o;
   }
@@ -688,14 +767,24 @@ class CloudDbBridge {
   }
 
   Future<void> updateOrderClientNotes(int orderId, String notes) async {
-    await updateOrderNotes(orderId, notes);
+    final o = await _crm.patchOrder(orderId, {'client_notes': notes});
+    _orders[o.id] = o;
   }
 
-  Future<void> updateOrderClientVisibleNotes(int orderId, String notes) async {}
+  Future<void> updateOrderClientVisibleNotes(int orderId, String notes) async {
+    final o = await _crm.patchOrder(orderId, {'client_visible_notes': notes});
+    _orders[o.id] = o;
+  }
 
-  Future<void> updateOrderMasterNotes(int orderId, String notes) async {}
+  Future<void> updateOrderMasterNotes(int orderId, String notes) async {
+    final o = await _crm.patchOrder(orderId, {'master_notes': notes});
+    _orders[o.id] = o;
+  }
 
-  Future<void> updateOrderPaymentMethod(int orderId, String method) async {}
+  Future<void> updateOrderPaymentMethod(int orderId, String method) async {
+    final o = await _crm.patchOrder(orderId, {'payment_method': method});
+    _orders[o.id] = o;
+  }
 
   Future<Map<String, dynamic>?> getClientByPhone(String phone) async {
     await _ensureClients();
@@ -783,8 +872,16 @@ class CloudDbBridge {
   }
 
   Future<Map<String, dynamic>?> voidPayment(int paymentId) async {
-    // void через API есть — при необходимости расширим; пока null
-    return null;
+    try {
+      final voided = await _cash.voidPayment(paymentId);
+      final orderId = (voided['crm_order_id'] as num?)?.toInt();
+      if (orderId != null) {
+        await _refreshOrder(orderId);
+      }
+      return _paymentToLocal(voided);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<int> openCashShift(double openingCash, {String note = '', Map<int, double>? openings}) async {

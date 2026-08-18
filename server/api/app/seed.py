@@ -47,6 +47,23 @@ def ensure_user_phone_column() -> None:
             text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS end_time VARCHAR(16) DEFAULT ''")
         )
         for col, typ in [
+            ("end_date", "VARCHAR(32) DEFAULT ''"),
+            ("client_notes", "TEXT DEFAULT ''"),
+            ("client_visible_notes", "TEXT DEFAULT ''"),
+            ("master_notes", "TEXT DEFAULT ''"),
+            ("payment_method", "VARCHAR(40) DEFAULT 'Наличные'"),
+            ("discount_percent", "DOUBLE PRECISION DEFAULT 0"),
+            ("discount_fixed", "DOUBLE PRECISION DEFAULT 0"),
+            ("promo_code", "VARCHAR(80) DEFAULT ''"),
+            ("handover_ready", "BOOLEAN DEFAULT FALSE"),
+            ("handover_works", "BOOLEAN DEFAULT FALSE"),
+            ("handover_payment", "BOOLEAN DEFAULT FALSE"),
+            ("handover_keys", "BOOLEAN DEFAULT FALSE"),
+            ("handover_inspect", "BOOLEAN DEFAULT FALSE"),
+            ("handover_notified", "BOOLEAN DEFAULT FALSE"),
+        ]:
+            conn.execute(text(f"ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS {col} {typ}"))
+        for col, typ in [
             ("comment", "TEXT DEFAULT ''"),
             ("master_ids", "VARCHAR(200) DEFAULT ''"),
             ("start_time", "VARCHAR(32) DEFAULT ''"),

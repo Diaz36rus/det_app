@@ -129,6 +129,27 @@ class CashCloudApi {
     _ensure(r);
   }
 
+  Future<List<Map<String, dynamic>>> listPayments({int? orderId, bool includeVoided = false}) async {
+    final q = <String, String>{
+      if (orderId != null) 'order_id': '$orderId',
+      if (includeVoided) 'include_voided': 'true',
+    };
+    final uri = _u('/cash/payments').replace(queryParameters: q.isEmpty ? null : q);
+    final r = await http.get(uri, headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> voidPayment(int paymentId) async {
+    final r = await http
+        .delete(_u('/cash/payments/$paymentId'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
+  }
+
   void _ensure(http.Response r) {
     if (r.statusCode >= 200 && r.statusCode < 300) return;
     var msg = 'Ошибка кассы (${r.statusCode})';

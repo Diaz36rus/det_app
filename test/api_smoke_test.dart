@@ -360,4 +360,139 @@ void main() {
         .timeout(const Duration(seconds: 15));
     expect(del.statusCode, 200, reason: utf8.decode(del.bodyBytes));
   });
+
+  test('CRM order card core: notes/discount/events/void (needs API 0.10+)', () async {
+    final ver = await apiVersion();
+    if (!_atLeast(ver, 0, 10)) {
+      print('SKIP order-card: API $ver');
+      return;
+    }
+    final token = await ownerToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+
+    var shiftR = await http
+        .get(Uri.parse('$base/cash/shifts/current'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    Map<String, dynamic>? shift;
+    if (shiftR.statusCode == 200 && shiftR.body.trim().isNotEmpty && shiftR.body.trim() != 'null') {
+      shift = jsonDecode(utf8.decode(shiftR.bodyBytes)) as Map<String, dynamic>;
+    }
+    if (shift == null || shift['status'] != 'open') {
+      final open = await http
+          .post(
+            Uri.parse('$base/cash/shifts/open'),
+            headers: headers,
+            body: jsonEncode({'openings': {}, 'note': 'smoke-card'}),
+          )
+          .timeout(const Duration(seconds: 15));
+      expect(open.statusCode, 200, reason: utf8.decode(open.bodyBytes));
+    }
+
+    final c = await http
+        .post(
+          Uri.parse('$base/crm/clients'),
+          headers: headers,
+          body: jsonEncode({'name': 'Card $stamp', 'phone': '900555${stamp % 10000}'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final clientId = (jsonDecode(utf8.decode(c.bodyBytes))['id'] as num).toInt();
+    final carR = await http
+        .post(
+          Uri.parse('$base/crm/cars'),
+          headers: headers,
+          body: jsonEncode({'client_id': clientId, 'make_model': 'Card Car', 'plate': 'K$stamp'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final carId = (jsonDecode(utf8.decode(carR.bodyBytes))['id'] as num).toInt();
+    final o = await http
+        .post(
+          Uri.parse('$base/crm/orders'),
+          headers: headers,
+          body: jsonEncode({
+            'client_id': clientId,
+            'car_id': carId,
+            'items': [
+              {'name': 'Мойка', 'price': 2000, 'workshop': 'Мойка'},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(o.statusCode, 200, reason: utf8.decode(o.bodyBytes));
+    final orderId = (jsonDecode(utf8.decode(o.bodyBytes))['id'] as num).toInt();
+
+    final patch = await http
+        .patch(
+          Uri.parse('$base/crm/orders/$orderId'),
+          headers: headers,
+          body: jsonEncode({
+            'client_notes': 'клиент: ждать',
+            'master_notes': 'мастер: полироль',
+            'client_visible_notes': 'видимая',
+            'payment_method': 'Карта',
+            'discount_percent': 10,
+            'discount_fixed': 100,
+            'promo_code': 'SMOKE10',
+            'end_date': '2026-08-20',
+            'handover_works': true,
+            'handover_keys': true,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(patch.statusCode, 200, reason: utf8.decode(patch.bodyBytes));
+    final patched = jsonDecode(utf8.decode(patch.bodyBytes)) as Map<String, dynamic>;
+    expect(patched['client_notes'], 'клиент: ждать');
+    expect(patched['master_notes'], 'мастер: полироль');
+    expect(patched['promo_code'], 'SMOKE10');
+    expect(patched['handover_works'], true);
+    // 2000 * 10% + 100 = 300 discount → 1700
+    expect((patched['price'] as num).toDouble(), 1700);
+
+    final ev = await http
+        .post(
+          Uri.parse('$base/crm/orders/$orderId/events'),
+          headers: headers,
+          body: jsonEncode({'event_text': 'smoke event'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(ev.statusCode, 200, reason: utf8.decode(ev.bodyBytes));
+    final events = await http
+        .get(Uri.parse('$base/crm/orders/$orderId/events'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(events.statusCode, 200);
+    final evList = jsonDecode(utf8.decode(events.bodyBytes)) as List;
+    expect(evList.any((e) => (e as Map)['event_text'] == 'smoke event'), isTrue);
+
+    final pay = await http
+        .post(
+          Uri.parse('$base/cash/payments'),
+          headers: headers,
+          body: jsonEncode({'order_id': orderId, 'amount': 500, 'method': 'Наличные'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(pay.statusCode, 200, reason: utf8.decode(pay.bodyBytes));
+    final paymentId = (jsonDecode(utf8.decode(pay.bodyBytes))['id'] as num).toInt();
+
+    final listed = await http
+        .get(Uri.parse('$base/cash/payments?order_id=$orderId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(listed.statusCode, 200, reason: utf8.decode(listed.bodyBytes));
+    final pays = jsonDecode(utf8.decode(listed.bodyBytes)) as List;
+    expect(pays.any((e) => (e as Map)['id'] == paymentId), isTrue);
+
+    final voided = await http
+        .delete(Uri.parse('$base/cash/payments/$paymentId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(voided.statusCode, 200, reason: utf8.decode(voided.bodyBytes));
+    expect((jsonDecode(utf8.decode(voided.bodyBytes)) as Map)['is_voided'], true);
+
+    final after = await http
+        .get(Uri.parse('$base/crm/orders/$orderId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final afterOrder = jsonDecode(utf8.decode(after.bodyBytes)) as Map<String, dynamic>;
+    expect((afterOrder['paid_amount'] as num).toDouble(), 0);
+  });
 }

@@ -160,6 +160,20 @@ class CrmOrder(Base):
     due_date: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     start_time: Mapped[str] = mapped_column(String(16), default="", nullable=False)
     end_time: Mapped[str] = mapped_column(String(16), default="", nullable=False)
+    end_date: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    client_notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    client_visible_notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    master_notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    payment_method: Mapped[str] = mapped_column(String(40), default="Наличные", nullable=False)
+    discount_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    discount_fixed: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    promo_code: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    handover_ready: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    handover_works: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    handover_payment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    handover_keys: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    handover_inspect: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    handover_notified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -171,6 +185,9 @@ class CrmOrder(Base):
     )
     master_links: Mapped[list[CrmOrderMaster]] = relationship(
         cascade="all, delete-orphan"
+    )
+    events: Mapped[list[CrmOrderEvent]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
     )
 
 class CrmOrderItem(Base):
@@ -226,6 +243,20 @@ class CrmOrderMaster(Base):
         ForeignKey("crm_orders.id", ondelete="CASCADE"), nullable=False, index=True
     )
     master_id: Mapped[int] = mapped_column(ForeignKey("crm_masters.id"), nullable=False)
+
+
+class CrmOrderEvent(Base):
+    __tablename__ = "crm_order_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    order: Mapped[CrmOrder] = relationship(back_populates="events")
 
 
 class CrmDefect(Base):

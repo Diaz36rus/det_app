@@ -200,6 +200,14 @@ class CrmOrderCreate(BaseModel):
     due_date: str = Field(default="", max_length=32)
     start_time: str = Field(default="", max_length=16)
     end_time: str = Field(default="", max_length=16)
+    end_date: str = Field(default="", max_length=32)
+    client_notes: str = Field(default="", max_length=4000)
+    client_visible_notes: str = Field(default="", max_length=4000)
+    master_notes: str = Field(default="", max_length=4000)
+    payment_method: str = Field(default="Наличные", max_length=40)
+    discount_percent: float = 0
+    discount_fixed: float = 0
+    promo_code: str = Field(default="", max_length=80)
     master_ids: list[int] = []
     items: list[CrmOrderItemIn] = []
 
@@ -210,6 +218,20 @@ class CrmOrderUpdate(BaseModel):
     due_date: str | None = Field(default=None, max_length=32)
     start_time: str | None = Field(default=None, max_length=16)
     end_time: str | None = Field(default=None, max_length=16)
+    end_date: str | None = Field(default=None, max_length=32)
+    client_notes: str | None = Field(default=None, max_length=4000)
+    client_visible_notes: str | None = Field(default=None, max_length=4000)
+    master_notes: str | None = Field(default=None, max_length=4000)
+    payment_method: str | None = Field(default=None, max_length=40)
+    discount_percent: float | None = None
+    discount_fixed: float | None = None
+    promo_code: str | None = Field(default=None, max_length=80)
+    handover_ready: bool | None = None
+    handover_works: bool | None = None
+    handover_payment: bool | None = None
+    handover_keys: bool | None = None
+    handover_inspect: bool | None = None
+    handover_notified: bool | None = None
     paid_amount: float | None = None
     car_id: int | None = None
     master_ids: list[int] | None = None
@@ -229,9 +251,36 @@ class CrmOrderOut(BaseModel):
     due_date: str
     start_time: str = ""
     end_time: str = ""
+    end_date: str = ""
+    client_notes: str = ""
+    client_visible_notes: str = ""
+    master_notes: str = ""
+    payment_method: str = "Наличные"
+    discount_percent: float = 0
+    discount_fixed: float = 0
+    promo_code: str = ""
+    handover_ready: bool = False
+    handover_works: bool = False
+    handover_payment: bool = False
+    handover_keys: bool = False
+    handover_inspect: bool = False
+    handover_notified: bool = False
     master_ids: list[int] = []
     items: list[CrmOrderItemOut] = []
     client_name: str | None = None
     car_label: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class CrmOrderEventCreate(BaseModel):
+    event_text: str = Field(min_length=1, max_length=4000)
+
+
+class CrmOrderEventOut(BaseModel):
+    id: int
+    order_id: int
+    event_text: str
+    created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
