@@ -495,4 +495,71 @@ void main() {
     final afterOrder = jsonDecode(utf8.decode(after.bodyBytes)) as Map<String, dynamic>;
     expect((afterOrder['paid_amount'] as num).toDouble(), 0);
   });
+
+  test('CRM workshops+calendar fields (needs API 0.11+)', () async {
+    final ver = await apiVersion();
+    if (!_atLeast(ver, 0, 11)) {
+      print('SKIP workshops-calendar: API $ver');
+      return;
+    }
+    final token = await ownerToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final c = await http
+        .post(
+          Uri.parse('$base/crm/clients'),
+          headers: headers,
+          body: jsonEncode({'name': 'Cal $stamp', 'phone': '900666${stamp % 10000}'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final clientId = (jsonDecode(utf8.decode(c.bodyBytes))['id'] as num).toInt();
+    final carR = await http
+        .post(
+          Uri.parse('$base/crm/cars'),
+          headers: headers,
+          body: jsonEncode({'client_id': clientId, 'make_model': 'Cal Car', 'plate': 'W$stamp'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final carId = (jsonDecode(utf8.decode(carR.bodyBytes))['id'] as num).toInt();
+    final day = '2026-08-19';
+    final o = await http
+        .post(
+          Uri.parse('$base/crm/orders'),
+          headers: headers,
+          body: jsonEncode({
+            'client_id': clientId,
+            'car_id': carId,
+            'start_time': '${day}T10:00',
+            'end_time': '${day}T12:00',
+            'items': [
+              {'name': 'Мойка', 'price': 1500, 'workshop': 'Мойка', 'start_time': '${day}T10:00', 'end_time': '${day}T11:00'},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(o.statusCode, 200, reason: utf8.decode(o.bodyBytes));
+    final orderId = (jsonDecode(utf8.decode(o.bodyBytes))['id'] as num).toInt();
+
+    final patch = await http
+        .patch(
+          Uri.parse('$base/crm/orders/$orderId'),
+          headers: headers,
+          body: jsonEncode({
+            'tech_wash_start': day,
+            'tech_wash_end': day,
+            'is_workshop_completed': true,
+            'start_time': '${day}T10:00',
+            'end_time': '${day}T14:00',
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(patch.statusCode, 200, reason: utf8.decode(patch.bodyBytes));
+    final patched = jsonDecode(utf8.decode(patch.bodyBytes)) as Map<String, dynamic>;
+    expect(patched['tech_wash_start'], day);
+    expect(patched['is_workshop_completed'], true);
+    expect((patched['start_time'] as String).length, greaterThan(16));
+  });
 }

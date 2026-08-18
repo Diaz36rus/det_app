@@ -41,11 +41,14 @@ def ensure_user_phone_column() -> None:
             )
         )
         conn.execute(
-            text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS start_time VARCHAR(16) DEFAULT ''")
+            text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS start_time VARCHAR(32) DEFAULT ''")
         )
         conn.execute(
-            text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS end_time VARCHAR(16) DEFAULT ''")
+            text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS end_time VARCHAR(32) DEFAULT ''")
         )
+        # Widen legacy 16-char columns so ISO datetime fits calendar slots.
+        conn.execute(text("ALTER TABLE crm_orders ALTER COLUMN start_time TYPE VARCHAR(32)"))
+        conn.execute(text("ALTER TABLE crm_orders ALTER COLUMN end_time TYPE VARCHAR(32)"))
         for col, typ in [
             ("end_date", "VARCHAR(32) DEFAULT ''"),
             ("client_notes", "TEXT DEFAULT ''"),
@@ -61,6 +64,9 @@ def ensure_user_phone_column() -> None:
             ("handover_keys", "BOOLEAN DEFAULT FALSE"),
             ("handover_inspect", "BOOLEAN DEFAULT FALSE"),
             ("handover_notified", "BOOLEAN DEFAULT FALSE"),
+            ("tech_wash_start", "VARCHAR(32) DEFAULT ''"),
+            ("tech_wash_end", "VARCHAR(32) DEFAULT ''"),
+            ("is_workshop_completed", "BOOLEAN DEFAULT FALSE"),
         ]:
             conn.execute(text(f"ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS {col} {typ}"))
         for col, typ in [

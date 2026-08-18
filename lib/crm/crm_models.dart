@@ -158,6 +158,9 @@ class CrmOrder {
   final bool handoverKeys;
   final bool handoverInspect;
   final bool handoverNotified;
+  final String techWashStart;
+  final String techWashEnd;
+  final bool isWorkshopCompleted;
   final List<int> masterIds;
   final List<CrmOrderItem> items;
   final String? clientName;
@@ -190,6 +193,9 @@ class CrmOrder {
     this.handoverKeys = false,
     this.handoverInspect = false,
     this.handoverNotified = false,
+    this.techWashStart = '',
+    this.techWashEnd = '',
+    this.isWorkshopCompleted = false,
     this.masterIds = const [],
     this.items = const [],
     this.clientName,
@@ -225,6 +231,9 @@ class CrmOrder {
         handoverKeys: j['handover_keys'] == true,
         handoverInspect: j['handover_inspect'] == true,
         handoverNotified: j['handover_notified'] == true,
+        techWashStart: j['tech_wash_start']?.toString() ?? '',
+        techWashEnd: j['tech_wash_end']?.toString() ?? '',
+        isWorkshopCompleted: j['is_workshop_completed'] == true,
         masterIds: (j['master_ids'] as List?)?.map((e) => (e as num).toInt()).toList() ?? const [],
         items: (j['items'] as List?)
                 ?.map((e) => CrmOrderItem.fromJson(e as Map<String, dynamic>))

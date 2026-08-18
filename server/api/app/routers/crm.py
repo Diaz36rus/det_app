@@ -141,6 +141,9 @@ def _order_out(order: CrmOrder, client: CrmClient | None = None, car: CrmCar | N
         handover_keys=bool(getattr(order, "handover_keys", False)),
         handover_inspect=bool(getattr(order, "handover_inspect", False)),
         handover_notified=bool(getattr(order, "handover_notified", False)),
+        tech_wash_start=getattr(order, "tech_wash_start", None) or "",
+        tech_wash_end=getattr(order, "tech_wash_end", None) or "",
+        is_workshop_completed=bool(getattr(order, "is_workshop_completed", False)),
         master_ids=master_ids,
         items=[_item_out(it) for it in (order.items or [])],
         client_name=client.name if client else None,
@@ -414,6 +417,12 @@ def update_order(
         val = getattr(body, hand_key, None)
         if val is not None:
             setattr(order, hand_key, bool(val))
+    if body.tech_wash_start is not None:
+        order.tech_wash_start = body.tech_wash_start
+    if body.tech_wash_end is not None:
+        order.tech_wash_end = body.tech_wash_end
+    if body.is_workshop_completed is not None:
+        order.is_workshop_completed = bool(body.is_workshop_completed)
     if body.paid_amount is not None:
         order.paid_amount = float(body.paid_amount)
     if body.car_id is not None:

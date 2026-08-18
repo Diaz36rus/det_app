@@ -198,8 +198,8 @@ class CrmOrderCreate(BaseModel):
     status: str = Field(default="Принят в работу", max_length=80)
     notes: str = Field(default="", max_length=4000)
     due_date: str = Field(default="", max_length=32)
-    start_time: str = Field(default="", max_length=16)
-    end_time: str = Field(default="", max_length=16)
+    start_time: str = Field(default="", max_length=32)
+    end_time: str = Field(default="", max_length=32)
     end_date: str = Field(default="", max_length=32)
     client_notes: str = Field(default="", max_length=4000)
     client_visible_notes: str = Field(default="", max_length=4000)
@@ -216,8 +216,8 @@ class CrmOrderUpdate(BaseModel):
     status: str | None = Field(default=None, max_length=80)
     notes: str | None = Field(default=None, max_length=4000)
     due_date: str | None = Field(default=None, max_length=32)
-    start_time: str | None = Field(default=None, max_length=16)
-    end_time: str | None = Field(default=None, max_length=16)
+    start_time: str | None = Field(default=None, max_length=32)
+    end_time: str | None = Field(default=None, max_length=32)
     end_date: str | None = Field(default=None, max_length=32)
     client_notes: str | None = Field(default=None, max_length=4000)
     client_visible_notes: str | None = Field(default=None, max_length=4000)
@@ -232,6 +232,9 @@ class CrmOrderUpdate(BaseModel):
     handover_keys: bool | None = None
     handover_inspect: bool | None = None
     handover_notified: bool | None = None
+    tech_wash_start: str | None = Field(default=None, max_length=32)
+    tech_wash_end: str | None = Field(default=None, max_length=32)
+    is_workshop_completed: bool | None = None
     paid_amount: float | None = None
     car_id: int | None = None
     master_ids: list[int] | None = None
@@ -265,6 +268,9 @@ class CrmOrderOut(BaseModel):
     handover_keys: bool = False
     handover_inspect: bool = False
     handover_notified: bool = False
+    tech_wash_start: str = ""
+    tech_wash_end: str = ""
+    is_workshop_completed: bool = False
     master_ids: list[int] = []
     items: list[CrmOrderItemOut] = []
     client_name: str | None = None

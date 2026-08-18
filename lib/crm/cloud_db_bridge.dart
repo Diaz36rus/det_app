@@ -139,6 +139,9 @@ class CloudDbBridge {
       'handover_keys': o.handoverKeys ? 1 : 0,
       'handover_inspect': o.handoverInspect ? 1 : 0,
       'handover_notified': o.handoverNotified ? 1 : 0,
+      'tech_wash_start': o.techWashStart.isEmpty ? null : o.techWashStart,
+      'tech_wash_end': o.techWashEnd.isEmpty ? null : o.techWashEnd,
+      'is_workshop_completed': o.isWorkshopCompleted ? 1 : 0,
     };
   }
 
@@ -556,7 +559,127 @@ class CloudDbBridge {
     _orders[o.id] = o;
   }
 
-  Future<void> setTechWash(int orderId, String? startDate, String? endDate) async {}
+  Future<void> setTechWash(int orderId, String? startDate, String? endDate) async {
+    final o = await _crm.patchOrder(orderId, {
+      'tech_wash_start': startDate ?? '',
+      'tech_wash_end': endDate ?? '',
+    });
+    _orders[o.id] = o;
+  }
+
+  Future<void> setWorkshopTaskCompleted(int orderId, int isCompleted) async {
+    final o = await _crm.patchOrder(orderId, {
+      'is_workshop_completed': isCompleted == 1,
+    });
+    _orders[o.id] = o;
+  }
+
+  String? _dayPart(String? raw) {
+    if (raw == null) return null;
+    final s = raw.replaceFirst('T', ' ').trim();
+    if (s.isEmpty) return null;
+    return s.length >= 10 ? s.substring(0, 10) : s;
+  }
+
+  bool _spansDay(String? start, String? end, String dateStr) {
+    final s = _dayPart(start);
+    if (s == null) return false;
+    final e = _dayPart((end != null && end.trim().isNotEmpty) ? end : start) ?? s;
+    return s.compareTo(dateStr) <= 0 && e.compareTo(dateStr) >= 0;
+  }
+
+  Future<List<Map<String, dynamic>>> getOrdersForCalendar(String dateStr) async {
+    await _ensureOrders();
+    await _ensureClients();
+    await _ensureCars();
+    final out = <Map<String, dynamic>>[];
+    for (final o in _orders.values) {
+      if (o.status == 'Выдан') continue;
+      final bySchedule = _spansDay(o.startTime, o.endTime, dateStr);
+      final byDue = _dayPart(o.dueDate) == dateStr;
+      final byEnd = _dayPart(o.endDate) == dateStr;
+      final byWash = _spansDay(
+        o.techWashStart.isEmpty ? null : o.techWashStart,
+        o.techWashEnd.isEmpty ? null : o.techWashEnd,
+        dateStr,
+      );
+      if (!(bySchedule || byDue || byEnd || byWash)) continue;
+      final client = _clients[o.clientId];
+      final car = _cars[o.carId];
+      out.add({
+        'id': o.id,
+        'status': o.status,
+        'price': o.price,
+        'paid_amount': o.paidAmount,
+        'start_time': o.startTime.isEmpty ? null : o.startTime,
+        'end_time': o.endTime.isEmpty ? null : o.endTime,
+        'due_date': o.dueDate,
+        'tech_wash_start': o.techWashStart.isEmpty ? null : o.techWashStart,
+        'tech_wash_end': o.techWashEnd.isEmpty ? null : o.techWashEnd,
+        'client_name': o.clientName ?? client?.name ?? '',
+        'make_model': car?.makeModel ?? '',
+        'plate': car?.plate ?? '',
+      });
+    }
+    out.sort((a, b) => (a['start_time']?.toString() ?? '').compareTo(b['start_time']?.toString() ?? ''));
+    return out;
+  }
+
+  Future<List<Map<String, dynamic>>> getOrderItemsForCalendar(String dateStr) async {
+    await _ensureOrders();
+    await _ensureClients();
+    await _ensureCars();
+    final out = <Map<String, dynamic>>[];
+    for (final o in _orders.values) {
+      if (o.status == 'Выдан') continue;
+      final client = _clients[o.clientId];
+      final car = _cars[o.carId];
+      for (final it in o.items) {
+        final start = it.startTime.trim().isNotEmpty ? it.startTime : o.startTime;
+        final end = it.endTime.trim().isNotEmpty ? it.endTime : o.endTime;
+        if (!_spansDay(start, end, dateStr)) continue;
+        var ws = it.workshop.trim();
+        if (ws.isEmpty) {
+          ws = _workshopFromName(it.name) ?? '';
+        }
+        if (ws.isEmpty) continue;
+        out.add({
+          'item_id': it.id ?? 0,
+          'order_id': o.id,
+          'work_name': it.name,
+          'start_time': start,
+          'end_time': end,
+          'workshop': ws,
+          'is_done': it.isDone ? 1 : 0,
+          'parent_id': it.parentId,
+          'status': o.status,
+          'price': o.price,
+          'paid_amount': o.paidAmount,
+          'client_name': o.clientName ?? client?.name ?? '',
+          'make_model': car?.makeModel ?? '',
+          'plate': car?.plate ?? '',
+        });
+      }
+    }
+    out.sort((a, b) => (a['start_time']?.toString() ?? '').compareTo(b['start_time']?.toString() ?? ''));
+    return out;
+  }
+
+  String? _workshopFromName(String? name) {
+    final blob = (name ?? '').toLowerCase();
+    if (blob.isEmpty) return null;
+    const workshops = ['Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование', 'Мойка'];
+    for (final w in workshops) {
+      if (blob.contains(w.toLowerCase())) return w;
+    }
+    if (blob.contains('химчист')) return 'Химчистка';
+    if (blob.contains('полир') || blob.contains('керамик') || blob.contains('силант')) return 'Полировка';
+    if (blob.contains('оклей') || blob.contains('пленк') || blob.contains('тонир')) return 'Оклейка';
+    if (blob.contains('интерьер') || blob.contains('салон')) return 'Интерьер';
+    if (blob.contains('оборуд') || blob.contains('двигател')) return 'Оборудование';
+    if (blob.contains('мойк') || blob.contains('багаж')) return 'Мойка';
+    return null;
+  }
 
   Future<void> syncZonePackage({
     required int orderId,
@@ -898,10 +1021,63 @@ class CloudDbBridge {
 
   Future<void> updateWrapPackageMasters(int headerId, List<int> masterIds) async {}
 
-  Future<void> assignMastersToWorkshop(int orderId, String workshop, List<int> masterIds) async {
+  Future<int> assignMastersToWorkshop(int orderId, String workshop, List<int> masterIds) async {
+    await _ensureOrders();
+    final o = _orders[orderId];
+    if (o == null) {
+      await _refreshOrder(orderId);
+    }
+    final order = _orders[orderId];
+    if (order == null) return 0;
+    final csv = masterIds.join(',');
+    var updated = 0;
+    const workshops = {'Мойка', 'Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование'};
+    for (final it in order.items) {
+      if ((it.name).trim() == 'Оклейка' && it.parentId == null) continue;
+      var resolved = it.workshop.trim();
+      if (resolved.isEmpty || !workshops.contains(resolved)) {
+        resolved = _workshopFromName(it.name) ?? '';
+      }
+      if (resolved != workshop) continue;
+      if (it.id == null || it.id! <= 0) continue;
+      await _crm.patchOrderItem(orderId, it.id!, {'master_ids': csv});
+      updated++;
+    }
     if (masterIds.isNotEmpty) {
       await updateOrderMaster(orderId, masterIds.first);
+    } else {
+      await updateOrderMaster(orderId, null);
     }
+    await _refreshOrder(orderId);
+    return updated;
+  }
+
+  Future<String> getWorkshopMasterNames(int orderId, String workshop) async {
+    await _ensureOrders();
+    await _ensureMasters();
+    final order = _orders[orderId];
+    if (order == null) return '';
+    const workshops = {'Мойка', 'Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование'};
+    final idSet = <int>{};
+    for (final it in order.items) {
+      var resolved = it.workshop.trim();
+      if (resolved.isEmpty || !workshops.contains(resolved)) {
+        resolved = _workshopFromName(it.name) ?? '';
+      }
+      if (resolved != workshop) continue;
+      for (final part in it.masterIds.split(',')) {
+        final id = int.tryParse(part.trim());
+        if (id != null) idSet.add(id);
+      }
+    }
+    if (idSet.isEmpty) return '';
+    final byId = {for (final m in _masters) m.id: m.name};
+    return idSet.map((id) => byId[id] ?? '').where((n) => n.isNotEmpty).join(', ');
+  }
+
+  Future<void> _ensureMasters() async {
+    if (_masters.isNotEmpty) return;
+    _masters = await _crm.listMasters();
   }
 
   Future<List<String>> getRolesList() async =>

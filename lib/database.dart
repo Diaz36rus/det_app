@@ -1186,6 +1186,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getOrdersForCalendar(String dateStr) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrdersForCalendar(dateStr);
     final db = await database;
     // День через substr после T→пробел. Длинные заказы: start_day ≤ день ≤ end_day.
     return await db.rawQuery('''
@@ -1224,6 +1225,7 @@ class DatabaseHelper {
   /// Пустой workshop → [workshopForService] по имени (иначе позиция пропадала из колонок).
   /// Длинные слоты показываются во все дни пересечения.
   Future<List<Map<String, dynamic>>> getOrderItemsForCalendar(String dateStr) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderItemsForCalendar(dateStr);
     final db = await database;
     final rows = await db.rawQuery('''
       SELECT order_items.id as item_id, order_items.order_id, order_items.name as work_name,
@@ -1628,6 +1630,11 @@ class DatabaseHelper {
   }
 
   Future<void> setWorkshopTaskCompleted(int orderId, int isCompleted) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.setWorkshopTaskCompleted(orderId, isCompleted);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.update('orders', {'is_workshop_completed': isCompleted}, where: 'id = ?', whereArgs: [orderId]);
   }
@@ -2190,6 +2197,7 @@ class DatabaseHelper {
   Future<void> setTechWash(int orderId, String? startDate, String? endDate) async {
     if (CloudDbBridge.active) {
       await CloudDbBridge.instance.setTechWash(orderId, startDate, endDate);
+      bumpDataRevision();
       return;
     }
     final db = await database;
@@ -2927,6 +2935,11 @@ class DatabaseHelper {
     String workshop,
     List<int> masterIds,
   ) async {
+    if (CloudDbBridge.active) {
+      final n = await CloudDbBridge.instance.assignMastersToWorkshop(orderId, workshop, masterIds);
+      bumpDataRevision();
+      return n;
+    }
     final db = await database;
     final items = await db.query(
       'order_items',
@@ -2956,6 +2969,9 @@ class DatabaseHelper {
 
   /// Имена мастеров, назначенных на работы данного цеха в заказе.
   Future<String> getWorkshopMasterNames(int orderId, String workshop) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.getWorkshopMasterNames(orderId, workshop);
+    }
     final db = await database;
     final items = await db.query(
       'order_items',
