@@ -209,19 +209,29 @@ class UpdateService {
       );
     }
 
+    final exeDir = File(Platform.resolvedExecutable).parent;
     final root = UpdateChannel.portableRoot();
-    if (root == null) {
-      throw StateError('Обновление доступно только в portable-сборке Windows');
-    }
+    final updaterPs1 = root == null
+        ? null
+        : File(p.join(root, 'update', 'DetAppUpdate.ps1'));
+    final appDir = root == null ? null : Directory(p.join(root, 'app'));
+    final isPortable = root != null &&
+        p.basename(exeDir.path).toLowerCase() == 'app' &&
+        updaterPs1 != null &&
+        await updaterPs1.exists() &&
+        appDir != null &&
+        await appDir.exists();
 
-    final updaterPs1 = File(p.join(root, 'update', 'DetAppUpdate.ps1'));
-    if (!await updaterPs1.exists()) {
-      throw StateError('Не найден updater: ${updaterPs1.path}');
-    }
-
-    final appDir = Directory(p.join(root, 'app'));
-    if (!await appDir.exists()) {
-      throw StateError('Не найдена папка app: ${appDir.path}');
+    if (!isPortable) {
+      throw StateError(
+        'Автообновление работает только из папки DetApp (portable), '
+        'не из build\\…\\Release.\n\n'
+        'Сейчас запуск:\n${exeDir.path}\n\n'
+        'Закройте приложение и откройте:\n'
+        'D:\\Projects\\det_app\\dist\\DetApp-portable\\app\\det_app.exe\n'
+        'или D:\\DetApp\\app\\det_app.exe\n\n'
+        'Там снова: Обновление → Скачать и установить.',
+      );
     }
 
     final tmp = await getTemporaryDirectory();

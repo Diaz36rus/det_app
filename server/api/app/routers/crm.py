@@ -4,8 +4,15 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.deps import require_permissions
-from app.models import Branch, CrmCar, CrmClient, CrmOrder, CrmOrderItem, User
-from app.schemas import (
+from app.models import (
+    Branch,
+    CrmCar,
+    CrmClient,
+    CrmOrder,
+    CrmOrderItem,
+    CrmOrderMaster,
+    User,
+)from app.schemas import (
     CrmCarCreate,
     CrmCarOut,
     CrmClientCreate,
@@ -47,6 +54,7 @@ def _default_branch_id(db: Session, user: User, company_id: int) -> int:
 
 
 def _order_out(order: CrmOrder, client: CrmClient | None = None, car: CrmCar | None = None) -> CrmOrderOut:
+    master_ids = [m.master_id for m in (getattr(order, "master_links", None) or [])]
     return CrmOrderOut(
         id=order.id,
         company_id=order.company_id,
@@ -58,6 +66,9 @@ def _order_out(order: CrmOrder, client: CrmClient | None = None, car: CrmCar | N
         paid_amount=float(order.paid_amount or 0),
         notes=order.notes or "",
         due_date=order.due_date or "",
+        start_time=getattr(order, "start_time", None) or "",
+        end_time=getattr(order, "end_time", None) or "",
+        master_ids=master_ids,
         items=[
             CrmOrderItemOut(
                 id=it.id,
@@ -176,7 +187,7 @@ def list_orders(
     orders = db.scalars(
         select(CrmOrder)
         .where(CrmOrder.company_id == company_id)
-        .options(selectinload(CrmOrder.items))
+        .options(selectinload(CrmOrder.items), selectinload(CrmOrder.master_links))
         .order_by(CrmOrder.id.desc())
     ).all()
     client_ids = {o.client_id for o in orders}
@@ -201,7 +212,7 @@ def get_order(
     order = db.scalar(
         select(CrmOrder)
         .where(CrmOrder.id == order_id, CrmOrder.company_id == company_id)
-        .options(selectinload(CrmOrder.items))
+        .options(selectinload(CrmOrder.items), selectinload(CrmOrder.master_links))
     )
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
@@ -251,6 +262,8 @@ def create_order(
         status=body.status.strip() or "Принят в работу",
         notes=body.notes or "",
         due_date=body.due_date or "",
+        start_time=getattr(body, "start_time", None) or "",
+        end_time=getattr(body, "end_time", None) or "",
         price=total,
         paid_amount=0,
     )
@@ -266,9 +279,13 @@ def create_order(
                 is_done=it.is_done,
             )
         )
+    for mid in getattr(body, "master_ids", None) or []:
+        db.add(CrmOrderMaster(order_id=order.id, master_id=int(mid)))
     db.commit()
     order = db.scalar(
-        select(CrmOrder).where(CrmOrder.id == order.id).options(selectinload(CrmOrder.items))
+        select(CrmOrder)
+        .where(CrmOrder.id == order.id)
+        .options(selectinload(CrmOrder.items), selectinload(CrmOrder.master_links))
     )
     return _order_out(order, client, car)  # type: ignore[arg-type]
 
@@ -284,7 +301,7 @@ def update_order(
     order = db.scalar(
         select(CrmOrder)
         .where(CrmOrder.id == order_id, CrmOrder.company_id == company_id)
-        .options(selectinload(CrmOrder.items))
+        .options(selectinload(CrmOrder.items), selectinload(CrmOrder.master_links))
     )
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
@@ -294,8 +311,18 @@ def update_order(
         order.notes = body.notes
     if body.due_date is not None:
         order.due_date = body.due_date
+    if body.start_time is not None:
+        order.start_time = body.start_time
+    if body.end_time is not None:
+        order.end_time = body.end_time
     if body.paid_amount is not None:
         order.paid_amount = float(body.paid_amount)
+    if body.master_ids is not None:
+        for old in list(order.master_links):
+            db.delete(old)
+        db.flush()
+        for mid in body.master_ids:
+            db.add(CrmOrderMaster(order_id=order.id, master_id=int(mid)))
     if body.items is not None:
         for old in list(order.items):
             db.delete(old)
@@ -316,7 +343,9 @@ def update_order(
         order.price = total
     db.commit()
     order = db.scalar(
-        select(CrmOrder).where(CrmOrder.id == order_id).options(selectinload(CrmOrder.items))
+        select(CrmOrder)
+        .where(CrmOrder.id == order_id)
+        .options(selectinload(CrmOrder.items), selectinload(CrmOrder.master_links))
     )
     client = db.get(CrmClient, order.client_id)  # type: ignore[union-attr]
     car = db.get(CrmCar, order.car_id)  # type: ignore[union-attr]

@@ -5,17 +5,14 @@ import 'database.dart';
 import 'pulse_anchor.dart';
 import 'responsive.dart';
 
-class InventoryScreen extends StatefulWidget {
-  const InventoryScreen({super.key});
+class ServicesScreen extends StatefulWidget {
+  const ServicesScreen({super.key});
 
   @override
-  State<InventoryScreen> createState() => _InventoryScreenState();
+  State<ServicesScreen> createState() => _ServicesScreenState();
 }
 
-class _InventoryScreenState extends State<InventoryScreen>
-    with SingleTickerProviderStateMixin, PulseHighlightMixin {
-  late final TabController _tabs;
-  static const _pulseAddInv = 'inv_add';
+class _ServicesScreenState extends State<ServicesScreen> with PulseHighlightMixin {
   List<Map<String, dynamic>> _services = [];
   List<Map<String, dynamic>> _inventory = [];
   bool _isLoading = true;
@@ -25,13 +22,11 @@ class _InventoryScreenState extends State<InventoryScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 2, vsync: this);
     _loadAll();
   }
 
   @override
   void dispose() {
-    _tabs.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -88,186 +83,6 @@ class _InventoryScreenState extends State<InventoryScreen>
         ),
       ),
     );
-    _loadAll();
-  }
-
-  Future<void> _showAddInventoryDialog() async {
-    final nameCtrl = TextEditingController();
-    final qtyCtrl = TextEditingController(text: '0');
-    final unitCtrl = TextEditingController(text: 'шт');
-    final minCtrl = TextEditingController(text: '0');
-    final ok = await runWithPulseHighlight(
-      _pulseAddInv,
-      () => showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text("Новая позиция склада", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(labelText: "Название", isDense: true),
-              autofocus: true,
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: qtyCtrl,
-                    decoration: const InputDecoration(labelText: "Количество", isDense: true),
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: unitCtrl,
-                    decoration: const InputDecoration(labelText: "Ед.", isDense: true),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: minCtrl,
-              decoration: const InputDecoration(
-                labelText: "Мин. остаток",
-                helperText: "0 = алерт только при нуле",
-                isDense: true,
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Добавить")),
-        ],
-      ),
-    ),
-    );
-    if (ok != true) return;
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) return;
-    final qty = double.tryParse(qtyCtrl.text.replaceAll(',', '.')) ?? 0;
-    final minQty = double.tryParse(minCtrl.text.replaceAll(',', '.')) ?? 0;
-    await DatabaseHelper().addInventoryItem(name, qty, unitCtrl.text.trim(), minQty: minQty);
-    _loadAll();
-  }
-
-  Future<void> _adjustStock(Map<String, dynamic> item, double delta) async {
-    await DatabaseHelper().adjustInventoryQuantity((item['id'] as num).toInt(), delta);
-    _loadAll();
-  }
-
-  Future<void> _editInventory(Map<String, dynamic> item) async {
-    final invId = (item['id'] as num).toInt();
-    final nameCtrl = TextEditingController(text: item['name']?.toString() ?? '');
-    final qtyCtrl = TextEditingController(text: '${item['quantity'] ?? 0}');
-    final unitCtrl = TextEditingController(text: item['unit']?.toString() ?? 'шт');
-    final minCtrl = TextEditingController(text: '${item['min_qty'] ?? 0}');
-    final ok = await runWithPulseHighlight(
-      invId,
-      () => showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          title: Text("Редактировать", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameCtrl,
-                decoration: const InputDecoration(labelText: "Название", isDense: true),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: qtyCtrl,
-                      decoration: const InputDecoration(labelText: "Количество", isDense: true),
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: unitCtrl,
-                      decoration: const InputDecoration(labelText: "Ед.", isDense: true),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: minCtrl,
-                decoration: const InputDecoration(
-                  labelText: "Мин. остаток",
-                  helperText: "0 = алерт только при нуле",
-                  isDense: true,
-                ),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-            ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text("Сохранить")),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) return;
-    final qty = double.tryParse(qtyCtrl.text.replaceAll(',', '.')) ?? 0;
-    final minQty = double.tryParse(minCtrl.text.replaceAll(',', '.')) ?? 0;
-    await DatabaseHelper().updateInventoryItem(
-      invId,
-      name: name,
-      quantity: qty,
-      unit: unitCtrl.text.trim(),
-      minQty: minQty,
-    );
-    _loadAll();
-  }
-
-  bool _isLowStock(Map<String, dynamic> item) {
-    final qty = (item['quantity'] as num?)?.toDouble() ?? 0;
-    final min = (item['min_qty'] as num?)?.toDouble() ?? 0;
-    return qty <= (min > 0 ? min : 0);
-  }
-
-  Future<void> _deleteInventory(Map<String, dynamic> item) async {
-    final invId = (item['id'] as num).toInt();
-    final ok = await runWithPulseHighlight(
-      invId,
-      () => showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          backgroundColor: AppColors.surface,
-          title: Text("Удалить позицию?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-          content: Text(
-            "${item['name']} будет удалена вместе с рецептами.",
-            style: GoogleFonts.manrope(color: AppColors.textMuted),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text("Удалить"),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (ok != true) return;
-    await DatabaseHelper().deleteInventoryItem(invId);
     _loadAll();
   }
 
@@ -399,159 +214,6 @@ class _InventoryScreenState extends State<InventoryScreen>
     );
   }
 
-  Widget _buildInventoryTab() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 12, AppResponsive.isMobile(context) ? 12 : 24, 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  "Материалы. Списание — по рецепту услуги при отметке «выполнено».",
-                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13),
-                ),
-              ),
-              PulseAnchor(
-                active: isPulseActive(_pulseAddInv),
-                borderRadius: BorderRadius.circular(AppTheme.radius),
-                child: ElevatedButton.icon(
-                  onPressed: _showAddInventoryDialog,
-                  icon: const Icon(Icons.add, size: 18),
-                  label: Text("Добавить", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _inventory.isEmpty
-              ? Center(
-                  child: Text(
-                    "Склад пуст — добавь материалы",
-                    style: GoogleFonts.manrope(color: AppColors.textDim),
-                  ),
-                )
-              : Builder(
-                  builder: (context) {
-                    final sorted = [..._inventory]..sort((a, b) {
-                      final la = _isLowStock(a);
-                      final lb = _isLowStock(b);
-                      if (la != lb) return la ? -1 : 1;
-                      return (a['name']?.toString() ?? '')
-                          .compareTo(b['name']?.toString() ?? '');
-                    });
-                    final lowCount = sorted.where(_isLowStock).length;
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        if (lowCount > 0)
-                          Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              AppResponsive.isMobile(context) ? 12 : 24,
-                              0,
-                              AppResponsive.isMobile(context) ? 12 : 24,
-                              8,
-                            ),
-                            child: Text(
-                              'Мало на складе: $lowCount',
-                              style: GoogleFonts.manrope(
-                                color: AppColors.danger,
-                                fontWeight: FontWeight.w800,
-                                fontSize: 13,
-                              ),
-                            ),
-                          ),
-                        Expanded(
-                          child: ListView.builder(
-                  padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 24),
-                  itemCount: sorted.length,
-                  itemBuilder: (context, index) {
-                    final item = sorted[index];
-                    final invId = (item['id'] as num).toInt();
-                    final qty = (item['quantity'] as num?)?.toDouble() ?? 0;
-                    final minQty = (item['min_qty'] as num?)?.toDouble() ?? 0;
-                    final low = _isLowStock(item);
-                    return PulseAnchor(
-                      active: isPulseActive(invId),
-                      accent: low ? AppColors.danger : AppColors.primary,
-                      child: Container(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      decoration: BoxDecoration(
-                        color: low
-                            ? AppColors.danger.withOpacity(0.06)
-                            : AppColors.surface2.withOpacity(0.92),
-                        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                        border: Border(
-                          left: BorderSide(
-                            color: (low ? AppColors.danger : AppColors.primary).withOpacity(0.75),
-                            width: 3,
-                          ),
-                        ),
-                      ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
-                        title: Text(
-                          item['name']?.toString() ?? '',
-                          style: GoogleFonts.manrope(fontWeight: FontWeight.w700, color: AppColors.text),
-                        ),
-                        subtitle: Text(
-                          low
-                              ? "${_fmtQty(qty)} ${item['unit'] ?? 'шт'} · мало (мин ${_fmtQty(minQty)})"
-                              : minQty > 0
-                                  ? "${_fmtQty(qty)} ${item['unit'] ?? 'шт'} · мин ${_fmtQty(minQty)}"
-                                  : "${_fmtQty(qty)} ${item['unit'] ?? 'шт'}",
-                          style: GoogleFonts.manrope(
-                            color: low ? AppColors.danger : AppColors.textMuted,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: "−1",
-                              onPressed: () => _adjustStock(item, -1),
-                              icon: const Icon(Icons.remove_circle_outline, color: AppColors.textMuted),
-                            ),
-                            IconButton(
-                              tooltip: "+1",
-                              onPressed: () => _adjustStock(item, 1),
-                              icon: const Icon(Icons.add_circle_outline, color: AppColors.primary),
-                            ),
-                            IconButton(
-                              tooltip: "Изменить",
-                              onPressed: () => _editInventory(item),
-                              icon: const Icon(Icons.edit_outlined, color: AppColors.textDim, size: 20),
-                            ),
-                            IconButton(
-                              tooltip: "Удалить",
-                              onPressed: () => _deleteInventory(item),
-                              icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 20),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    );
-                  },
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-
-  String _fmtQty(double q) {
-    if (q == q.roundToDouble()) return q.toStringAsFixed(0);
-    return q.toStringAsFixed(2);
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -563,10 +225,10 @@ class _InventoryScreenState extends State<InventoryScreen>
             padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, 8),
             child: Row(
               children: [
-                Text("Услуги и склад", style: AppTheme.pageTitle),
+                Text("Услуги", style: AppTheme.pageTitle),
                 const Spacer(),
                 Text(
-                  _tabs.index == 0 ? "${_services.length}" : "${_inventory.length}",
+                  "${_services.length}",
                   style: GoogleFonts.manrope(
                     color: AppColors.textDim,
                     fontSize: 15,
@@ -576,32 +238,10 @@ class _InventoryScreenState extends State<InventoryScreen>
               ],
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: TabBar(
-              controller: _tabs,
-              onTap: (_) => setState(() {}),
-              labelStyle: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14),
-              unselectedLabelStyle: GoogleFonts.manrope(fontWeight: FontWeight.w500, fontSize: 14),
-              labelColor: AppColors.primary,
-              unselectedLabelColor: AppColors.textMuted,
-              indicatorColor: AppColors.primary,
-              tabs: const [
-                Tab(text: "Услуги"),
-                Tab(text: "Склад"),
-              ],
-            ),
-          ),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                : TabBarView(
-                    controller: _tabs,
-                    children: [
-                      _buildServicesTab(),
-                      _buildInventoryTab(),
-                    ],
-                  ),
+                : _buildServicesTab(),
           ),
         ],
       ),
@@ -727,7 +367,7 @@ class _RecipeEditorDialogState extends State<_RecipeEditorDialog> {
                   const Divider(height: 20),
                   if (widget.inventory.isEmpty)
                     Text(
-                      "Сначала добавь материалы на вкладке «Склад».",
+                      "Сначала добавь материалы в разделе «Склад».",
                       style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
                     )
                   else if (available.isEmpty)

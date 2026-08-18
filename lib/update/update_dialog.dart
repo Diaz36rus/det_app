@@ -6,7 +6,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../app_theme.dart';
 import '../app_version.dart';
 import '../responsive.dart';
-import '../sync/sync_controller.dart';
 import 'update_channel.dart';
 import 'update_service.dart';
 
@@ -86,14 +85,11 @@ class _UpdateDialogState extends State<UpdateDialog> {
 
   Future<void> _bootstrap() async {
     await AppVersion.ensureLoaded();
+    // load() сам поднимает старый LAN → облако (если не prefer_lan).
     final ch = await UpdateChannel.load();
-    var url = ch?.manifestUrl ?? UpdateChannel.cloudManifestUrl;
-    if (url.isEmpty) {
-      final sync = SyncController.instance;
-      url = UpdateChannel.suggestFromSyncBaseUrl(sync.config.normalizedBaseUrl) ??
-          UpdateChannel.suggestFromSyncBaseUrl(sync.suggestedClientUrl) ??
-          UpdateChannel.cloudManifestUrl;
-    }
+    final url = (ch?.manifestUrl.trim().isNotEmpty == true)
+        ? ch!.manifestUrl
+        : UpdateChannel.cloudManifestUrl;
     _urlCtrl.text = url;
     await _check();
   }
@@ -258,7 +254,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
                 controller: _urlCtrl,
                 decoration: const InputDecoration(
                   labelText: 'URL манифеста (latest.json)',
-                  hintText: 'http://192.168.3.2:8080/latest.json',
+                  hintText: UpdateChannel.cloudManifestUrl,
                   isDense: true,
                 ),
                 enabled: !_applying,

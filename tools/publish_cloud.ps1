@@ -49,8 +49,15 @@ $zipName = [string]$meta.zip_name
 $ZipSrc = Join-Path $DistRoot $zipName
 if (-not (Test-Path $ZipSrc)) { throw "missing zip $ZipSrc" }
 
-$notesVal = if ($Notes) { $Notes } else { "Сборка $($meta.version)+$($meta.build)" }
+# «Сборка» через codepoints — иначе PS 5.1 читает .ps1 не в UTF-8 и портит строку.
+$sborka = -join ([char[]](0x0421, 0x0431, 0x043E, 0x0440, 0x043A, 0x0430))
+$notesVal = if ($Notes) { $Notes } else { "$sborka $($meta.version)+$($meta.build)" }
 $url = ($ApiBase.TrimEnd('/')) + '/updates/publish'
+
+# curl -F "notes=..." из аргументов PS тоже ломает UTF-8 → пишем файл и шлём его.
+$notesFile = Join-Path $env:TEMP ("detapp-release-notes-{0}.txt" -f [guid]::NewGuid().ToString('n'))
+$utf8NoBom = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText($notesFile, $notesVal, $utf8NoBom)
 
 $curlArgs = @(
   '-sS', '-X', 'POST',
@@ -58,7 +65,7 @@ $curlArgs = @(
   '-F', "version=$($meta.version)",
   '-F', "build=$($meta.build)",
   '-F', 'min_build=1',
-  '-F', "notes=$notesVal",
+  '-F', "notes=<$notesFile;type=text/plain;charset=UTF-8",
   '-F', "db_version=$($meta.db_version)",
   '-F', 'critical=false',
   '-F', "sha256=$($meta.sha256)",
@@ -78,8 +85,12 @@ if ($meta.PSObject.Properties.Name -contains 'apk_name' -and $meta.apk_name) {
 
 $curlArgs += $url
 Write-Host "==> POST $url" -ForegroundColor Cyan
-& curl.exe @curlArgs
-if ($LASTEXITCODE -ne 0) { throw "upload failed (curl exit $LASTEXITCODE)" }
+try {
+  & curl.exe @curlArgs
+  if ($LASTEXITCODE -ne 0) { throw "upload failed (curl exit $LASTEXITCODE)" }
+} finally {
+  Remove-Item -LiteralPath $notesFile -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host ""
 Write-Host "OK. Канал для устройств:" -ForegroundColor Green

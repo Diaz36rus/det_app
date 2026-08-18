@@ -30,9 +30,16 @@ class UpdateManifest {
   });
 
   factory UpdateManifest.fromJson(Map<String, dynamic> json) {
+    final version = json['version']?.toString() ?? '';
+    final build = (json['build'] as num?)?.toInt() ?? 0;
+    var notes = json['notes']?.toString() ?? '';
+    // Mojibake с Windows-публикации: «Сборка» → «РЎР±РѕСЂРєР°».
+    if (notes.contains('РЎР±') || notes.contains('РсР') || notes.contains('РЎР')) {
+      notes = (version.isNotEmpty && build > 0) ? 'Сборка $version+$build' : '';
+    }
     return UpdateManifest(
-      version: json['version']?.toString() ?? '',
-      build: (json['build'] as num?)?.toInt() ?? 0,
+      version: version,
+      build: build,
       minBuild: (json['min_build'] as num?)?.toInt() ?? 1,
       url: json['url']?.toString() ?? '',
       sha256: (json['sha256']?.toString() ?? '').toLowerCase(),
@@ -40,7 +47,7 @@ class UpdateManifest {
       androidUrl: json['android_url']?.toString() ?? '',
       androidSha256: (json['android_sha256']?.toString() ?? '').toLowerCase(),
       androidSize: (json['android_size'] as num?)?.toInt(),
-      notes: json['notes']?.toString() ?? '',
+      notes: notes,
       dbVersion: (json['db_version'] as num?)?.toInt() ?? 0,
       critical: json['critical'] == true,
     );

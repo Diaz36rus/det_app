@@ -1,13 +1,16 @@
+import 'dart:convert';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'app_diagnostics.dart';
 import 'app_theme.dart';
 import 'bug_report_dialog.dart';
+import 'crm/cloud_mode.dart';
 import 'responsive.dart';
 import 'app_toast.dart';
 import 'sync/lan_discover.dart';
@@ -15,6 +18,7 @@ import 'sync/qr_scan_sheet.dart';
 import 'sync/sync_config.dart';
 import 'sync/sync_controller.dart';
 import 'sync/sync_qr.dart';
+import 'update/update_channel.dart';
 
 bool get _canScanSyncQr => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
@@ -45,6 +49,12 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
   int _scanTotal = 0;
   List<DiscoveredHost> _foundHosts = const [];
 
+  bool _apkExpanded = false;
+  bool _apkLoading = false;
+  String? _apkQrUrl;
+  String? _apkLabel;
+  String? _apkError;
+
   @override
   void initState() {
     super.initState();
@@ -58,6 +68,65 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
   void dispose() {
     _urlCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _ensureApkQr() async {
+    if (_apkLoading) return;
+    if (_apkQrUrl != null && _apkError == null) return;
+    setState(() {
+      _apkLoading = true;
+      _apkError = null;
+    });
+    try {
+      // Постоянная ссылка (после деплоя API /updates/android).
+      // Если её ещё нет — берём прямой android_url из latest.json.
+      String qrUrl = UpdateChannel.cloudApkUrl;
+      String? label;
+      try {
+        final head = await http
+            .head(Uri.parse(UpdateChannel.cloudApkUrl))
+            .timeout(const Duration(seconds: 6));
+        if (head.statusCode < 200 || head.statusCode >= 400) {
+          qrUrl = '';
+        }
+      } catch (_) {
+        qrUrl = '';
+      }
+
+      final resp = await http
+          .get(Uri.parse(UpdateChannel.cloudManifestUrl))
+          .timeout(const Duration(seconds: 8));
+      if (resp.statusCode != 200) {
+        throw StateError('Сервер ответил ${resp.statusCode}');
+      }
+      final map = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+      final androidUrl = (map['android_url']?.toString() ?? '').trim();
+      final ver = map['version']?.toString() ?? '';
+      final build = map['build'];
+      if (ver.isNotEmpty && build != null) {
+        label = '$ver+$build';
+      }
+      if (qrUrl.isEmpty) {
+        if (androidUrl.isEmpty) {
+          throw StateError('APK на сервере ещё нет');
+        }
+        qrUrl = androidUrl;
+      }
+      if (!mounted) return;
+      setState(() {
+        _apkQrUrl = qrUrl;
+        _apkLabel = label;
+        _apkLoading = false;
+        _apkError = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _apkLoading = false;
+        _apkError = '$e';
+        _apkQrUrl = null;
+      });
+    }
   }
 
   Future<void> _scanHostQr() async {
@@ -181,22 +250,24 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
   Widget build(BuildContext context) {
     final diag = AppDiagnostics.instance;
     final sync = SyncController.instance;
-    final h = MediaQuery.sizeOf(context).height * 0.82;
+    final mq = MediaQuery.of(context);
+    // SafeArea + padding уже съедают высоту — не брать 0.82 от полного экрана.
+    final h = (mq.size.height - mq.padding.vertical - mq.viewInsets.bottom) * 0.88;
 
-    return ListenableBuilder(
-      listenable: Listenable.merge([diag, sync]),
-      builder: (context, _) {
-        final ok = diag.isOk;
-        final role = sync.config.role;
-        final hostUrl = sync.suggestedClientUrl;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + mq.viewInsets.bottom),
+        child: SizedBox(
+          height: h.clamp(320.0, mq.size.height),
+          width: AppResponsive.dialogWidth(context, desktop: 520),
+          child: ListenableBuilder(
+            listenable: Listenable.merge([diag, sync]),
+            builder: (context, _) {
+              final ok = diag.isOk;
+              final role = sync.config.role;
+              final hostUrl = sync.suggestedClientUrl;
 
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 16 + MediaQuery.viewInsetsOf(context).bottom),
-            child: SizedBox(
-              height: h,
-              width: AppResponsive.dialogWidth(context, desktop: 520),
-              child: Column(
+              return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Center(
@@ -231,6 +302,11 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                     ],
                   ),
                   const SizedBox(height: 8),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
                   _SyncStatusBanner(
                     role: role,
                     ok: ok,
@@ -238,6 +314,20 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                     hostUrl: hostUrl,
                     clientUrl: role == SyncRole.client ? sync.config.normalizedBaseUrl : null,
                     isHosting: sync.isHosting,
+                  ),
+                  const SizedBox(height: 10),
+                  if (CloudMode.enabled) ...[
+                    Text(
+                      'Облачный режим: заказы, касса и склад идут через api.det-app.ru.\n'
+                      'LAN-хост :7878 не нужен — оба устройства работают по интернету.',
+                      style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
+                    ),
+                    const SizedBox(height: 14),
+                  ] else ...[
+                  Text(
+                    'Обновления и APK — с сервера api.det-app.ru.\n'
+                    'Общая база ПК↔телефон пока по Wi‑Fi (хост ниже) — до облачных логинов.',
+                    style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
                   ),
                   const SizedBox(height: 14),
                   Text(
@@ -283,41 +373,69 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                   const SizedBox(height: 12),
                   if (role == SyncRole.host) ...[
                     Text(
-                      'Этот ноут — главный. База здесь. На втором ноуте вставьте адрес:',
+                      'Этот ПК — хост. База здесь. Телефон и другой ПК — в той же Wi‑Fi.',
                       style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
                     ),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      hostUrl ?? 'IP не найден — проверьте Wi‑Fi',
+                    const SizedBox(height: 12),
+                    Text(
+                      'Ссылка для другого ПК',
                       style: GoogleFonts.manrope(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
+                        color: AppColors.textMuted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface2,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.border),
+                      ),
+                      child: SelectableText(
+                        hostUrl ?? 'IP не найден — проверьте Wi‑Fi',
+                        style: GoogleFonts.manrope(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: hostUrl == null
+                            ? null
+                            : () async {
+                                await Clipboard.setData(ClipboardData(text: hostUrl));
+                                if (!context.mounted) return;
+                                showAppToast(context, 'Ссылка скопирована — вставьте на другом ПК');
+                              },
+                        icon: const Icon(Icons.copy, size: 18),
+                        label: const Text('Копировать ссылку'),
                       ),
                     ),
                     if (sync.lanIps.length > 1) ...[
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 6),
                       Text(
-                        'Другие IP: ${sync.lanIps.skip(1).map((ip) => 'http://$ip:${sync.config.port}').join(', ')}',
-                        style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 11),
+                        'Если не подключается — попробуйте другой адрес:\n'
+                        '${sync.lanIps.skip(1).map((ip) => 'http://$ip:${sync.config.port}').join('\n')}',
+                        style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 11, height: 1.35),
                       ),
                     ],
-                    const SizedBox(height: 8),
-                    OutlinedButton.icon(
-                      onPressed: hostUrl == null
-                          ? null
-                          : () async {
-                              await Clipboard.setData(ClipboardData(text: hostUrl));
-                              if (!context.mounted) return;
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('URL скопирован')),
-                              );
-                            },
-                      icon: const Icon(Icons.copy, size: 18),
-                      label: const Text('Копировать URL для клиента'),
-                    ),
                     if (hostUrl != null) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
+                      Text(
+                        'QR для телефона',
+                        style: GoogleFonts.manrope(
+                          color: AppColors.textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                       Center(
                         child: Container(
                           padding: const EdgeInsets.all(12),
@@ -327,10 +445,9 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                             border: Border.all(color: AppColors.border),
                           ),
                           child: QrImageView(
-                            // Не чистый http:// — иначе системная камера уходит в браузер.
                             data: encodeSyncQrPayload(hostUrl),
                             version: QrVersions.auto,
-                            size: 168,
+                            size: 180,
                             backgroundColor: Colors.white,
                             eyeStyle: const QrEyeStyle(
                               eyeShape: QrEyeShape.square,
@@ -343,30 +460,31 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 8),
                       Text(
-                        'Телефон: камера → QR → «Открыть Det App». '
-                        'Или на телефоне: связь → «Сканировать QR хоста» / «Найти хост».',
+                        'На телефоне: лампочка → «Сканировать QR хоста» '
+                        'или камера → QR → «Открыть Det App».',
                         textAlign: TextAlign.center,
-                        style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+                        style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
                       ),
                     ],
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Text(
-                      'Firewall: при запросе Windows разрешите доступ в частных сетях.\n'
-                      'Оба ноута — в одной Wi‑Fi (не «гостевая» с изоляцией клиентов).\n'
-                      'Хост не выключать и не уводить в сон на время смены.',
+                      'Windows может спросить firewall — разрешите в частных сетях.\n'
+                      'Хост не уводить в сон, пока клиенты подключены.',
                       style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
                     ),
                   ] else ...[
                     Text(
                       role == SyncRole.client
-                          ? 'Адрес хоста — найдите в сети или вставьте вручную'
-                          : 'На ПК: «Хост». Здесь: «Найти хост» или вставьте URL',
+                          ? 'Вставьте ссылку с хоста или найдите его в Wi‑Fi'
+                          : 'На хосте: «Хост» → скопируйте ссылку / покажите QR.\n'
+                              'Здесь: вставьте ссылку, «Найти хост» или сканируйте QR.',
                       style: GoogleFonts.manrope(
                         color: AppColors.textMuted,
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
+                        height: 1.35,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -457,7 +575,7 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                       decoration: const InputDecoration(
                         hintText: 'http://192.168.0.10:7878',
                         isDense: true,
-                        labelText: 'Вручную (если поиск не нашёл)',
+                        labelText: 'Ссылка с хоста',
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -483,7 +601,134 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                       ],
                     ),
                   ],
-                  const SizedBox(height: 12),
+                  ], // end !CloudMode LAN host UI
+                  const SizedBox(height: 10),
+                  Theme(
+                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      initiallyExpanded: false,
+                      tilePadding: EdgeInsets.zero,
+                      childrenPadding: const EdgeInsets.only(bottom: 8),
+                      onExpansionChanged: (open) {
+                        setState(() => _apkExpanded = open);
+                        if (open) _ensureApkQr();
+                      },
+                      leading: Icon(
+                        Icons.android,
+                        color: _apkExpanded ? AppColors.primary : AppColors.textMuted,
+                        size: 22,
+                      ),
+                      title: Text(
+                        'QR на скачивание APK',
+                        style: GoogleFonts.manrope(
+                          color: AppColors.text,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Актуальная мобилка с сервера',
+                        style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+                      ),
+                      children: [
+                        if (_apkLoading)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 16),
+                            child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+                          )
+                        else if (_apkError != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  _apkError!,
+                                  style: GoogleFonts.manrope(color: AppColors.danger, fontSize: 12),
+                                ),
+                                TextButton(
+                                  onPressed: () {
+                                    setState(() {
+                                      _apkQrUrl = null;
+                                      _apkError = null;
+                                    });
+                                    _ensureApkQr();
+                                  },
+                                  child: const Text('Повторить'),
+                                ),
+                              ],
+                            ),
+                          )
+                        else if (_apkQrUrl != null) ...[
+                          if (_apkLabel != null)
+                            Text(
+                              'Сборка $_apkLabel',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.manrope(
+                                color: AppColors.textDim,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          const SizedBox(height: 8),
+                          Center(
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppColors.border),
+                              ),
+                              child: QrImageView(
+                                data: _apkQrUrl!,
+                                version: QrVersions.auto,
+                                size: 150,
+                                backgroundColor: Colors.white,
+                                eyeStyle: const QrEyeStyle(
+                                  eyeShape: QrEyeShape.square,
+                                  color: Color(0xFF111827),
+                                ),
+                                dataModuleStyle: const QrDataModuleStyle(
+                                  dataModuleShape: QrDataModuleShape.square,
+                                  color: Color(0xFF111827),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SelectableText(
+                            _apkQrUrl!,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.manrope(
+                              color: AppColors.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                await Clipboard.setData(ClipboardData(text: _apkQrUrl!));
+                                if (!context.mounted) return;
+                                showAppToast(context, 'Ссылка на APK скопирована');
+                              },
+                              icon: const Icon(Icons.copy, size: 18),
+                              label: const Text('Копировать ссылку на APK'),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Телефон: камера → QR → скачать → установить',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Text(
                     'Последние события',
                     style: GoogleFonts.manrope(
@@ -493,40 +738,43 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppColors.bg,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: diag.recentErrors.isEmpty
-                          ? Center(
-                              child: Text(
-                                'Лог пока пуст',
-                                style: GoogleFonts.manrope(color: AppColors.textDim),
-                              ),
-                            )
-                          : ListView.builder(
-                              itemCount: diag.recentErrors.length,
-                              itemBuilder: (_, i) {
-                                final e = diag.recentErrors[diag.recentErrors.length - 1 - i];
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: Text(
-                                    e.format(),
-                                    style: GoogleFonts.manrope(
-                                      color: e.level == 'error' || e.level == 'fatal'
-                                          ? AppColors.danger
-                                          : AppColors.textMuted,
-                                      fontSize: 11,
-                                      height: 1.3,
-                                    ),
-                                  ),
-                                );
-                              },
+                  Container(
+                    height: 120,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.bg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: diag.recentErrors.isEmpty
+                        ? Center(
+                            child: Text(
+                              'Лог пока пуст',
+                              style: GoogleFonts.manrope(color: AppColors.textDim),
                             ),
+                          )
+                        : ListView.builder(
+                            itemCount: diag.recentErrors.length,
+                            itemBuilder: (_, i) {
+                              final e = diag.recentErrors[diag.recentErrors.length - 1 - i];
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(
+                                  e.format(),
+                                  style: GoogleFonts.manrope(
+                                    color: e.level == 'error' || e.level == 'fatal'
+                                        ? AppColors.danger
+                                        : AppColors.textMuted,
+                                    fontSize: 11,
+                                    height: 1.3,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -571,11 +819,11 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                     ],
                   ),
                 ],
-              ),
-            ),
+              );
+            },
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

@@ -225,7 +225,8 @@ $latest = [ordered]@{
 
 # Android APK (if release apk already built) for LAN phone updates
 $ApkSrc = Join-Path $ProjectRoot "build\app\outputs\flutter-apk\app-release.apk"
-$ApkName = "DetApp-${appVersion}+${appBuild}-android.apk"
+# Без «+» в имени: в URL/браузере «+» часто превращается в пробел и ломает скачивание.
+$ApkName = "DetApp-${appVersion}-b${appBuild}-android.apk"
 $ApkDist = Join-Path $DistRoot $ApkName
 $apkSha = $null
 $apkSize = $null

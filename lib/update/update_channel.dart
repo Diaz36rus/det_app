@@ -15,6 +15,9 @@ class UpdateChannel {
   /// Облачный канал по умолчанию (Selectel / api.det-app.ru).
   static const cloudManifestUrl = 'http://api.det-app.ru/updates/latest.json';
 
+  /// Постоянная ссылка на актуальный APK (сервер редиректит/отдаёт последний билд).
+  static const cloudApkUrl = 'http://api.det-app.ru/updates/android';
+
   /// Корень portable: `…/DetApp-portable` (родитель папки `app`). Только desktop.
   static String? portableRoot() {
     if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) return null;
@@ -45,19 +48,74 @@ class UpdateChannel {
     return out;
   }
 
+  static bool isCloudManifestUrl(String url) {
+    try {
+      final u = Uri.parse(url.trim());
+      final host = u.host.toLowerCase();
+      return host == 'api.det-app.ru' ||
+          host == 'det-app.ru' ||
+          host.endsWith('.det-app.ru') ||
+          u.path.contains('/updates');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Частный LAN / localhost — не для раздачи тестового APK.
+  static bool isLanManifestUrl(String url) {
+    try {
+      final u = Uri.parse(url.trim());
+      final host = u.host.toLowerCase();
+      if (host.isEmpty) return false;
+      if (host == 'localhost' || host == '127.0.0.1' || host == '::1') return true;
+      final parts = host.split('.');
+      if (parts.length == 4 && parts.every((x) => int.tryParse(x) != null)) {
+        final a = int.parse(parts[0]);
+        final b = int.parse(parts[1]);
+        if (a == 10) return true;
+        if (a == 192 && b == 168) return true;
+        if (a == 172 && b >= 16 && b <= 31) return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<UpdateChannel?> load() async {
     for (final path in await _candidatePaths()) {
       final f = File(path);
       if (!await f.exists()) continue;
       try {
         final map = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
-        final url = normalizeManifestUrl(map['manifest_url']?.toString() ?? '');
+        final preferLan = map['prefer_lan'] == true;
+        var url = normalizeManifestUrl(map['manifest_url']?.toString() ?? '');
         if (url.isEmpty) continue;
+
+        // Старый LAN из тестов не должен оставаться у новых сборок / тестеров,
+        // пока пользователь явно не сохранил LAN снова (prefer_lan).
+        if (!preferLan && isLanManifestUrl(url)) {
+          url = cloudManifestUrl;
+          try {
+            await f.writeAsString(
+              const JsonEncoder.withIndent('  ').convert({
+                'manifest_url': url,
+                'prefer_lan': false,
+              }),
+              flush: true,
+            );
+          } catch (_) {}
+          return UpdateChannel(manifestUrl: url);
+        }
+
         final raw = map['manifest_url']?.toString().trim() ?? '';
         if (raw != url) {
           try {
             await f.writeAsString(
-              const JsonEncoder.withIndent('  ').convert({'manifest_url': url}),
+              const JsonEncoder.withIndent('  ').convert({
+                'manifest_url': url,
+                'prefer_lan': preferLan,
+              }),
               flush: true,
             );
           } catch (_) {}
@@ -90,6 +148,8 @@ class UpdateChannel {
     await f.writeAsString(
       const JsonEncoder.withIndent('  ').convert({
         'manifest_url': normalized,
+        // Явно сохранённый LAN оставляем; иначе при следующем запуске уйдёт в облако.
+        'prefer_lan': isLanManifestUrl(normalized),
       }),
       flush: true,
     );

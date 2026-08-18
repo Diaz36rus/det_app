@@ -158,6 +158,8 @@ class CrmOrder(Base):
     paid_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     due_date: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    start_time: Mapped[str] = mapped_column(String(16), default="", nullable=False)
+    end_time: Mapped[str] = mapped_column(String(16), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -167,7 +169,9 @@ class CrmOrder(Base):
     items: Mapped[list[CrmOrderItem]] = relationship(
         back_populates="order", cascade="all, delete-orphan"
     )
-
+    master_links: Mapped[list[CrmOrderMaster]] = relationship(
+        cascade="all, delete-orphan"
+    )
 
 class CrmOrderItem(Base):
     __tablename__ = "crm_order_items"
@@ -182,6 +186,81 @@ class CrmOrderItem(Base):
     is_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     order: Mapped[CrmOrder] = relationship(back_populates="items")
+
+
+class CrmMaster(Base):
+    __tablename__ = "crm_masters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    role: Mapped[str] = mapped_column(String(80), default="Универсал", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class CrmService(Base):
+    __tablename__ = "crm_services"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(80), default="Прочее", nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    price: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    workshop: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class CrmOrderMaster(Base):
+    __tablename__ = "crm_order_masters"
+    __table_args__ = (UniqueConstraint("order_id", "master_id", name="uq_order_master"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    master_id: Mapped[int] = mapped_column(ForeignKey("crm_masters.id"), nullable=False)
+
+
+class CrmDefect(Base):
+    __tablename__ = "crm_defects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workshop: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    photo_b64: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmInventoryItem(Base):
+    __tablename__ = "crm_inventory_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    unit: Mapped[str] = mapped_column(String(20), default="шт", nullable=False)
+    category: Mapped[str] = mapped_column(String(80), default="Прочее", nullable=False)
+    min_qty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+
+class CrmInventoryMove(Base):
+    __tablename__ = "crm_inventory_moves"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    item_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_inventory_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    delta: Mapped[float] = mapped_column(Float, nullable=False)
+    balance_after: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_orders.id"), nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class CashRegister(Base):

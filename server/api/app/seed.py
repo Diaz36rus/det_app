@@ -7,6 +7,9 @@ from app.models import (
     Branch,
     CashRegister,
     Company,
+    CrmInventoryItem,
+    CrmMaster,
+    CrmService,
     Permission,
     Role,
     RolePermission,
@@ -36,6 +39,12 @@ def ensure_user_phone_column() -> None:
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_phone_unique "
                 "ON users (phone) WHERE phone IS NOT NULL"
             )
+        )
+        conn.execute(
+            text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS start_time VARCHAR(16) DEFAULT ''")
+        )
+        conn.execute(
+            text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS end_time VARCHAR(16) DEFAULT ''")
         )
 
 
@@ -115,6 +124,18 @@ def seed_database(db: Session) -> None:
                 Role.name == "Администратор компании",
             )
         )
+        # Синхронизируем системные роли с актуальным каталогом (inventory и т.п.).
+        for role_name, codes in COMPANY_ROLE_PRESETS.items():
+            role = db.scalar(
+                select(Role).where(Role.company_id == company.id, Role.name == role_name)
+            )
+            if role is None:
+                role = Role(company_id=company.id, name=role_name, is_system=True)
+                db.add(role)
+                db.flush()
+            _set_role_permissions(db, role, codes, by_code)
+            if role_name == "Администратор компании":
+                admin_role = role
 
     owner_email = "owner@demo.det-app.ru"
     owner = db.scalar(select(User).where(User.email == owner_email))
@@ -152,6 +173,41 @@ def seed_database(db: Session) -> None:
                         is_active=True,
                         sort_order=sort_order,
                     )
+                    )
+
+    # C3 demo справочники
+    if company is not None:
+        if db.scalars(select(CrmMaster).where(CrmMaster.company_id == company.id).limit(1)).first() is None:
+            db.add(CrmMaster(company_id=company.id, name="Иван Мастер", role="Универсал"))
+            db.add(CrmMaster(company_id=company.id, name="Алексей", role="Полировка"))
+        if db.scalars(select(CrmService).where(CrmService.company_id == company.id).limit(1)).first() is None:
+            for name, cat, price, ws in [
+                ("Мойка кузова", "Мойка", 3000, "Мойка"),
+                ("Химчистка салона", "Химчистка", 12000, "Химчистка"),
+                ("Полировка в 1 этап", "Полировка", 15000, "Полировка"),
+            ]:
+                db.add(
+                    CrmService(
+                        company_id=company.id,
+                        name=name,
+                        category=cat,
+                        price=price,
+                        workshop=ws,
+                    )
                 )
+        if (
+            db.scalars(select(CrmInventoryItem).where(CrmInventoryItem.company_id == company.id).limit(1)).first()
+            is None
+        ):
+            db.add(
+                CrmInventoryItem(
+                    company_id=company.id,
+                    name="Плёнка демо",
+                    quantity=10,
+                    unit="м",
+                    category="Оклейка",
+                    min_qty=2,
+                )
+            )
 
     db.commit()

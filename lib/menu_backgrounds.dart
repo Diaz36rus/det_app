@@ -37,6 +37,7 @@ class MenuBackgrounds {
       7 => '$folder/bg_inventory.jpg',
       8 => '$folder/bg_preview.jpg',
       9 => '$folder/bg_completed.jpg',
+      10 => '$folder/bg_inventory.jpg', // Услуги
       _ => null,
     };
   }

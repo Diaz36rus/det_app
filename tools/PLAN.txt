@@ -1,0 +1,38 @@
+Det App — план внедрения (кратко)
+================================
+Порядок блоков (без разбивки по дням):
+
+A  Страховка: тесты + домашний смоук + журнал багов   ← ГОТОВО (авто)
+B  Логины в приложении                                ← ГОТОВО
+C  Полный онлайн → выключить LAN                      ← ГОТОВО (API 0.8.0)
+D  Визуал / адаптация мобилки (кусками параллельно)
+E  Сайт + фичи роста (в ящике)
+
+Блок B — критерий
+-----------------
+Вход по email ИЛИ телефону, сессия сохраняется, выход из меню.
+Демо: admin@det-app.ru / 9000000001  пароль DetAppAdmin2026!
+
+Блок C — ГОТОВО
+---------------
+Данные студии в облаке (Postgres/API). Signed-in company → cloud path без LAN :7878.
+
+C1  /crm clients/cars/orders
+C2  /cash shifts/flows/payments (0.6.0)
+C3  /crm/masters, /crm/services + seed + выбор в create
+C4  статусы/мастера/доска; «Доска»/«Новый заказ» → CloudBoard
+C5  дефекты (+photo_b64), оплата долга из карточки заказа
+C6  /crm/inventory + moves
+C_end cutover: CloudMode; прячем «Облачные …»; стоп host; import /crm/import/clients
+
+Критерий C: два устройства без Wi‑Fi-хоста ведут смену (заказ → статус → оплата).
+Демо: owner@demo.det-app.ru / 9000000002  пароль DetAppAdmin2026!
+Деплой: tools\deploy_cali.ps1 (SSH-ключ).
+
+Блок A — как гонять
+-------------------
+Авто:  powershell -ExecutionPolicy Bypass -File tools\run_regression.ps1
+Ручной чек-лист: tools\HOME_SMOKE.txt
+Баги: tools\BUGS.txt
+
+Критерий выхода из A: зелёные автотесты + хотя бы раз пройден HOME_SMOKE на ПК.

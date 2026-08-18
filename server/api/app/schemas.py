@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -166,6 +168,9 @@ class CrmOrderCreate(BaseModel):
     status: str = Field(default="Принят в работу", max_length=80)
     notes: str = Field(default="", max_length=4000)
     due_date: str = Field(default="", max_length=32)
+    start_time: str = Field(default="", max_length=16)
+    end_time: str = Field(default="", max_length=16)
+    master_ids: list[int] = []
     items: list[CrmOrderItemIn] = []
 
 
@@ -173,7 +178,10 @@ class CrmOrderUpdate(BaseModel):
     status: str | None = Field(default=None, max_length=80)
     notes: str | None = Field(default=None, max_length=4000)
     due_date: str | None = Field(default=None, max_length=32)
+    start_time: str | None = Field(default=None, max_length=16)
+    end_time: str | None = Field(default=None, max_length=16)
     paid_amount: float | None = None
+    master_ids: list[int] | None = None
     items: list[CrmOrderItemIn] | None = None
 
 
@@ -188,6 +196,9 @@ class CrmOrderOut(BaseModel):
     paid_amount: float
     notes: str
     due_date: str
+    start_time: str = ""
+    end_time: str = ""
+    master_ids: list[int] = []
     items: list[CrmOrderItemOut] = []
     client_name: str | None = None
     car_label: str | None = None

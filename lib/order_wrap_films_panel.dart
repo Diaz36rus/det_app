@@ -7,18 +7,26 @@ import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'database.dart';
+import 'inventory_catalog.dart';
 
 /// Расход плёнки по заказу (м.п.). В цехе «Оклейка» — collapsible для мастера.
 class OrderWrapFilmsPanel extends StatefulWidget {
   final int orderId;
   final bool collapsible;
   final bool initiallyExpanded;
+  /// Какие складские категории показывать в выборе (оклейка / тонировка).
+  /// Пусто = обе плёночные категории.
+  final List<String> filmCategories;
 
   const OrderWrapFilmsPanel({
     super.key,
     required this.orderId,
     this.collapsible = false,
     this.initiallyExpanded = true,
+    this.filmCategories = const [
+      InventoryCategories.filmWrap,
+      InventoryCategories.filmTint,
+    ],
   });
 
   @override
@@ -27,10 +35,12 @@ class OrderWrapFilmsPanel extends StatefulWidget {
 
 class _FilmRow {
   int filmId;
+  int? rollId;
   final TextEditingController metersCtrl;
   final FocusNode metersFocus;
+  List<Map<String, dynamic>> rolls = [];
 
-  _FilmRow({required this.filmId, required String metersText})
+  _FilmRow({required this.filmId, this.rollId, required String metersText})
       : metersCtrl = TextEditingController(text: metersText),
         metersFocus = FocusNode();
 
@@ -44,7 +54,11 @@ class _FilmRow {
     metersFocus.dispose();
   }
 
-  Map<String, dynamic> toMap() => {'filmId': filmId, 'meters': meters};
+  Map<String, dynamic> toMap() => {
+        'filmId': filmId,
+        'rollId': rollId,
+        'meters': meters,
+      };
 }
 
 class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
@@ -83,25 +97,65 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
     _rows.clear();
   }
 
+  int? _inventoryIdForFilm(int filmId) {
+    for (final f in _catalog) {
+      if ((f['id'] as num).toInt() == filmId) {
+        return (f['inventory_id'] as num?)?.toInt();
+      }
+    }
+    return null;
+  }
+
+  Future<void> _loadRolls(_FilmRow row) async {
+    final invId = _inventoryIdForFilm(row.filmId);
+    if (invId == null) {
+      row.rolls = [];
+      return;
+    }
+    row.rolls = await DatabaseHelper().listFilmRolls(invId);
+  }
+
+  String _filmLabel(Map<String, dynamic> film) {
+    final name = film['name']?.toString() ?? '—';
+    final cat = film['inventory_category']?.toString() ?? '';
+    final multi = widget.filmCategories.length > 1;
+    if (!multi) return name;
+    if (cat == InventoryCategories.filmTint) return 'Тонировка · $name';
+    if (cat == InventoryCategories.filmWrap) return 'Оклейка · $name';
+    return name;
+  }
+
   Future<void> _load() async {
     try {
-      final catalog = await DatabaseHelper().listWrapFilms();
+      final allow = widget.filmCategories
+          .where(InventoryCategories.isFilm)
+          .toList();
+      final all = await DatabaseHelper().listWrapFilms();
       final current = await DatabaseHelper().getOrderWrapFilms(widget.orderId);
+      final keepIds = current.map((r) => (r['film_id'] as num).toInt()).toSet();
+      final catalog = all.where((f) {
+        final id = (f['id'] as num).toInt();
+        if (keepIds.contains(id)) return true;
+        final cat = f['inventory_category']?.toString();
+        if (allow.isEmpty) return InventoryCategories.isFilm(cat);
+        return allow.contains(cat);
+      }).toList();
       if (!mounted) return;
       _clearRows();
+      _catalog = catalog;
       for (final r in current) {
         final meters = (r['meters'] as num?)?.toDouble() ?? 0;
         final row = _FilmRow(
           filmId: (r['film_id'] as num).toInt(),
-          metersText: _fmtMeters(meters),
+          rollId: (r['roll_id'] as num?)?.toInt(),
+          metersText: meters > 0 ? _fmtMeters(meters) : '',
         );
         row.metersFocus.addListener(() => _onMetersFocus(row));
+        await _loadRolls(row);
         _rows.add(row);
       }
-      setState(() {
-        _catalog = catalog;
-        _loading = false;
-      });
+      if (!mounted) return;
+      setState(() => _loading = false);
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -127,11 +181,14 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
     _saving = true;
     try {
       final payload = _rows.map((r) => r.toMap()).toList();
-      await DatabaseHelper().setOrderWrapFilms(widget.orderId, payload);
-      if (showOk && mounted) {
+      final warnings = await DatabaseHelper().setOrderWrapFilms(widget.orderId, payload);
+      if (!mounted) return;
+      if (warnings.isNotEmpty) {
+        showAppToast(context, warnings.first);
+      } else if (showOk) {
         showAppToast(context, 'Расход плёнки сохранён');
-        setState(() {});
       }
+      setState(() {});
     } catch (e) {
       if (mounted) showAppToast(context, 'Не сохранилось: $e');
     } finally {
@@ -142,54 +199,200 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
   double get _totalMeters => _rows.fold<double>(0, (s, r) => s + r.meters);
 
   Future<void> _addFilmToCatalog() async {
-    final ctrl = TextEditingController();
-    final name = await showDialog<String>(
+    final nameCtrl = TextEditingController();
+    final mprCtrl = TextEditingController(text: '15');
+    final allowedCats = widget.filmCategories.where(InventoryCategories.isFilm).toList();
+    var category = allowedCats.contains(InventoryCategories.filmWrap)
+        ? InventoryCategories.filmWrap
+        : (allowedCats.isNotEmpty ? allowedCats.first : InventoryCategories.filmWrap);
+    var unit = FilmUnits.meters;
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text('Новая плёнка', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (v) => Navigator.pop(ctx, v),
-          decoration: const InputDecoration(
-            labelText: 'Название',
-            hintText: 'например Avery SW900',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Новая плёнка', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Название',
+                    hintText: 'например HAUT Titan',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: category,
+                  decoration: const InputDecoration(labelText: 'Категория', isDense: true),
+                  items: [
+                    if (allowedCats.isEmpty || allowedCats.contains(InventoryCategories.filmWrap))
+                      const DropdownMenuItem(
+                        value: InventoryCategories.filmWrap,
+                        child: Text('Плёнка оклейка'),
+                      ),
+                    if (allowedCats.isEmpty || allowedCats.contains(InventoryCategories.filmTint))
+                      const DropdownMenuItem(
+                        value: InventoryCategories.filmTint,
+                        child: Text('Плёнка тонировка'),
+                      ),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setLocal(() => category = v);
+                  },
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: unit,
+                  decoration: const InputDecoration(
+                    labelText: 'Единица учёта на складе',
+                    helperText: 'Расход в заказе — всегда м.п.',
+                    isDense: true,
+                  ),
+                  items: FilmUnits.choices
+                      .map(
+                        (u) => DropdownMenuItem(
+                          value: u,
+                          child: Text(u == FilmUnits.rolls ? 'Рулоны (рул.)' : 'Метры погонные (м.п.)'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setLocal(() => unit = v);
+                  },
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: mprCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Метров в полном рулоне',
+                    isDense: true,
+                  ),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, {
+                'name': nameCtrl.text,
+                'category': category,
+                'mpr': mprCtrl.text,
+                'unit': unit,
+              }),
+              child: const Text('Добавить'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Отмена')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text),
-            child: const Text('Добавить'),
-          ),
-        ],
       ),
     );
-    final trimmed = name?.trim() ?? '';
-    // Не dispose ctrl до закрытия диалога — на мобилке иначе гонка.
-    WidgetsBinding.instance.addPostFrameCallback((_) => ctrl.dispose());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      nameCtrl.dispose();
+      mprCtrl.dispose();
+    });
+    if (result == null) return;
+    final trimmed = (result['name']?.toString() ?? '').trim();
     if (trimmed.isEmpty) return;
-
+    final mpr = double.tryParse((result['mpr']?.toString() ?? '').replaceAll(',', '.')) ?? 0;
     try {
-      final id = await DatabaseHelper().addWrapFilm(trimmed);
+      final id = await DatabaseHelper().addWrapFilm(
+        trimmed,
+        category: result['category']?.toString() ?? InventoryCategories.filmWrap,
+        metersPerRoll: mpr,
+        unit: result['unit']?.toString() ?? FilmUnits.meters,
+      );
       final catalog = await DatabaseHelper().listWrapFilms();
       if (!mounted) return;
       final row = _FilmRow(filmId: id, metersText: '');
       row.metersFocus.addListener(() => _onMetersFocus(row));
+      await _loadRolls(row);
       setState(() {
         _catalog = catalog;
         _rows.add(row);
         _expanded = true;
       });
       await _save(showOk: true);
-      // Фокус на метры — сразу ввести расход.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) row.metersFocus.requestFocus();
-      });
     } catch (e) {
       if (mounted) showAppToast(context, 'Плёнка не добавлена: $e');
+    }
+  }
+
+  Future<void> _addRollForRow(_FilmRow row) async {
+    final invId = _inventoryIdForFilm(row.filmId);
+    if (invId == null) {
+      showAppToast(context, 'Плёнка не связана со складом');
+      return;
+    }
+    final rollCtrl = TextEditingController();
+    final mpr = (_catalog.cast<Map<String, dynamic>?>().firstWhere(
+              (f) => f != null && (f['id'] as num).toInt() == row.filmId,
+              orElse: () => null,
+            )?['meters_per_roll'] as num?)
+            ?.toDouble() ??
+        0;
+    final metersCtrl = TextEditingController(text: mpr > 0 ? _fmtMeters(mpr) : '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Новый рулон', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: rollCtrl,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              inputFormatters: [UpperCaseTextFormatter()],
+              decoration: const InputDecoration(
+                labelText: 'Номер рулона',
+                hintText: 'A-14',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: metersCtrl,
+              decoration: const InputDecoration(labelText: 'Метров в рулоне', isDense: true),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Добавить')),
+        ],
+      ),
+    );
+    final rollNo = normalizeRollNumber(rollCtrl.text);
+    final meters = double.tryParse(metersCtrl.text.replaceAll(',', '.')) ?? 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      rollCtrl.dispose();
+      metersCtrl.dispose();
+    });
+    if (ok != true || rollNo.isEmpty) return;
+    try {
+      final rollId = await DatabaseHelper().addFilmRoll(
+        inventoryId: invId,
+        rollNumber: rollNo,
+        metersInitial: meters > 0 ? meters : null,
+      );
+      await _loadRolls(row);
+      if (!mounted) return;
+      setState(() => row.rollId = rollId);
+      await _save(showOk: false);
+      if (!mounted) return;
+      showAppToast(context, 'Рулон $rollNo добавлен на склад');
+    } catch (e) {
+      if (mounted) showAppToast(context, 'Рулон не добавлен: $e');
     }
   }
 
@@ -203,21 +406,19 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
       metersText: '',
     );
     row.metersFocus.addListener(() => _onMetersFocus(row));
+    await _loadRolls(row);
     setState(() {
       _rows.add(row);
       _expanded = true;
     });
     await _save(showOk: false);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) row.metersFocus.requestFocus();
-    });
   }
 
   Widget _headerButton() {
     final n = _rows.length;
     final meters = _totalMeters;
     final subtitle = n == 0
-        ? 'Не заполнено — укажите расход'
+        ? 'Не заполнено — плёнка, рулон, расход'
         : '$n поз. · ${meters.toStringAsFixed(1)} м.п.';
 
     return Material(
@@ -279,7 +480,13 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
 
   Widget _rowCard(int index) {
     final row = _rows[index];
-    final value = _catalog.any((f) => (f['id'] as num).toInt() == row.filmId) ? row.filmId : null;
+    final filmValue = _catalog.any((f) => (f['id'] as num).toInt() == row.filmId) ? row.filmId : null;
+    final rollValue = row.rolls.any((r) => (r['id'] as num).toInt() == row.rollId) ? row.rollId : null;
+    final stock = (_catalog.cast<Map<String, dynamic>?>().firstWhere(
+              (f) => f != null && (f['id'] as num).toInt() == row.filmId,
+              orElse: () => null,
+            )?['stock_meters'] as num?)
+            ?.toDouble();
 
     return Padding(
       padding: const EdgeInsets.only(top: 10),
@@ -287,23 +494,65 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           DropdownButtonFormField<int>(
-            value: value,
+            value: filmValue,
             isDense: true,
             isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Плёнка', isDense: true),
+            decoration: InputDecoration(
+              labelText: 'Плёнка',
+              isDense: true,
+              helperText: stock == null ? null : 'На складе: ${_fmtMeters(stock)} м',
+            ),
             items: _catalog
                 .map(
                   (film) => DropdownMenuItem<int>(
                     value: (film['id'] as num).toInt(),
-                    child: Text(film['name'].toString(), overflow: TextOverflow.ellipsis),
+                    child: Text(_filmLabel(film), overflow: TextOverflow.ellipsis),
                   ),
                 )
                 .toList(),
             onChanged: (id) async {
               if (id == null) return;
-              setState(() => row.filmId = id);
+              setState(() {
+                row.filmId = id;
+                row.rollId = null;
+              });
+              await _loadRolls(row);
+              setState(() {});
               await _save(showOk: false);
             },
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<int>(
+                  value: rollValue,
+                  isDense: true,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Рулон №', isDense: true),
+                  items: row.rolls
+                      .map(
+                        (r) => DropdownMenuItem<int>(
+                          value: (r['id'] as num).toInt(),
+                          child: Text(
+                            '${r['roll_number']} · ${_fmtMeters((r['meters_left'] as num?)?.toDouble() ?? 0)} м',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (id) async {
+                    setState(() => row.rollId = id);
+                    await _save(showOk: false);
+                  },
+                ),
+              ),
+              IconButton(
+                tooltip: 'Новый рулон на склад',
+                onPressed: () => _addRollForRow(row),
+                icon: const Icon(Icons.qr_code_2_outlined, color: AppColors.primary),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Row(
@@ -373,20 +622,12 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
-                'Сначала «Новая плёнка» — название в каталог, потом расход в м.п.',
-                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-              ),
-            )
-          else if (_rows.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'Нажмите «Строка» или «Новая плёнка».',
+                'Сначала «Новая плёнка» — попадёт на склад, затем рулон и расход.',
                 style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
               ),
             )
           else
-            for (var i = 0; i < _rows.length; i++) _rowCard(i),
+            ...List.generate(_rows.length, _rowCard),
         ],
       ),
     );
@@ -396,26 +637,39 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
   Widget build(BuildContext context) {
     if (_loading) {
       return const Padding(
-        padding: EdgeInsets.all(12),
+        padding: EdgeInsets.all(16),
         child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(
-          color: _rows.isEmpty ? AppColors.primary.withOpacity(0.35) : AppColors.border,
+    if (!widget.collapsible) {
+      return Container(
+        decoration: AppTheme.panelDecoration,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              child: Text(
+                'Плёнки · расход',
+                style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 14),
+              ),
+            ),
+            _body(),
+          ],
         ),
-      ),
+      );
+    }
+
+    return Container(
+      decoration: AppTheme.panelDecoration,
+      clipBehavior: Clip.antiAlias,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
         children: [
-          if (widget.collapsible) _headerButton(),
-          if (!widget.collapsible || _expanded) ...[
-            if (widget.collapsible) const Divider(height: 1),
+          _headerButton(),
+          if (_expanded) ...[
+            const Divider(height: 1),
             _body(),
           ],
         ],

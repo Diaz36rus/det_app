@@ -12,6 +12,7 @@ import 'database.dart';
 import 'issue_guard.dart';
 import 'master_picker.dart';
 import 'order_defects_sheet.dart';
+import 'inventory_catalog.dart';
 import 'order_wrap_films_panel.dart';
 import 'pulse_anchor.dart';
 import 'quick_datetime_picker.dart';
@@ -639,10 +640,32 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     return _resolvedWorkWorkshop(w) == widget.workshop;
   }
 
+  /// Какие плёнки показывать в расходе: оклейка и/или тонировка — по составу заказа.
+  List<String> _orderFilmCategories() {
+    var wrap = false;
+    var tint = false;
+    for (final w in _selectedWorks) {
+      final name = w['name']?.toString();
+      final cat = w['category']?.toString();
+      if (isTintPackageHeader(name) || isTintPackageLine(category: cat, name: name)) {
+        tint = true;
+      }
+      if (isWrapPackageHeader(name) || isWrapPackageLine(category: cat, name: name)) {
+        wrap = true;
+      }
+    }
+    if (wrap && tint) {
+      return const [InventoryCategories.filmWrap, InventoryCategories.filmTint];
+    }
+    if (tint && !wrap) return const [InventoryCategories.filmTint];
+    // Заказ оклейки / цех Оклейка без явной тонировки — только оклеечная плёнка.
+    return const [InventoryCategories.filmWrap];
+  }
+
   Future<void> _toggleWorkDone(int index, bool done) async {
     final w = _selectedWorks[index];
     if (_isWorkshopMode && !_canToggleWorkInWorkshop(w)) return;
-    await DatabaseHelper().updateOrderItemDone(w['id'] as int, done);
+    final warnings = await DatabaseHelper().updateOrderItemDone(w['id'] as int, done);
     final updated = Map<String, dynamic>.from(w);
     updated['is_done'] = done ? 1 : 0;
     setState(() => _selectedWorks[index] = updated);
@@ -653,6 +676,14 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     await DatabaseHelper().addOrderEvent(widget.order['id'], log);
     _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
     setState(() {});
+    if (warnings.isNotEmpty && mounted) {
+      showAppToast(
+        context,
+        warnings.length == 1
+            ? 'Склад: ${warnings.first}'
+            : 'Склад: нехватка по ${warnings.length} позициям',
+      );
+    }
   }
 
   Future<void> _addWorkshopMasterComment() async {
@@ -2214,6 +2245,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               orderId: widget.order['id'] as int,
               collapsible: true,
               initiallyExpanded: false,
+              filmCategories: _orderFilmCategories(),
             ),
           ],
         ],
@@ -2380,13 +2412,21 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   ) async {
     final headerId = (header['id'] as num).toInt();
     final label = header['name']?.toString() ?? 'Пакет';
-    await DatabaseHelper().updateWrapPackageDone(headerId, done);
+    final warnings = await DatabaseHelper().updateWrapPackageDone(headerId, done);
     final log = done
         ? "Пакет «$label» выполнен (${children.length} поз.)"
         : "Снята отметка выполнения пакета «$label»";
     await DatabaseHelper().addOrderEvent(widget.order['id'], log);
     _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
     await _reloadWorksFromDb();
+    if (warnings.isNotEmpty && mounted) {
+      showAppToast(
+        context,
+        warnings.length == 1
+            ? 'Склад: ${warnings.first}'
+            : 'Склад: нехватка по ${warnings.length} позициям',
+      );
+    }
   }
 
   Future<void> _saveWrapPackageSchedule({
@@ -3915,6 +3955,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     orderId: widget.order['id'] as int,
                     collapsible: true,
                     initiallyExpanded: false,
+                    filmCategories: _orderFilmCategories(),
                   ),
                   const SizedBox(height: 10),
                 ],
@@ -4145,6 +4186,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     orderId: widget.order['id'] as int,
                     collapsible: true,
                     initiallyExpanded: false,
+                    filmCategories: _orderFilmCategories(),
                   ),
                 ),
               _mobileAccordion(

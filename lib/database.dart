@@ -10,6 +10,7 @@ import 'package:sqflite/sqflite.dart';
 import 'sync/remote_database.dart';
 import 'sync/sync_config.dart';
 import 'cash_catalog.dart';
+import 'inventory_catalog.dart';
 import 'wrap_catalog.dart';
 
 // --- НАЧАЛО БЛОКА: КОНСТАНТЫ ---
@@ -333,12 +334,14 @@ class DatabaseHelper {
     )''');
     await db.execute('''CREATE TABLE wrap_films (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE
+      name TEXT NOT NULL UNIQUE,
+      inventory_id INTEGER
     )''');
     await db.execute('''CREATE TABLE order_wrap_films (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       order_id INTEGER NOT NULL,
       film_id INTEGER NOT NULL,
+      roll_id INTEGER,
       meters REAL DEFAULT 0
     )''');
     await db.execute('''CREATE TABLE payments (
@@ -401,12 +404,51 @@ class DatabaseHelper {
     await _seedCashRegisters(db);
     await db.execute('''CREATE TABLE custom_works (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, category TEXT DEFAULT 'Прочее', price REAL DEFAULT 0)''');
     await db.execute('''CREATE TABLE services (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL, name TEXT NOT NULL UNIQUE, price1 REAL DEFAULT 0, price2 REAL DEFAULT 0, price3 REAL DEFAULT 0, price4 REAL DEFAULT 0, fixed_price REAL DEFAULT 0)''');
-    await db.execute('''CREATE TABLE inventory (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, quantity REAL DEFAULT 0, unit TEXT DEFAULT 'шт', min_qty REAL DEFAULT 0)''');
+    await db.execute('''CREATE TABLE inventory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      quantity REAL DEFAULT 0,
+      unit TEXT DEFAULT 'шт',
+      min_qty REAL DEFAULT 0,
+      category TEXT DEFAULT 'Прочее',
+      meters_per_roll REAL DEFAULT 0,
+      last_brand TEXT DEFAULT ''
+    )''');
     await db.execute('''CREATE TABLE service_recipes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       service_name TEXT NOT NULL,
       inventory_id INTEGER NOT NULL,
       qty REAL NOT NULL DEFAULT 1
+    )''');
+    await db.execute('''CREATE TABLE inventory_brands (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE
+    )''');
+    await db.execute('''CREATE TABLE inventory_moves (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inventory_id INTEGER NOT NULL,
+      roll_id INTEGER,
+      delta REAL NOT NULL,
+      balance_after REAL,
+      reason TEXT NOT NULL,
+      order_id INTEGER,
+      order_item_id INTEGER,
+      cash_flow_id INTEGER,
+      note TEXT DEFAULT '',
+      brand TEXT DEFAULT '',
+      created_at TEXT NOT NULL
+    )''');
+    for (final b in InventoryBrands.popular) {
+      await db.insert('inventory_brands', {'name': b}, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+    await db.execute('''CREATE TABLE film_rolls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inventory_id INTEGER NOT NULL,
+      roll_number TEXT NOT NULL,
+      meters_initial REAL NOT NULL DEFAULT 0,
+      meters_left REAL NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      UNIQUE(inventory_id, roll_number)
     )''');
     await db.execute('''CREATE TABLE roles (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE)''');
     await db.execute('''CREATE TABLE promocodes (
@@ -670,6 +712,124 @@ class DatabaseHelper {
     if (oldVersion < 23) {
       await _ensureColumn(db, 'order_items', 'work_started_at', 'TEXT');
       await _ensureColumn(db, 'order_items', 'work_ended_at', 'TEXT');
+    }
+    // --- Версия 24: склад — категории, журнал, рулоны плёнки ---
+    if (oldVersion < 24) {
+      await _ensureColumn(db, 'inventory', 'category', "TEXT DEFAULT 'Прочее'");
+      await _ensureColumn(db, 'inventory', 'meters_per_roll', 'REAL DEFAULT 0');
+      await _ensureColumn(db, 'wrap_films', 'inventory_id', 'INTEGER');
+      await _ensureColumn(db, 'order_wrap_films', 'roll_id', 'INTEGER');
+      await db.execute('''CREATE TABLE IF NOT EXISTS inventory_moves (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inventory_id INTEGER NOT NULL,
+        roll_id INTEGER,
+        delta REAL NOT NULL,
+        balance_after REAL,
+        reason TEXT NOT NULL,
+        order_id INTEGER,
+        order_item_id INTEGER,
+        cash_flow_id INTEGER,
+        note TEXT DEFAULT '',
+        created_at TEXT NOT NULL
+      )''');
+      await db.execute('''CREATE TABLE IF NOT EXISTS film_rolls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inventory_id INTEGER NOT NULL,
+        roll_number TEXT NOT NULL,
+        meters_initial REAL NOT NULL DEFAULT 0,
+        meters_left REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        UNIQUE(inventory_id, roll_number)
+      )''');
+      // Старые wrap_films → позиции склада «Плёнка оклейка».
+      final films = await db.query('wrap_films');
+      for (final f in films) {
+        final filmId = (f['id'] as num).toInt();
+        final name = f['name']?.toString() ?? '';
+        if (name.isEmpty) continue;
+        final existingInv = (f['inventory_id'] as num?)?.toInt();
+        if (existingInv != null && existingInv > 0) continue;
+        final invId = await db.insert('inventory', {
+          'name': name,
+          'quantity': 0,
+          'unit': FilmUnits.meters,
+          'min_qty': 0,
+          'category': InventoryCategories.filmWrap,
+          'meters_per_roll': 0,
+        });
+        await db.update('wrap_films', {'inventory_id': invId}, where: 'id = ?', whereArgs: [filmId]);
+      }
+    }
+    // --- Версия 25: единица плёнки м.п. / рул. ---
+    if (oldVersion < 25) {
+      await db.execute('''
+        UPDATE inventory
+        SET unit = '${FilmUnits.meters}'
+        WHERE category IN ('${InventoryCategories.filmWrap}', '${InventoryCategories.filmTint}')
+          AND (
+            unit IS NULL OR trim(unit) = '' OR lower(trim(unit)) IN ('м', 'м.', 'мп', 'м.п', 'м.п.', 'meter', 'meters')
+          )
+      ''');
+      await db.execute('''
+        UPDATE inventory
+        SET unit = '${FilmUnits.rolls}'
+        WHERE category IN ('${InventoryCategories.filmWrap}', '${InventoryCategories.filmTint}')
+          AND lower(replace(trim(unit), ' ', '')) IN ('рул', 'рул.', 'рулон', 'рулоны', 'roll', 'rolls')
+      ''');
+      // Пересчитать quantity по выбранной единице.
+      final films = await db.query(
+        'inventory',
+        columns: ['id'],
+        where: "category IN (?, ?)",
+        whereArgs: [InventoryCategories.filmWrap, InventoryCategories.filmTint],
+      );
+      for (final f in films) {
+        final invId = (f['id'] as num).toInt();
+        final unitRows = await db.query(
+          'inventory',
+          columns: ['unit'],
+          where: 'id = ?',
+          whereArgs: [invId],
+          limit: 1,
+        );
+        final unit = FilmUnits.normalize(unitRows.first['unit']?.toString());
+        final double total;
+        if (FilmUnits.isRolls(unit)) {
+          final cnt = await db.rawQuery(
+            'SELECT COUNT(*) AS c FROM film_rolls WHERE inventory_id = ? AND meters_left > 0.001',
+            [invId],
+          );
+          total = ((cnt.first['c'] as num?)?.toInt() ?? 0).toDouble();
+        } else {
+          final sum = await db.rawQuery(
+            'SELECT COALESCE(SUM(meters_left), 0) AS s FROM film_rolls WHERE inventory_id = ?',
+            [invId],
+          );
+          total = (sum.first['s'] as num?)?.toDouble() ?? 0;
+        }
+        await db.update(
+          'inventory',
+          {'quantity': total, 'unit': unit},
+          where: 'id = ?',
+          whereArgs: [invId],
+        );
+      }
+    }
+    // --- Версия 26: бренды расходников (остаток по типу; плёнки без бренда) ---
+    if (oldVersion < 26) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS inventory_brands (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE
+      )''');
+      await _ensureColumn(db, 'inventory', 'last_brand', "TEXT DEFAULT ''");
+      await _ensureColumn(db, 'inventory_moves', 'brand', "TEXT DEFAULT ''");
+      for (final b in InventoryBrands.popular) {
+        await db.insert(
+          'inventory_brands',
+          {'name': b},
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
     }
   }
 
@@ -1398,6 +1558,8 @@ class DatabaseHelper {
 
     // --- УДАЛЕНИЕ ЗАКАЗА ---
   Future<void> deleteOrder(int orderId) async {
+    // Вернуть метры на рулоны и очистить order_wrap_films (дельта-учёт).
+    await setOrderWrapFilms(orderId, const []);
     final db = await database;
     await db.delete('order_items', where: 'order_id = ?', whereArgs: [orderId]);
     await db.delete('order_events', where: 'order_id = ?', whereArgs: [orderId]);
@@ -1690,27 +1852,35 @@ class DatabaseHelper {
     if (orderId != null) await syncOrderFromItems(orderId);
   }
 
-  Future<void> updateOrderItemDone(int itemId, bool isDone) async {
+  /// Возвращает предупреждения о нехватке склада (списание не блокируется).
+  Future<List<String>> updateOrderItemDone(int itemId, bool isDone) async {
     final db = await database;
     final rows = await db.query(
       'order_items',
-      columns: ['name', 'is_done', 'parent_id'],
+      columns: ['name', 'is_done', 'parent_id', 'order_id'],
       where: 'id = ?',
       whereArgs: [itemId],
     );
     final wasDone = rows.isNotEmpty && ((rows.first['is_done'] as num?)?.toInt() ?? 0) == 1;
     await db.update('order_items', {'is_done': isDone ? 1 : 0}, where: 'id = ?', whereArgs: [itemId]);
-    // Списание склада только при первом переходе в «выполнено»
-    if (isDone && !wasDone && rows.isNotEmpty) {
-      await deductRecipeForService(rows.first['name']?.toString() ?? '');
-    }
-    // Зона пакета → подтянуть is_done шапки (иначе «Выдан» может блокироваться).
+    final warnings = <String>[];
     if (rows.isNotEmpty) {
+      final name = rows.first['name']?.toString() ?? '';
+      final orderId = (rows.first['order_id'] as num?)?.toInt();
+      // Списание / возврат склада при смене «выполнено».
+      if (isDone && !wasDone) {
+        warnings.addAll(
+          await deductRecipeForService(name, orderId: orderId, orderItemId: itemId),
+        );
+      } else if (!isDone && wasDone) {
+        await restoreRecipeForService(name, orderId: orderId, orderItemId: itemId);
+      }
       final parentId = (rows.first['parent_id'] as num?)?.toInt();
       if (parentId != null) {
         await syncZonePackageHeaderDone(parentId);
       }
     }
+    return warnings;
   }
 
   /// Шапка пакета выполнена ⇔ все зоны выполнены.
@@ -1814,7 +1984,7 @@ class DatabaseHelper {
   }
 
   /// Отметка выполнения пакета — шапка и все зоны (списание склада по зонам).
-  Future<void> updateWrapPackageDone(int headerId, bool isDone) async {
+  Future<List<String>> updateWrapPackageDone(int headerId, bool isDone) async {
     final db = await database;
     final children = await db.query(
       'order_items',
@@ -1822,10 +1992,12 @@ class DatabaseHelper {
       where: 'parent_id = ?',
       whereArgs: [headerId],
     );
-    await updateOrderItemDone(headerId, isDone);
+    final warnings = <String>[];
+    warnings.addAll(await updateOrderItemDone(headerId, isDone));
     for (final c in children) {
-      await updateOrderItemDone((c['id'] as num).toInt(), isDone);
+      warnings.addAll(await updateOrderItemDone((c['id'] as num).toInt(), isDone));
     }
+    return warnings;
   }
 
   /// Сохраняет время и цех одной услуги (сразу в базу).
@@ -2040,42 +2212,167 @@ class DatabaseHelper {
     bumpDataRevision();
   }
 
-  Future<List<Map<String, dynamic>>> listWrapFilms() async {
+  /// Складские позиции плёнки → записи каталога цеха (wrap_films).
+  Future<void> syncWrapFilmsFromInventory() async {
     final db = await database;
-    return db.query('wrap_films', orderBy: 'name COLLATE NOCASE');
+    final films = await db.query(
+      'inventory',
+      where: 'category IN (?, ?)',
+      whereArgs: [InventoryCategories.filmWrap, InventoryCategories.filmTint],
+    );
+    var changed = false;
+    for (final inv in films) {
+      final invId = (inv['id'] as num).toInt();
+      final name = inv['name']?.toString().trim() ?? '';
+      if (name.isEmpty) continue;
+      final byInv = await db.query(
+        'wrap_films',
+        where: 'inventory_id = ?',
+        whereArgs: [invId],
+        limit: 1,
+      );
+      if (byInv.isNotEmpty) continue;
+      final byName = await db.rawQuery(
+        'SELECT id, inventory_id FROM wrap_films WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1',
+        [name],
+      );
+      if (byName.isNotEmpty) {
+        final filmId = (byName.first['id'] as num).toInt();
+        final linked = (byName.first['inventory_id'] as num?)?.toInt();
+        if (linked == null || linked <= 0) {
+          await db.update('wrap_films', {'inventory_id': invId}, where: 'id = ?', whereArgs: [filmId]);
+          changed = true;
+        }
+      } else {
+        await db.insert('wrap_films', {'name': name, 'inventory_id': invId});
+        changed = true;
+      }
+    }
+    if (changed) bumpDataRevision();
   }
 
-  Future<int> addWrapFilm(String name) async {
+  /// Каталог плёнок для цеха. [categories] — фильтр склада («Плёнка оклейка» / «Плёнка тонировка»).
+  Future<List<Map<String, dynamic>>> listWrapFilms({List<String>? categories}) async {
+    await syncWrapFilmsFromInventory();
+    final db = await database;
+    final cats = (categories ?? const <String>[])
+        .where((c) => InventoryCategories.isFilm(c))
+        .toList();
+    if (cats.isEmpty) {
+      return db.rawQuery('''
+        SELECT wrap_films.*, inventory.quantity AS stock_meters, inventory.meters_per_roll,
+               inventory.category AS inventory_category
+        FROM wrap_films
+        LEFT JOIN inventory ON inventory.id = wrap_films.inventory_id
+        ORDER BY inventory.category COLLATE NOCASE, wrap_films.name COLLATE NOCASE
+      ''');
+    }
+    final placeholders = List.filled(cats.length, '?').join(', ');
+    return db.rawQuery('''
+      SELECT wrap_films.*, inventory.quantity AS stock_meters, inventory.meters_per_roll,
+             inventory.category AS inventory_category
+      FROM wrap_films
+      INNER JOIN inventory ON inventory.id = wrap_films.inventory_id
+      WHERE inventory.category IN ($placeholders)
+      ORDER BY inventory.category COLLATE NOCASE, wrap_films.name COLLATE NOCASE
+    ''', cats);
+  }
+
+  /// Новая плёнка в каталоге цеха + позиция на складе.
+  Future<int> addWrapFilm(
+    String name, {
+    String category = InventoryCategories.filmWrap,
+    double metersPerRoll = 0,
+    String unit = FilmUnits.meters,
+  }) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) throw ArgumentError.value(name, 'name', 'Название плёнки не может быть пустым');
+    final filmUnit = FilmUnits.normalize(unit);
     final db = await database;
-    final id = await db.insert(
-      'wrap_films',
-      {'name': trimmed},
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
-    if (id != 0) {
-      bumpDataRevision();
-      return id;
+    final existing = await db.query('wrap_films', where: 'name = ?', whereArgs: [trimmed], limit: 1);
+    if (existing.isNotEmpty) {
+      final filmId = (existing.first['id'] as num).toInt();
+      final invId = (existing.first['inventory_id'] as num?)?.toInt();
+      if (invId == null || invId <= 0) {
+        final newInv = await addInventoryItem(
+          trimmed,
+          0,
+          filmUnit,
+          category: category,
+          metersPerRoll: metersPerRoll,
+        );
+        await db.update('wrap_films', {'inventory_id': newInv}, where: 'id = ?', whereArgs: [filmId]);
+        bumpDataRevision();
+      }
+      return filmId;
     }
-    final existing = await db.query('wrap_films', columns: ['id'], where: 'name = ?', whereArgs: [trimmed]);
-    return (existing.first['id'] as num).toInt();
+    final invId = await addInventoryItem(
+      trimmed,
+      0,
+      filmUnit,
+      category: category,
+      metersPerRoll: metersPerRoll,
+    );
+    final id = await db.insert('wrap_films', {'name': trimmed, 'inventory_id': invId});
+    bumpDataRevision();
+    return id;
   }
 
   Future<List<Map<String, dynamic>>> getOrderWrapFilms(int orderId) async {
     final db = await database;
     return db.rawQuery('''
-      SELECT order_wrap_films.*, wrap_films.name AS film_name
+      SELECT order_wrap_films.*, wrap_films.name AS film_name,
+             film_rolls.roll_number AS roll_number,
+             film_rolls.meters_left AS roll_meters_left,
+             wrap_films.inventory_id AS inventory_id
       FROM order_wrap_films
       JOIN wrap_films ON wrap_films.id = order_wrap_films.film_id
+      LEFT JOIN film_rolls ON film_rolls.id = order_wrap_films.roll_id
       WHERE order_wrap_films.order_id = ?
       ORDER BY order_wrap_films.id ASC
     ''', [orderId]);
   }
 
-  Future<void> setOrderWrapFilms(int orderId, List<Map<String, dynamic>> films) async {
+  Map<int, double> _usageByRoll(Iterable<Map<String, dynamic>> rows) {
+    final map = <int, double>{};
+    for (final r in rows) {
+      final rollId = (r['roll_id'] as num?)?.toInt() ??
+          (r['rollId'] is num ? (r['rollId'] as num).toInt() : int.tryParse('${r['rollId']}'));
+      final metersRaw = r['meters'];
+      final meters = metersRaw is num
+          ? metersRaw.toDouble()
+          : double.tryParse('$metersRaw'.replaceAll(',', '.')) ?? 0;
+      if (rollId == null || meters <= 0) continue;
+      map[rollId] = (map[rollId] ?? 0) + meters;
+    }
+    return map;
+  }
+
+  /// Сохранить расход плёнок: на склад уходит только дельта по рулонам (без спама в журнале).
+  Future<List<String>> setOrderWrapFilms(int orderId, List<Map<String, dynamic>> films) async {
     final db = await database;
-    // Без txn: на LAN-клиенте транзакция — просто цепочка HTTP; так надёжнее на телефоне.
+    final warnings = <String>[];
+    final oldRows = await db.query('order_wrap_films', where: 'order_id = ?', whereArgs: [orderId]);
+    final oldUsage = _usageByRoll(oldRows);
+    final newUsage = _usageByRoll(films);
+
+    final rollIds = {...oldUsage.keys, ...newUsage.keys};
+    for (final rollId in rollIds) {
+      final before = oldUsage[rollId] ?? 0;
+      final after = newUsage[rollId] ?? 0;
+      final stockDelta = before - after; // расход вырос → остаток рулона падает
+      if (stockDelta.abs() < 0.0001) continue;
+      final w = await adjustFilmRollMeters(
+        rollId,
+        stockDelta,
+        reason: stockDelta > 0 ? InventoryMoveReasons.filmRestore : InventoryMoveReasons.filmDeduct,
+        orderId: orderId,
+        note: 'Заказ #$orderId',
+        logMove: false,
+      );
+      if (w != null) warnings.add(w);
+    }
+
     await db.delete('order_wrap_films', where: 'order_id = ?', whereArgs: [orderId]);
     for (final film in films) {
       final rawId = film['filmId'] ?? film['film_id'];
@@ -2085,13 +2382,17 @@ class DatabaseHelper {
       final meters = metersRaw is num
           ? metersRaw.toDouble()
           : double.tryParse('$metersRaw'.replaceAll(',', '.')) ?? 0;
+      final rawRoll = film['rollId'] ?? film['roll_id'];
+      final rollId = (rawRoll is num) ? rawRoll.toInt() : int.tryParse('$rawRoll');
       await db.insert('order_wrap_films', {
         'order_id': orderId,
         'film_id': id,
+        'roll_id': rollId,
         'meters': meters,
       });
     }
     bumpDataRevision();
+    return warnings;
   }
 
   Future<List<Map<String, dynamic>>> getOrdersByPlate(String plate) async {
@@ -2818,6 +3119,7 @@ class DatabaseHelper {
     int? orderId,
     String templateKey = '',
     String note = '',
+    String inventoryBrand = '',
   }) async {
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
@@ -2842,10 +3144,146 @@ class DatabaseHelper {
     });
     // Закупка на склад: приход количества
     if (inventoryId != null && inventoryQty > 0 && type == 'Расход') {
-      await adjustInventoryQuantity(inventoryId, inventoryQty);
+      await _stockInFromCash(
+        inventoryId,
+        inventoryQty,
+        cashFlowId: id,
+        brand: inventoryBrand,
+      );
     }
     bumpDataRevision();
     return id;
+  }
+
+  /// Приход из кассы: обычные позиции — +qty; плёнка — новый рулон.
+  Future<void> _stockInFromCash(
+    int inventoryId,
+    double qty, {
+    int? cashFlowId,
+    String brand = '',
+  }) async {
+    final db = await database;
+    final rows = await db.query('inventory', where: 'id = ?', whereArgs: [inventoryId], limit: 1);
+    if (rows.isEmpty || qty <= 0) return;
+    final cat = rows.first['category']?.toString() ?? '';
+    if (InventoryCategories.isFilm(cat)) {
+      // Уникальный суффикс: cashFlowId + микросекунды (правка операции не бьётся UNIQUE).
+      final stamp =
+          '${cashFlowId ?? 0}-${DateTime.now().microsecondsSinceEpoch}';
+      final unit = FilmUnits.normalize(rows.first['unit']?.toString());
+      final perRoll = (rows.first['meters_per_roll'] as num?)?.toDouble() ?? 0;
+      if (FilmUnits.isRolls(unit)) {
+        // qty = число рулонов; метры берём из «метров в рулоне».
+        final n = qty.round().clamp(1, 50);
+        final meters = perRoll > 0 ? perRoll : 0.0;
+        for (var i = 0; i < n; i++) {
+          final suffix = n == 1 ? stamp : '$stamp-${i + 1}';
+          await addFilmRoll(
+            inventoryId: inventoryId,
+            rollNumber: 'КАССА-$suffix',
+            metersInitial: meters > 0 ? meters : null,
+            cashFlowId: cashFlowId,
+          );
+        }
+      } else {
+        await addFilmRoll(
+          inventoryId: inventoryId,
+          rollNumber: 'КАССА-$stamp',
+          metersInitial: qty,
+          cashFlowId: cashFlowId,
+        );
+      }
+      return;
+    }
+    await adjustInventoryQuantity(
+      inventoryId,
+      qty,
+      reason: InventoryMoveReasons.cashPurchase,
+      cashFlowId: cashFlowId,
+      note: 'Закупка из кассы',
+      brand: brand,
+    );
+  }
+
+  /// Откат прихода со склада по кассовой операции (плёнка — удаление связанных рулонов).
+  Future<void> _rollbackStockInFromCash({
+    required int cashFlowId,
+    required int inventoryId,
+    required double inventoryQty,
+    String note = '',
+  }) async {
+    if (inventoryQty <= 0) return;
+    final db = await database;
+    final inv = await db.query('inventory', where: 'id = ?', whereArgs: [inventoryId], limit: 1);
+    if (inv.isEmpty) return;
+    final cat = inv.first['category']?.toString() ?? '';
+
+    if (InventoryCategories.isFilm(cat)) {
+      final moveRows = await db.query(
+        'inventory_moves',
+        columns: ['roll_id'],
+        where: 'cash_flow_id = ? AND inventory_id = ? AND roll_id IS NOT NULL',
+        whereArgs: [cashFlowId, inventoryId],
+      );
+      var rollIds = moveRows
+          .map((r) => (r['roll_id'] as num?)?.toInt())
+          .whereType<int>()
+          .toSet();
+
+      // Старые операции без cash_flow_id на движении — ищем рулоны КАССА-*.
+      if (rollIds.isEmpty) {
+        final unit = FilmUnits.normalize(inv.first['unit']?.toString());
+        if (FilmUnits.isRolls(unit)) {
+          final n = inventoryQty.round().clamp(1, 50);
+          final rolls = await db.query(
+            'film_rolls',
+            where: "inventory_id = ? AND roll_number LIKE 'КАССА-%'",
+            whereArgs: [inventoryId],
+            orderBy: 'id DESC',
+            limit: n,
+          );
+          rollIds = rolls.map((r) => (r['id'] as num).toInt()).toSet();
+        } else {
+          final rolls = await db.query(
+            'film_rolls',
+            where:
+                "inventory_id = ? AND roll_number LIKE 'КАССА-%' AND abs(meters_initial - ?) < 0.011",
+            whereArgs: [inventoryId, inventoryQty],
+            orderBy: 'id DESC',
+            limit: 1,
+          );
+          rollIds = rolls.map((r) => (r['id'] as num).toInt()).toSet();
+        }
+      }
+
+      for (final rollId in rollIds) {
+        // Снимаем ссылки заказа (метры уже «сидели» на рулоне — рулон убираем целиком).
+        await db.delete('order_wrap_films', where: 'roll_id = ?', whereArgs: [rollId]);
+        await db.delete('film_rolls', where: 'id = ?', whereArgs: [rollId]);
+      }
+      if (rollIds.isNotEmpty) {
+        await _syncFilmInventoryQuantity(inventoryId);
+        await _insertInventoryMove(
+          inventoryId: inventoryId,
+          delta: FilmUnits.isRolls(FilmUnits.normalize(inv.first['unit']?.toString()))
+              ? -rollIds.length.toDouble()
+              : -inventoryQty,
+          balanceAfter: await _inventoryQty(inventoryId),
+          reason: InventoryMoveReasons.manual,
+          cashFlowId: cashFlowId,
+          note: note.isEmpty ? 'Откат закупки плёнки (касса #$cashFlowId)' : note,
+        );
+      }
+      return;
+    }
+
+    await adjustInventoryQuantity(
+      inventoryId,
+      -inventoryQty,
+      reason: InventoryMoveReasons.manual,
+      cashFlowId: cashFlowId,
+      note: note,
+    );
   }
 
   Future<Map<String, dynamic>?> getCashFlowById(int id) async {
@@ -2876,6 +3314,7 @@ class DatabaseHelper {
     double inventoryQty = 0,
     String templateKey = '',
     String note = '',
+    String inventoryBrand = '',
   }) async {
     final db = await database;
     final existing = await db.query('cash_flow', where: 'id = ?', whereArgs: [id], limit: 1);
@@ -2885,9 +3324,13 @@ class DatabaseHelper {
     final oldInvId = (old['inventory_id'] as num?)?.toInt();
     final oldQty = (old['inventory_qty'] as num?)?.toDouble() ?? 0;
 
-    // Откат старого влияния на склад
     if (oldInvId != null && oldQty > 0 && oldType == 'Расход') {
-      await adjustInventoryQuantity(oldInvId, -oldQty);
+      await _rollbackStockInFromCash(
+        cashFlowId: id,
+        inventoryId: oldInvId,
+        inventoryQty: oldQty,
+        note: 'Откат правки кассы #$id',
+      );
     }
 
     final rid = registerId ?? await resolveRegisterIdForMethod(method);
@@ -2912,7 +3355,12 @@ class DatabaseHelper {
     );
 
     if (inventoryId != null && inventoryQty > 0 && type == 'Расход') {
-      await adjustInventoryQuantity(inventoryId, inventoryQty);
+      await _stockInFromCash(
+        inventoryId,
+        inventoryQty,
+        cashFlowId: id,
+        brand: inventoryBrand,
+      );
     }
     bumpDataRevision();
     return true;
@@ -2927,7 +3375,12 @@ class DatabaseHelper {
     final oldInvId = (old['inventory_id'] as num?)?.toInt();
     final oldQty = (old['inventory_qty'] as num?)?.toDouble() ?? 0;
     if (oldInvId != null && oldQty > 0 && oldType == 'Расход') {
-      await adjustInventoryQuantity(oldInvId, -oldQty);
+      await _rollbackStockInFromCash(
+        cashFlowId: id,
+        inventoryId: oldInvId,
+        inventoryQty: oldQty,
+        note: 'Удаление операции кассы #$id',
+      );
     }
     await db.delete('cash_flow', where: 'id = ?', whereArgs: [id]);
     bumpDataRevision();
@@ -3128,7 +3581,93 @@ class DatabaseHelper {
   // --- СКЛАД И УСЛУГИ ---
   Future<List<Map<String, dynamic>>> getInventory() async {
     final db = await database;
-    return await db.query('inventory', orderBy: 'name ASC');
+    return await db.rawQuery('''
+      SELECT inventory.*,
+        (SELECT COUNT(*) FROM film_rolls r
+          WHERE r.inventory_id = inventory.id AND r.meters_left > 0.001) AS rolls_count,
+        (SELECT COALESCE(SUM(r.meters_left), 0) FROM film_rolls r
+          WHERE r.inventory_id = inventory.id) AS rolls_meters
+      FROM inventory
+      ORDER BY inventory.name ASC
+    ''');
+  }
+
+  /// Один раз подставляет логичные единицы из сида (шт→фл. и т.п.) для известных позиций.
+  Future<void> applyInventoryUnitDefaultsIfNeeded() async {
+    final done = await getAppSetting(InventorySeedCatalog.unitsFixKey);
+    if (done == '1') return;
+    final db = await database;
+    var changed = 0;
+    for (final s in InventorySeedCatalog.items) {
+      final unit = InventoryUnits.normalize(s.unit, category: s.category);
+      final n = await db.rawUpdate(
+        '''
+        UPDATE inventory SET unit = ?
+        WHERE category = ? AND lower(trim(name)) = lower(trim(?))
+        ''',
+        [unit, s.category, s.name],
+      );
+      changed += n;
+    }
+    await setAppSetting(InventorySeedCatalog.unitsFixKey, '1');
+    if (changed > 0) bumpDataRevision();
+  }
+
+  /// Один раз наполняет склад стандартными позициями (без дублей по имени+категории).
+  Future<int> seedStandardInventoryIfNeeded() async {
+    final done = await getAppSetting(InventorySeedCatalog.settingKey);
+    if (done == '1') return 0;
+    final db = await database;
+    var added = 0;
+    for (final s in InventorySeedCatalog.items) {
+      final rows = await db.rawQuery(
+        '''
+        SELECT id FROM inventory
+        WHERE category = ? AND lower(trim(name)) = lower(trim(?))
+        LIMIT 1
+        ''',
+        [s.category, s.name],
+      );
+      late final int invId;
+      if (rows.isNotEmpty) {
+        invId = (rows.first['id'] as num).toInt();
+      } else {
+        invId = await addInventoryItem(
+          s.name,
+          0,
+          s.unit,
+          minQty: s.minQty,
+          category: s.category,
+          metersPerRoll: s.metersPerRoll,
+        );
+        added++;
+      }
+      // Плёнки — сразу в каталог цеха оклейки/тонировки.
+      if (InventoryCategories.isFilm(s.category)) {
+        final films = await db.query(
+          'wrap_films',
+          where: 'lower(trim(name)) = lower(trim(?))',
+          whereArgs: [s.name],
+          limit: 1,
+        );
+        if (films.isEmpty) {
+          await db.insert('wrap_films', {'name': s.name, 'inventory_id': invId});
+        } else {
+          final filmInv = (films.first['inventory_id'] as num?)?.toInt();
+          if (filmInv == null || filmInv <= 0) {
+            await db.update(
+              'wrap_films',
+              {'inventory_id': invId},
+              where: 'id = ?',
+              whereArgs: [(films.first['id'] as num).toInt()],
+            );
+          }
+        }
+      }
+    }
+    await setAppSetting(InventorySeedCatalog.settingKey, '1');
+    if (added > 0) bumpDataRevision();
+    return added;
   }
 
   Future<int> addInventoryItem(
@@ -3136,14 +3675,36 @@ class DatabaseHelper {
     double quantity,
     String unit, {
     double minQty = 0,
+    String category = InventoryCategories.other,
+    double metersPerRoll = 0,
   }) async {
     final db = await database;
-    return await db.insert('inventory', {
+    final cat = InventoryCategories.all.contains(category) ? category : InventoryCategories.other;
+    final resolvedUnit = unit.trim().isEmpty
+        ? InventoryUnits.defaultFor(category: cat, name: name)
+        : InventoryUnits.normalize(unit, category: cat);
+    final id = await db.insert('inventory', {
       'name': name.trim(),
       'quantity': quantity,
-      'unit': unit.trim().isEmpty ? 'шт' : unit.trim(),
+      'unit': resolvedUnit,
       'min_qty': minQty < 0 ? 0 : minQty,
+      'category': cat,
+      'meters_per_roll': metersPerRoll < 0 ? 0 : metersPerRoll,
     });
+    if (quantity.abs() > 0.0001 && !InventoryCategories.isFilm(cat)) {
+      await _insertInventoryMove(
+        inventoryId: id,
+        delta: quantity,
+        balanceAfter: quantity,
+        reason: InventoryMoveReasons.purchase,
+        note: 'Начальный остаток',
+      );
+    }
+    if (InventoryCategories.isFilm(cat)) {
+      await syncWrapFilmsFromInventory();
+    }
+    bumpDataRevision();
+    return id;
   }
 
   Future<void> updateInventoryItem(
@@ -3152,15 +3713,58 @@ class DatabaseHelper {
     double? quantity,
     String? unit,
     double? minQty,
+    String? category,
+    double? metersPerRoll,
   }) async {
     final db = await database;
+    final prev = await db.query('inventory', where: 'id = ?', whereArgs: [id], limit: 1);
+    if (prev.isEmpty) return;
+    final oldQty = (prev.first['quantity'] as num?)?.toDouble() ?? 0;
+    final prevCat = prev.first['category']?.toString() ?? InventoryCategories.other;
+    final nextCat = category ?? prevCat;
     final data = <String, dynamic>{};
     if (name != null) data['name'] = name.trim();
-    if (quantity != null) data['quantity'] = quantity;
-    if (unit != null) data['unit'] = unit.trim().isEmpty ? 'шт' : unit.trim();
+    if (unit != null) {
+      data['unit'] = unit.trim().isEmpty
+          ? InventoryUnits.defaultFor(category: nextCat, name: name ?? prev.first['name']?.toString())
+          : InventoryUnits.normalize(unit, category: nextCat);
+    }
     if (minQty != null) data['min_qty'] = minQty < 0 ? 0 : minQty;
+    if (category != null) {
+      data['category'] = InventoryCategories.all.contains(category)
+          ? category
+          : InventoryCategories.other;
+    }
+    if (metersPerRoll != null) data['meters_per_roll'] = metersPerRoll < 0 ? 0 : metersPerRoll;
+    if (quantity != null && !InventoryCategories.isFilm(nextCat)) {
+      data['quantity'] = quantity;
+      final delta = quantity - oldQty;
+      if (delta.abs() > 0.0001) {
+        await _insertInventoryMove(
+          inventoryId: id,
+          delta: delta,
+          balanceAfter: quantity,
+          reason: InventoryMoveReasons.inventoryCount,
+          note: 'Инвентаризация / правка остатка',
+        );
+      }
+    }
     if (data.isEmpty) return;
     await db.update('inventory', data, where: 'id = ?', whereArgs: [id]);
+    if (InventoryCategories.isFilm(nextCat)) {
+      await _syncFilmInventoryQuantity(id);
+      await syncWrapFilmsFromInventory();
+    }
+    // Имя на складе → имя в каталоге цеха.
+    if (name != null && InventoryCategories.isFilm(nextCat)) {
+      await db.update(
+        'wrap_films',
+        {'name': name.trim()},
+        where: 'inventory_id = ?',
+        whereArgs: [id],
+      );
+    }
+    bumpDataRevision();
   }
 
   /// Позиции с остатком ≤ мин. (или ≤ 0, если мин. не задан).
@@ -3174,6 +3778,244 @@ class DatabaseHelper {
       END
       ORDER BY quantity ASC, name ASC
     ''');
+  }
+
+  /// Журнал логистики склада (приход / закупка / ручные правки).
+  /// Расход цеха и рецепты сюда не попадают ([logisticsOnly] = true по умолчанию).
+  Future<List<Map<String, dynamic>>> getInventoryMoves({
+    int limit = 100,
+    int? inventoryId,
+    bool logisticsOnly = true,
+  }) async {
+    final db = await database;
+    final where = <String>[];
+    final args = <Object>[];
+    if (inventoryId != null) {
+      where.add('m.inventory_id = ?');
+      args.add(inventoryId);
+    }
+    if (logisticsOnly) {
+      final placeholders = InventoryMoveReasons.logistics.map((_) => '?').join(', ');
+      where.add('m.reason IN ($placeholders)');
+      args.addAll(InventoryMoveReasons.logistics);
+    }
+    args.add(limit);
+    final whereSql = where.isEmpty ? '' : 'WHERE ${where.join(' AND ')}';
+    return db.rawQuery('''
+      SELECT m.*, i.name AS inventory_name, i.unit,
+             r.roll_number AS roll_number
+      FROM inventory_moves m
+      JOIN inventory i ON i.id = m.inventory_id
+      LEFT JOIN film_rolls r ON r.id = m.roll_id
+      $whereSql
+      ORDER BY m.id DESC
+      LIMIT ?
+    ''', args);
+  }
+
+  Future<void> _insertInventoryMove({
+    required int inventoryId,
+    required double delta,
+    double? balanceAfter,
+    required String reason,
+    int? rollId,
+    int? orderId,
+    int? orderItemId,
+    int? cashFlowId,
+    String note = '',
+    String brand = '',
+  }) async {
+    final db = await database;
+    await db.insert('inventory_moves', {
+      'inventory_id': inventoryId,
+      'roll_id': rollId,
+      'delta': delta,
+      'balance_after': balanceAfter,
+      'reason': reason,
+      'order_id': orderId,
+      'order_item_id': orderItemId,
+      'cash_flow_id': cashFlowId,
+      'note': note,
+      'brand': InventoryBrands.normalize(brand),
+      'created_at': DateTime.now().toIso8601String().substring(0, 19).replaceFirst('T', ' '),
+    });
+  }
+
+  Future<List<String>> listInventoryBrands({String query = ''}) async {
+    final db = await database;
+    final q = query.trim().toLowerCase();
+    final rows = q.isEmpty
+        ? await db.query('inventory_brands', orderBy: 'name COLLATE NOCASE ASC')
+        : await db.query(
+            'inventory_brands',
+            where: 'lower(name) LIKE ?',
+            whereArgs: ['%$q%'],
+            orderBy: 'name COLLATE NOCASE ASC',
+          );
+    return rows.map((r) => r['name']?.toString() ?? '').where((n) => n.isNotEmpty).toList();
+  }
+
+  /// Сохраняет бренд в справочник (если новый). Возвращает нормализованное имя.
+  Future<String> ensureInventoryBrand(String? raw) async {
+    final name = InventoryBrands.normalize(raw);
+    if (name.isEmpty) return '';
+    final db = await database;
+    final existing = await db.rawQuery(
+      'SELECT id FROM inventory_brands WHERE lower(name) = lower(?) LIMIT 1',
+      [name],
+    );
+    if (existing.isEmpty) {
+      await db.insert('inventory_brands', {'name': name});
+      bumpDataRevision();
+    }
+    return name;
+  }
+
+  Future<List<Map<String, dynamic>>> listFilmRolls(int inventoryId, {bool onlyWithStock = false}) async {
+    final db = await database;
+    final where = onlyWithStock
+        ? 'inventory_id = ? AND meters_left > 0.001'
+        : 'inventory_id = ?';
+    return db.query(
+      'film_rolls',
+      where: where,
+      whereArgs: [inventoryId],
+      orderBy: 'roll_number ASC',
+    );
+  }
+
+  Future<int> addFilmRoll({
+    required int inventoryId,
+    required String rollNumber,
+    double? metersInitial,
+    int? cashFlowId,
+  }) async {
+    final db = await database;
+    final rollNo = normalizeRollNumber(rollNumber);
+    if (rollNo.isEmpty) throw ArgumentError('Номер рулона пуст');
+    final inv = await db.query('inventory', where: 'id = ?', whereArgs: [inventoryId], limit: 1);
+    if (inv.isEmpty) throw StateError('Позиция склада не найдена');
+    final perRoll = (inv.first['meters_per_roll'] as num?)?.toDouble() ?? 0;
+    final initial = metersInitial ?? (perRoll > 0 ? perRoll : 0);
+    final id = await db.insert('film_rolls', {
+      'inventory_id': inventoryId,
+      'roll_number': rollNo,
+      'meters_initial': initial,
+      'meters_left': initial,
+      'created_at': DateTime.now().toIso8601String().substring(0, 19).replaceFirst('T', ' '),
+    });
+    await _syncFilmInventoryQuantity(inventoryId);
+    final unit = FilmUnits.normalize(inv.first['unit']?.toString());
+    final moveDelta = FilmUnits.isRolls(unit) ? 1.0 : initial;
+    if (moveDelta > 0) {
+      await _insertInventoryMove(
+        inventoryId: inventoryId,
+        rollId: id,
+        delta: moveDelta,
+        balanceAfter: await _inventoryQty(inventoryId),
+        reason: cashFlowId != null
+            ? InventoryMoveReasons.cashPurchase
+            : InventoryMoveReasons.purchase,
+        cashFlowId: cashFlowId,
+        note: FilmUnits.isRolls(unit)
+            ? '${initial.toStringAsFixed(1)} м.п.'
+            : '',
+      );
+    }
+    bumpDataRevision();
+    return id;
+  }
+
+  Future<double> _inventoryQty(int inventoryId) async {
+    final db = await database;
+    final rows = await db.query('inventory', columns: ['quantity'], where: 'id = ?', whereArgs: [inventoryId]);
+    return (rows.first['quantity'] as num?)?.toDouble() ?? 0;
+  }
+
+  Future<void> _syncFilmInventoryQuantity(int inventoryId) async {
+    final db = await database;
+    final inv = await db.query(
+      'inventory',
+      columns: ['unit'],
+      where: 'id = ?',
+      whereArgs: [inventoryId],
+      limit: 1,
+    );
+    if (inv.isEmpty) return;
+    final unit = FilmUnits.normalize(inv.first['unit']?.toString());
+    final double total;
+    if (FilmUnits.isRolls(unit)) {
+      final cnt = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM film_rolls WHERE inventory_id = ? AND meters_left > 0.001',
+        [inventoryId],
+      );
+      total = ((cnt.first['c'] as num?)?.toInt() ?? 0).toDouble();
+    } else {
+      final sum = await db.rawQuery(
+        'SELECT COALESCE(SUM(meters_left), 0) AS s FROM film_rolls WHERE inventory_id = ?',
+        [inventoryId],
+      );
+      total = (sum.first['s'] as num?)?.toDouble() ?? 0;
+    }
+    await db.update(
+      'inventory',
+      {'quantity': total, 'unit': unit},
+      where: 'id = ?',
+      whereArgs: [inventoryId],
+    );
+  }
+
+  /// Изменить остаток рулона. Возвращает текст предупреждения при уходе в минус.
+  /// [logMove] = false — не писать в журнал «Движения» (расход по заказу).
+  Future<String?> adjustFilmRollMeters(
+    int rollId,
+    double delta, {
+    required String reason,
+    int? orderId,
+    String note = '',
+    bool logMove = true,
+  }) async {
+    final db = await database;
+    final rows = await db.query('film_rolls', where: 'id = ?', whereArgs: [rollId], limit: 1);
+    if (rows.isEmpty) return 'Рулон не найден';
+    final invId = (rows.first['inventory_id'] as num).toInt();
+    final rollNo = rows.first['roll_number']?.toString() ?? '';
+    final left = (rows.first['meters_left'] as num?)?.toDouble() ?? 0;
+    final next = left + delta;
+    String? warn;
+    if (next < -0.001) {
+      warn = 'Рулон $rollNo: остаток ${left.toStringAsFixed(1)} м, списание ${(-delta).toStringAsFixed(1)} м — уходит в минус';
+    }
+    await db.update('film_rolls', {'meters_left': next}, where: 'id = ?', whereArgs: [rollId]);
+    await _syncFilmInventoryQuantity(invId);
+    if (logMove) {
+      final bal = await _inventoryQty(invId);
+      final invRows = await db.query(
+        'inventory',
+        columns: ['unit'],
+        where: 'id = ?',
+        whereArgs: [invId],
+        limit: 1,
+      );
+      final unit = FilmUnits.normalize(invRows.isEmpty ? null : invRows.first['unit']?.toString());
+      final metersNote =
+          '${delta >= 0 ? '+' : ''}${delta.toStringAsFixed(1)} м.п. · рул. $rollNo';
+      final moveDelta = FilmUnits.isRolls(unit)
+          ? ((next > 0.001 ? 1 : 0) - (left > 0.001 ? 1 : 0)).toDouble()
+          : delta;
+      final moveNote = note.trim().isEmpty ? metersNote : '${note.trim()} · $metersNote';
+      await _insertInventoryMove(
+        inventoryId: invId,
+        rollId: rollId,
+        delta: moveDelta,
+        balanceAfter: bal,
+        reason: reason,
+        orderId: orderId,
+        note: moveNote,
+      );
+    }
+    bumpDataRevision();
+    return warn;
   }
 
   Future<List<Map<String, dynamic>>> getCashJournalForShift(int shiftId) async {
@@ -3225,22 +4067,64 @@ class DatabaseHelper {
   Future<void> deleteInventoryItem(int id) async {
     final db = await database;
     await db.delete('service_recipes', where: 'inventory_id = ?', whereArgs: [id]);
+    await db.delete('film_rolls', where: 'inventory_id = ?', whereArgs: [id]);
+    await db.delete('inventory_moves', where: 'inventory_id = ?', whereArgs: [id]);
+    await db.update('wrap_films', {'inventory_id': null}, where: 'inventory_id = ?', whereArgs: [id]);
     await db.delete('inventory', where: 'id = ?', whereArgs: [id]);
+    bumpDataRevision();
   }
 
-  Future<void> adjustInventoryQuantity(int id, double delta) async {
+  Future<void> adjustInventoryQuantity(
+    int id,
+    double delta, {
+    String reason = InventoryMoveReasons.manual,
+    int? orderId,
+    int? orderItemId,
+    int? cashFlowId,
+    String note = '',
+    String brand = '',
+    bool logMove = true,
+  }) async {
     final db = await database;
+    final brandName = delta > 0 ? await ensureInventoryBrand(brand) : InventoryBrands.normalize(brand);
     await db.rawUpdate(
       'UPDATE inventory SET quantity = quantity + ? WHERE id = ?',
       [delta, id],
     );
+    // Приход расходника: запоминаем последний бренд на карточке (остаток всё равно по типу).
+    if (delta > 0 && brandName.isNotEmpty) {
+      final inv = await db.query('inventory', columns: ['category'], where: 'id = ?', whereArgs: [id], limit: 1);
+      final cat = inv.isEmpty ? '' : inv.first['category']?.toString();
+      if (!InventoryCategories.isFilm(cat)) {
+        await db.update('inventory', {'last_brand': brandName}, where: 'id = ?', whereArgs: [id]);
+      }
+    }
+    if (logMove) {
+      final bal = await _inventoryQty(id);
+      await _insertInventoryMove(
+        inventoryId: id,
+        delta: delta,
+        balanceAfter: bal,
+        reason: reason,
+        orderId: orderId,
+        orderItemId: orderItemId,
+        cashFlowId: cashFlowId,
+        note: note,
+        brand: brandName,
+      );
+    }
+    bumpDataRevision();
   }
 
   Future<void> deductInventory(String itemName, double amount) async {
     final db = await database;
-    await db.rawUpdate(
-      'UPDATE inventory SET quantity = quantity - ? WHERE name = ?',
-      [amount, itemName],
+    final rows = await db.query('inventory', columns: ['id'], where: 'name = ?', whereArgs: [itemName], limit: 1);
+    if (rows.isEmpty) return;
+    await adjustInventoryQuantity(
+      (rows.first['id'] as num).toInt(),
+      -amount,
+      reason: InventoryMoveReasons.manual,
+      note: 'Списание по имени',
     );
   }
 
@@ -3268,6 +4152,7 @@ class DatabaseHelper {
         where: 'service_name = ? AND inventory_id = ?',
         whereArgs: [serviceName, inventoryId],
       );
+      bumpDataRevision();
       return;
     }
     if (existing.isEmpty) {
@@ -3284,15 +4169,52 @@ class DatabaseHelper {
         whereArgs: [existing.first['id']],
       );
     }
+    bumpDataRevision();
   }
 
   Future<void> deleteRecipeLine(int recipeId) async {
     final db = await database;
     await db.delete('service_recipes', where: 'id = ?', whereArgs: [recipeId]);
+    bumpDataRevision();
   }
 
-  /// Списать материалы по рецепту услуги (точное совпадение имени).
-  Future<void> deductRecipeForService(String serviceName) async {
+  /// Списать материалы по рецепту. Возвращает предупреждения о нехватке.
+  Future<List<String>> deductRecipeForService(
+    String serviceName, {
+    int? orderId,
+    int? orderItemId,
+  }) async {
+    final name = serviceName.trim();
+    if (name.isEmpty) return const [];
+    final warnings = <String>[];
+    final recipes = await getRecipesForService(name);
+    for (final r in recipes) {
+      final invId = (r['inventory_id'] as num?)?.toInt();
+      final qty = (r['qty'] as num?)?.toDouble() ?? 0;
+      if (invId == null || qty <= 0) continue;
+      final stock = (r['stock'] as num?)?.toDouble() ?? 0;
+      final invName = r['inventory_name']?.toString() ?? '#$invId';
+      if (stock + 0.001 < qty) {
+        warnings.add('$invName: нужно $qty, есть $stock');
+      }
+      await adjustInventoryQuantity(
+        invId,
+        -qty,
+        reason: InventoryMoveReasons.recipeDeduct,
+        orderId: orderId,
+        orderItemId: orderItemId,
+        note: 'Рецепт: $name',
+        logMove: false,
+      );
+    }
+    return warnings;
+  }
+
+  Future<void> restoreRecipeForService(
+    String serviceName, {
+    int? orderId,
+    int? orderItemId,
+  }) async {
     final name = serviceName.trim();
     if (name.isEmpty) return;
     final recipes = await getRecipesForService(name);
@@ -3300,7 +4222,15 @@ class DatabaseHelper {
       final invId = (r['inventory_id'] as num?)?.toInt();
       final qty = (r['qty'] as num?)?.toDouble() ?? 0;
       if (invId == null || qty <= 0) continue;
-      await adjustInventoryQuantity(invId, -qty);
+      await adjustInventoryQuantity(
+        invId,
+        qty,
+        reason: InventoryMoveReasons.recipeRestore,
+        orderId: orderId,
+        orderItemId: orderItemId,
+        note: 'Возврат рецепта: $name',
+        logMove: false,
+      );
     }
   }
 

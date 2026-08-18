@@ -12,9 +12,16 @@ import 'app_menu.dart';
 import 'app_theme.dart';
 import 'app_tour.dart';
 import 'app_version.dart';
+import 'auth/auth_controller.dart';
+import 'auth/auth_gate.dart';
 import 'backup_helper.dart';
 import 'bug_report_dialog.dart';
 import 'conn_status_sheet.dart';
+import 'cash_cloud/cloud_cash_screen.dart';
+import 'crm/cloud_board_screen.dart';
+import 'crm/cloud_inventory_screen.dart';
+import 'crm/cloud_mode.dart';
+import 'crm/cloud_orders_screen.dart';
 import 'tour_keys.dart';
 import 'update/update_dialog.dart';
 import 'update/update_service.dart';
@@ -57,16 +64,27 @@ void main() async {
     if (!SyncController.instance.config.isClient) {
       await BackupHelper.runDailyBackup();
     }
-    await SyncController.instance.startHostIfNeeded();
     await AppDiagnostics.instance.start();
     // QR / deep link detapp:// — только на телефоне имеет смысл.
     if (Platform.isAndroid || Platform.isIOS) {
       await SyncDeepLink.instance.start();
     }
+    // Облачная сессия: после bootstrap решаем, нужен ли LAN-хост.
+    await AuthController.instance.bootstrap();
+    AuthController.instance.addListener(_syncLanWithCloudMode);
+    await _syncLanWithCloudMode();
     runApp(const DetApp());
   } catch (e, st) {
     debugPrint('Startup failed: $e\n$st');
     runApp(_StartupErrorApp(message: '$e'));
+  }
+}
+
+Future<void> _syncLanWithCloudMode() async {
+  if (CloudMode.enabled) {
+    await SyncController.instance.stopHost();
+  } else {
+    await SyncController.instance.startHostIfNeeded();
   }
 }
 
@@ -134,7 +152,7 @@ class DetApp extends StatelessWidget {
       ],
       navigatorObservers: [TourNavBridge.instance],
       theme: AppTheme.build(),
-      home: const HomeScreen(),
+      home: const AuthGate(child: HomeScreen()),
     );
   }
 }
@@ -182,6 +200,8 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       "subtitle": "В разработке",
     },
     {"id": AppMenuIds.completed, "icon": Icons.task_alt_outlined, "label": "Завершённые"},
+    {"id": AppMenuIds.cloudOrders, "icon": Icons.cloud_outlined, "label": "Облачные заказы"},
+    {"id": AppMenuIds.cloudCash, "icon": Icons.account_balance_outlined, "label": "Облачная касса"},
   ];
 
   Future<void> _refreshLastBackup() async {
@@ -269,10 +289,15 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   /// Пункты, видимые в текущем контексте (desktop / full phone / light).
   List<Map<String, dynamic>> _visibleMenuItems(BuildContext context) {
     final mobile = AppResponsive.isMobile(context);
-    if (!mobile || _mobileFullPhone) return _menuItems;
-    return _menuItems
-        .where((m) => !AppMenuIds.lightHidden.contains(m['id'] as int))
-        .toList();
+    var items = _menuItems;
+    // В cloud-режиме прячем дубли «Облачные …» — основные пункты уже на API.
+    if (CloudMode.enabled) {
+      items = items
+          .where((m) => m['id'] != AppMenuIds.cloudOrders && m['id'] != AppMenuIds.cloudCash)
+          .toList();
+    }
+    if (!mobile || _mobileFullPhone) return items;
+    return items.where((m) => !AppMenuIds.lightHidden.contains(m['id'] as int)).toList();
   }
 
   Future<void> _refreshOpenBugs() async {
@@ -307,6 +332,34 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       _selectedIndex = AppMenuIds.workshop;
       _selectedWorkshop = w;
     });
+  }
+
+  Future<void> _confirmLogout() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text(
+          'Выйти из аккаунта?',
+          style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          'Локальные данные на этом устройстве останутся. '
+          'Чтобы снова работать с облаком, нужно будет войти.',
+          style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.4),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Выйти', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      await AuthController.instance.logout();
+    }
   }
 
   Future<void> _confirmWipeDatabase() async {
@@ -387,6 +440,29 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   }
 
   Widget _buildContent() {
+    // Cloud cutover: основные экраны ходят в API.
+    if (CloudMode.enabled) {
+      switch (_selectedIndex) {
+        case AppMenuIds.board:
+        case AppMenuIds.cloudOrders:
+          return const CloudBoardScreen(key: ValueKey('cloud_board'));
+        case AppMenuIds.cash:
+        case AppMenuIds.cloudCash:
+          return const CloudCashScreen(key: ValueKey('cloud_cash'));
+        case AppMenuIds.inventory:
+          return const CloudInventoryScreen(key: ValueKey('cloud_inv'));
+        case AppMenuIds.newOrder:
+          return const CloudBoardScreen(key: ValueKey('cloud_board_new'));
+        case AppMenuIds.stats:
+          return Center(
+            key: const ValueKey('cloud_stats'),
+            child: Text(
+              'Статистика из облака — скоро',
+              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 16),
+            ),
+          );
+      }
+    }
     if (_selectedIndex == AppMenuIds.workshop) {
       return WorkshopsScreen(selectedWorkshop: _selectedWorkshop, key: ValueKey("ws_$_selectedWorkshop"));
     }
@@ -442,6 +518,10 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         );
       case AppMenuIds.completed:
         return const CompletedOrdersScreen(key: ValueKey(AppMenuIds.completed));
+      case AppMenuIds.cloudOrders:
+        return const CloudOrdersScreen(key: ValueKey(AppMenuIds.cloudOrders));
+      case AppMenuIds.cloudCash:
+        return const CloudCashScreen(key: ValueKey(AppMenuIds.cloudCash));
       default:
         return const Center(child: Text("Выберите экран", style: TextStyle(color: AppColors.textMuted)));
     }
@@ -574,6 +654,26 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
               fontWeight: FontWeight.w600,
               letterSpacing: 0.4,
             ),
+          ),
+          ListenableBuilder(
+            listenable: AuthController.instance,
+            builder: (context, _) {
+              final u = AuthController.instance.user;
+              if (u == null) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  u.displayLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textDim,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -988,6 +1088,39 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          child: SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () async {
+                afterAction?.call();
+                await _confirmLogout();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textMuted,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                alignment: Alignment.centerLeft,
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.logout, size: 18, color: AppColors.textDim),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Выйти',
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textMuted,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
         if (showTraining)
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),

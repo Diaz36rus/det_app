@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'app_theme.dart';
 import 'cash_catalog.dart';
 import 'database.dart';
+import 'inventory_catalog.dart';
 import 'responsive.dart';
 
 /// Диалог создания / редактирования кассовой операции.
@@ -49,6 +50,8 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
   final _noteCtrl = TextEditingController();
   final _counterpartyCtrl = TextEditingController();
   final _invQtyCtrl = TextEditingController(text: '1');
+  final _invBrandCtrl = TextEditingController();
+  List<String> _brands = [];
 
   List<Map<String, dynamic>> _masters = [];
   List<Map<String, dynamic>> _inventory = [];
@@ -123,11 +126,13 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
     final masters = await DatabaseHelper().getAllMastersFull();
     final inv = await DatabaseHelper().getInventory();
     final regs = await DatabaseHelper().getCashRegisters();
+    final brands = await DatabaseHelper().listInventoryBrands();
     if (!mounted) return;
     setState(() {
       _masters = masters;
       _inventory = inv;
       _registers = regs;
+      _brands = brands;
       if (_registerId == null && regs.isNotEmpty) {
         Map<String, dynamic>? match;
         for (final r in regs) {
@@ -141,6 +146,16 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
     });
     if (_needsMaster && _masterId != null) _refreshPayrollHint();
   }
+
+  Map<String, dynamic>? _selectedInventory() {
+    for (final i in _inventory) {
+      if ((i['id'] as num?)?.toInt() == _inventoryId) return i;
+    }
+    return null;
+  }
+
+  bool get _selectedInventoryIsFilm =>
+      InventoryCategories.isFilm(_selectedInventory()?['category']?.toString());
 
   Future<void> _refreshPayrollHint() async {
     if (_masterId == null) {
@@ -244,6 +259,9 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
         inventoryQty: invQty,
         templateKey: _templateKey,
         note: _noteCtrl.text.trim(),
+        inventoryBrand: (_needsInventory && !_selectedInventoryIsFilm)
+            ? _invBrandCtrl.text
+            : '',
       );
     } else {
       await DatabaseHelper().addCashFlow(
@@ -259,6 +277,9 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
         inventoryQty: invQty,
         templateKey: _templateKey,
         note: _noteCtrl.text.trim(),
+        inventoryBrand: (_needsInventory && !_selectedInventoryIsFilm)
+            ? _invBrandCtrl.text
+            : '',
       );
     }
 
@@ -273,6 +294,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
     _noteCtrl.dispose();
     _counterpartyCtrl.dispose();
     _invQtyCtrl.dispose();
+    _invBrandCtrl.dispose();
     super.dispose();
   }
 
@@ -479,14 +501,79 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                             ),
                           ),
                         ],
-                        onChanged: (v) => setState(() => _inventoryId = v),
+                        onChanged: (v) {
+                          setState(() {
+                            _inventoryId = v;
+                            final inv = _selectedInventory();
+                            final last = inv?['last_brand']?.toString() ?? '';
+                            if (!InventoryCategories.isFilm(inv?['category']?.toString()) &&
+                                _invBrandCtrl.text.trim().isEmpty &&
+                                last.isNotEmpty) {
+                              _invBrandCtrl.text = last;
+                            }
+                          });
+                        },
                       ),
                       if (_inventoryId != null) ...[
                         const SizedBox(height: 10),
-                        TextField(
-                          controller: _invQtyCtrl,
-                          decoration: const InputDecoration(labelText: 'Кол-во на склад', isDense: true),
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        Builder(
+                          builder: (_) {
+                            final inv = _selectedInventory();
+                            final cat = inv?['category']?.toString();
+                            final unit = inv?['unit']?.toString() ?? '';
+                            final film = InventoryCategories.isFilm(cat);
+                            final filmUnit = film ? FilmUnits.normalize(unit) : unit;
+                            final label = film
+                                ? (FilmUnits.isRolls(filmUnit)
+                                    ? 'Кол-во рулонов'
+                                    : 'Кол-во, м.п.')
+                                : 'Кол-во на склад';
+                            final helper = film && FilmUnits.isRolls(filmUnit)
+                                ? 'Метры возьмутся из «метров в рулоне»'
+                                : null;
+                            return Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                TextField(
+                                  controller: _invQtyCtrl,
+                                  decoration: InputDecoration(
+                                    labelText: label,
+                                    suffixText: film ? filmUnit : (unit.isEmpty ? null : unit),
+                                    helperText: helper,
+                                    isDense: true,
+                                  ),
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                ),
+                                if (!film) ...[
+                                  const SizedBox(height: 10),
+                                  Autocomplete<String>(
+                                    initialValue: TextEditingValue(text: _invBrandCtrl.text),
+                                    optionsBuilder: (tv) {
+                                      final q = tv.text.trim().toLowerCase();
+                                      if (q.isEmpty) return _brands;
+                                      return _brands.where((b) => b.toLowerCase().contains(q));
+                                    },
+                                    onSelected: (v) => _invBrandCtrl.text = v,
+                                    fieldViewBuilder: (context, textCtrl, focusNode, onSubmit) {
+                                      return TextField(
+                                        controller: textCtrl,
+                                        focusNode: focusNode,
+                                        decoration: const InputDecoration(
+                                          labelText: 'Бренд',
+                                          hintText: 'Koch Chemie…',
+                                          helperText: 'Остаток по типу · бренд в историю',
+                                          isDense: true,
+                                        ),
+                                        textCapitalization: TextCapitalization.words,
+                                        onChanged: (v) => _invBrandCtrl.text = v,
+                                        onSubmitted: (_) => onSubmit(),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ],
+                            );
+                          },
                         ),
                       ],
                     ],

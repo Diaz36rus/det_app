@@ -13,6 +13,7 @@ class TourKeys {
   static final menuCash = GlobalKey(debugLabel: 'tour_menu_cash');
   static final menuStats = GlobalKey(debugLabel: 'tour_menu_stats');
   static final menuStaff = GlobalKey(debugLabel: 'tour_menu_staff');
+  static final menuServices = GlobalKey(debugLabel: 'tour_menu_services');
   static final menuInventory = GlobalKey(debugLabel: 'tour_menu_inventory');
   static final menuCalc = GlobalKey(debugLabel: 'tour_menu_calc');
   static final menuCompleted = GlobalKey(debugLabel: 'tour_menu_completed');
@@ -55,12 +56,18 @@ class TourKeys {
         return menuStats;
       case AppMenuIds.staff:
         return menuStaff;
+      case AppMenuIds.services:
+        return menuServices;
       case AppMenuIds.inventory:
         return menuInventory;
       case AppMenuIds.preview:
         return menuCalc;
       case AppMenuIds.completed:
         return menuCompleted;
+      case AppMenuIds.cloudOrders:
+        return null;
+      case AppMenuIds.cloudCash:
+        return null;
       default:
         return null;
     }

@@ -7,7 +7,7 @@
 [CmdletBinding()]
 param(
   [string]$InstallDir = 'D:\DetApp',
-  [string]$ManifestUrl = 'http://192.168.3.2:8080/latest.json'
+  [string]$ManifestUrl = 'http://api.det-app.ru/updates/latest.json'
 )
 
 $ErrorActionPreference = 'Stop'
