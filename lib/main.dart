@@ -470,15 +470,6 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       case AppMenuIds.cash:
         return const CashScreen(key: ValueKey(AppMenuIds.cash));
       case AppMenuIds.stats:
-        if (CloudMode.enabled) {
-          return Center(
-            key: const ValueKey('cloud_stats'),
-            child: Text(
-              'Статистика с сервера — скоро',
-              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 16),
-            ),
-          );
-        }
         return const StatsScreen(key: ValueKey(AppMenuIds.stats));
       case AppMenuIds.staff:
         return const MastersScreen(key: ValueKey(AppMenuIds.staff));

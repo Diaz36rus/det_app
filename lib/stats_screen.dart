@@ -3,6 +3,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'app_theme.dart';
+import 'crm/cloud_db_bridge.dart';
 import 'database.dart';
 import 'responsive.dart';
 
@@ -38,15 +39,47 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   Future<void> _loadStats() async {
-    final revToday = await DatabaseHelper().getRevenueToday();
-    final revMonth = await DatabaseHelper().getRevenueMonth();
-    final kpis = await DatabaseHelper().getStatsKpis();
-    final topByCount = await DatabaseHelper().getServicesStats();
-    final topByRevenue = await DatabaseHelper().getTopServicesByRevenue();
-    final byDay = await DatabaseHelper().getRevenueByDay(30);
-    final masterDay = await DatabaseHelper().getMasterDayStats(
-      DateFormat('yyyy-MM-dd').format(_masterDayDate),
-    );
+    final masterDayKey = DateFormat('yyyy-MM-dd').format(_masterDayDate);
+
+    late final double revToday;
+    late final double revMonth;
+    late final Map<String, double> kpis;
+    late final List<Map<String, dynamic>> topByCount;
+    late final List<Map<String, dynamic>> topByRevenue;
+    late final List<Map<String, dynamic>> byDay;
+    late final List<Map<String, dynamic>> masterDay;
+
+    if (CloudDbBridge.active) {
+      final s = await CloudDbBridge.instance.getCompanyStats(masterDay: masterDayKey, days: 30);
+      revToday = (s['revenue_today'] as num?)?.toDouble() ?? 0;
+      revMonth = (s['revenue_month'] as num?)?.toDouble() ?? 0;
+      kpis = {
+        'orders_count': (s['orders_count'] as num?)?.toDouble() ?? 0,
+        'avg_check': (s['avg_check'] as num?)?.toDouble() ?? 0,
+        'revenue_all': (s['revenue_all'] as num?)?.toDouble() ?? 0,
+        'open_debt': (s['open_debt'] as num?)?.toDouble() ?? 0,
+      };
+      topByCount = ((s['top_by_count'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      topByRevenue = ((s['top_by_revenue'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      byDay = ((s['revenue_by_day'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      masterDay = ((s['master_day'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } else {
+      revToday = await DatabaseHelper().getRevenueToday();
+      revMonth = await DatabaseHelper().getRevenueMonth();
+      kpis = await DatabaseHelper().getStatsKpis();
+      topByCount = await DatabaseHelper().getServicesStats();
+      topByRevenue = await DatabaseHelper().getTopServicesByRevenue();
+      byDay = await DatabaseHelper().getRevenueByDay(30);
+      masterDay = await DatabaseHelper().getMasterDayStats(masterDayKey);
+    }
 
     final map = <String, double>{};
     for (final r in byDay) {

@@ -2602,6 +2602,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getMasterDayStats(String dayYyyyMmDd) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getMasterDayStats(dayYyyyMmDd);
     final db = await database;
     return db.rawQuery('''
       SELECT m.id, m.name, COUNT(DISTINCT o.id) AS orders_count
@@ -3786,6 +3787,7 @@ class DatabaseHelper {
   }
 
   Future<double> getRevenueToday() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getRevenueToday();
     final db = await database;
     String today = DateTime.now().toIso8601String().substring(0, 10) + "%";
     List<Map> res = await db.rawQuery('SELECT COALESCE(SUM(paid_amount), 0) as total FROM orders WHERE is_completed = 1 AND created_at LIKE ?', [today]);
@@ -3793,6 +3795,7 @@ class DatabaseHelper {
   }
 
   Future<double> getRevenueMonth() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getRevenueMonth();
     final db = await database;
     String month = DateTime.now().toIso8601String().substring(0, 7) + "%";
     List<Map> res = await db.rawQuery('SELECT COALESCE(SUM(paid_amount), 0) as total FROM orders WHERE is_completed = 1 AND created_at LIKE ?', [month]);
@@ -3801,6 +3804,7 @@ class DatabaseHelper {
 
   /// KPI статистики: средний чек / число завершённых / долг по активным.
   Future<Map<String, double>> getStatsKpis() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getStatsKpis();
     final db = await database;
     final completed = await db.rawQuery('''
       SELECT COUNT(*) as cnt, COALESCE(AVG(paid_amount), 0) as avg_check,
@@ -3822,6 +3826,7 @@ class DatabaseHelper {
 
   /// Выручка по дням за последние [days] дней (завершённые заказы).
   Future<List<Map<String, dynamic>>> getRevenueByDay(int days) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getRevenueByDay(days);
     final db = await database;
     final offset = days - 1;
     final rows = await db.rawQuery('''
@@ -4689,6 +4694,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getServicesStats() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getServicesStats();
     final db = await database;
     List<Map> items = await db.query('order_items', columns: ['name']);
     Map<String, int> stats = {};
@@ -4703,6 +4709,9 @@ class DatabaseHelper {
 
   /// Топ услуг по сумме выручки (price в order_items).
   Future<List<Map<String, dynamic>>> getTopServicesByRevenue({int limit = 5}) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.getTopServicesByRevenue(limit: limit);
+    }
     final db = await database;
     return await db.rawQuery('''
       SELECT name, COUNT(*) as count, COALESCE(SUM(price), 0) as revenue
@@ -4712,6 +4721,56 @@ class DatabaseHelper {
       ORDER BY revenue DESC
       LIMIT ?
     ''', [limit]);
+  }
+
+  /// Клиенты+авто из локального detailing.db (для миграции в облако, минуя CloudDbBridge).
+  Future<List<Map<String, dynamic>>> exportLocalClientsForCloudImport() async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final path = join(documentsDirectory.path, 'detailing.db');
+    if (!await File(path).exists()) return [];
+    final db = await openDatabase(path, readOnly: true);
+    try {
+      final clients = await db.query('clients', orderBy: 'id ASC');
+      final out = <Map<String, dynamic>>[];
+      for (final c in clients) {
+        final id = (c['id'] as num?)?.toInt();
+        if (id == null) continue;
+        final cars = await db.query('cars', where: 'client_id = ?', whereArgs: [id]);
+        out.add({
+          'name': c['name']?.toString() ?? '',
+          'phone': c['phone']?.toString() ?? '',
+          'is_vip': (c['is_vip'] as num?)?.toInt() == 1 || c['is_vip'] == true,
+          'cars': cars
+              .map(
+                (car) => {
+                  'make_model': car['make_model']?.toString() ?? '',
+                  'plate': car['plate']?.toString() ?? '',
+                  'vin': car['vin']?.toString() ?? '',
+                  'category': car['category']?.toString() ?? '1',
+                },
+              )
+              .toList(),
+        });
+      }
+      return out;
+    } finally {
+      await db.close();
+    }
+  }
+
+  Future<Map<String, dynamic>> importLocalClientsToCloud() async {
+    if (!CloudDbBridge.active) {
+      throw StateError('Импорт доступен только в облачном режиме (войдите в компанию)');
+    }
+    final bundle = await exportLocalClientsForCloudImport();
+    if (bundle.isEmpty) {
+      return {'ok': true, 'created': 0, 'skipped': 0, 'cars_created': 0, 'local_total': 0};
+    }
+    final result = await CloudDbBridge.instance.importClientsBundle(bundle);
+    return {
+      ...result,
+      'local_total': bundle.length,
+    };
   }
 
   // --- БАГ-РЕПОРТЫ ---

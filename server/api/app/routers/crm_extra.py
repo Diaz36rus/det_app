@@ -1,8 +1,10 @@
-"""Masters, services, defects, inventory, import — C3..C6."""
+"""Masters, services, defects, inventory, import, stats — C3..C7."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.crm_extra_schemas import (
     CrmDefectCreate,
@@ -28,6 +30,7 @@ from app.crm_extra_schemas import (
     CrmServiceCreate,
     CrmServiceOut,
     CrmServiceUpdate,
+    CrmStatsOut,
     CrmWrapFilmOut,
 )
 from app.db import get_db
@@ -49,6 +52,18 @@ from app.models import (
 from app.routers.crm import _company_id
 
 router = APIRouter(prefix="/crm", tags=["crm-extra"])
+
+_COMPLETED = "Выдан"
+_MASTER_DAY_STATUSES = {
+    "Мойка",
+    "Химчистка",
+    "Полировка",
+    "Оклейка",
+    "Интерьер",
+    "Оборудование",
+    "Кузовные работы",
+    "Выдан",
+}
 
 
 # --- Masters ---
@@ -799,41 +814,205 @@ def put_order_wrap_films(
 # --- Import ---
 
 
+def _norm_phone(raw: str) -> str:
+    digits = "".join(ch for ch in (raw or "") if ch.isdigit())
+    if len(digits) == 11 and digits[0] in ("7", "8"):
+        return digits[-10:]
+    if len(digits) == 10:
+        return digits
+    return digits
+
+
 @router.post("/import/clients")
 def import_clients(
     body: CrmImportClients,
     user: User = Depends(require_permissions("orders.write")),
     db: Session = Depends(get_db),
 ):
-    """Разовый импорт [{name, phone, cars:[{make_model, plate}]}]"""
+    """Разовый импорт [{name, phone, is_vip, cars:[{make_model, plate, vin, category}]}]"""
     cid = _company_id(user)
+    existing = list(db.scalars(select(CrmClient).where(CrmClient.company_id == cid)).all())
+    by_phone = {_norm_phone(c.phone): c for c in existing if _norm_phone(c.phone)}
     created = 0
+    skipped = 0
+    cars_created = 0
     for raw in body.clients:
         name = str(raw.get("name") or "").strip()
         if not name:
             continue
-        client = CrmClient(
-            company_id=cid,
-            name=name,
-            phone=str(raw.get("phone") or "").strip(),
-            is_vip=bool(raw.get("is_vip")),
-        )
-        db.add(client)
-        db.flush()
+        phone = str(raw.get("phone") or "").strip()
+        phone_key = _norm_phone(phone)
+        if phone_key and phone_key in by_phone:
+            client = by_phone[phone_key]
+            skipped += 1
+        else:
+            client = CrmClient(
+                company_id=cid,
+                name=name,
+                phone=phone,
+                is_vip=bool(raw.get("is_vip")),
+            )
+            db.add(client)
+            db.flush()
+            if phone_key:
+                by_phone[phone_key] = client
+            created += 1
         for car in raw.get("cars") or []:
             mm = str(car.get("make_model") or car.get("name") or "").strip()
             if not mm:
+                continue
+            plate = str(car.get("plate") or "").strip()
+            dup = None
+            if plate:
+                dup = db.scalar(
+                    select(CrmCar).where(
+                        CrmCar.client_id == client.id,
+                        CrmCar.plate == plate,
+                    )
+                )
+            if dup is not None:
                 continue
             db.add(
                 CrmCar(
                     company_id=cid,
                     client_id=client.id,
                     make_model=mm,
-                    plate=str(car.get("plate") or "").strip(),
+                    plate=plate,
                     vin=str(car.get("vin") or "").strip(),
                     category=str(car.get("category") or "1"),
                 )
             )
-        created += 1
+            cars_created += 1
     db.commit()
-    return {"ok": True, "created": created}
+    return {
+        "ok": True,
+        "created": created,
+        "skipped": skipped,
+        "cars_created": cars_created,
+    }
+
+
+# --- Stats ---
+
+
+def _day_key(dt: datetime | None) -> str:
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).date().isoformat()
+
+
+@router.get("/stats", response_model=CrmStatsOut)
+def company_stats(
+    master_day: str | None = Query(default=None, description="YYYY-MM-DD"),
+    days: int = Query(default=30, ge=1, le=90),
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    now = datetime.now(timezone.utc)
+    today = now.date().isoformat()
+    month_prefix = now.strftime("%Y-%m")
+    day = (master_day or today)[:10]
+
+    orders = list(
+        db.scalars(
+            select(CrmOrder)
+            .where(CrmOrder.company_id == cid)
+            .options(
+                selectinload(CrmOrder.items),
+                selectinload(CrmOrder.master_links),
+            )
+        ).all()
+    )
+
+    completed = [o for o in orders if o.status == _COMPLETED]
+    open_orders = [o for o in orders if o.status != _COMPLETED]
+
+    revenue_today = sum(
+        float(o.paid_amount or 0) for o in completed if _day_key(o.created_at) == today
+    )
+    revenue_month = sum(
+        float(o.paid_amount or 0)
+        for o in completed
+        if (_day_key(o.created_at) or "").startswith(month_prefix)
+    )
+    revenue_all = sum(float(o.paid_amount or 0) for o in completed)
+    orders_count = float(len(completed))
+    avg_check = (revenue_all / orders_count) if orders_count else 0.0
+    open_debt = sum(
+        max(0.0, float(o.price or 0) - float(o.paid_amount or 0)) for o in open_orders
+    )
+
+    by_name_count: dict[str, int] = {}
+    by_name_rev: dict[str, float] = {}
+    for o in orders:
+        for it in o.items or []:
+            name = (it.name or "").strip()
+            if not name:
+                continue
+            by_name_count[name] = by_name_count.get(name, 0) + 1
+            by_name_rev[name] = by_name_rev.get(name, 0.0) + float(it.price or 0)
+
+    top_by_count = [
+        {"name": k, "count": by_name_count[k]}
+        for k in sorted(by_name_count, key=lambda n: by_name_count[n], reverse=True)[:5]
+    ]
+    top_by_revenue = [
+        {
+            "name": k,
+            "count": by_name_count.get(k, 0),
+            "revenue": by_name_rev[k],
+        }
+        for k in sorted(by_name_rev, key=lambda n: by_name_rev[n], reverse=True)[:5]
+    ]
+
+    since = (now.date() - timedelta(days=days - 1)).isoformat()
+    day_totals: dict[str, float] = {}
+    for o in completed:
+        key = _day_key(o.created_at)
+        if not key or key < since:
+            continue
+        day_totals[key] = day_totals.get(key, 0.0) + float(o.paid_amount or 0)
+    revenue_by_day = [
+        {"day": k, "total": day_totals[k]} for k in sorted(day_totals.keys())
+    ]
+
+    masters = list(
+        db.scalars(select(CrmMaster).where(CrmMaster.company_id == cid).order_by(CrmMaster.name)).all()
+    )
+    master_day_rows: list[dict] = []
+    for m in masters:
+        count = 0
+        for o in orders:
+            if o.status not in _MASTER_DAY_STATUSES:
+                continue
+            stamp = (o.end_time or o.start_time or "").replace("T", " ").strip()
+            if len(stamp) < 10 or stamp[:10] != day:
+                continue
+            ids = {link.master_id for link in (o.master_links or [])}
+            if not ids:
+                for it in o.items or []:
+                    raw = (it.master_ids or "").replace(" ", "")
+                    for part in raw.split(","):
+                        if part.isdigit():
+                            ids.add(int(part))
+            if m.id in ids:
+                count += 1
+        master_day_rows.append({"id": m.id, "name": m.name, "orders_count": count})
+    master_day_rows.sort(key=lambda r: (-int(r["orders_count"]), str(r["name"])))
+
+    return CrmStatsOut(
+        revenue_today=revenue_today,
+        revenue_month=revenue_month,
+        orders_count=orders_count,
+        avg_check=avg_check,
+        revenue_all=revenue_all,
+        open_debt=open_debt,
+        top_by_count=top_by_count,
+        top_by_revenue=top_by_revenue,
+        revenue_by_day=revenue_by_day,
+        master_day=master_day_rows,
+        master_day_date=day,
+    )

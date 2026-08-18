@@ -497,6 +497,28 @@ class CrmApi {
     return CrmOrderEvent.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
+  Future<Map<String, dynamic>> getStats({String? masterDay, int days = 30}) async {
+    final q = <String, String>{
+      'days': '$days',
+      if (masterDay != null && masterDay.isNotEmpty) 'master_day': masterDay,
+    };
+    final r = await http.get(_u('/crm/stats', q), headers: _headers()).timeout(const Duration(seconds: 20));
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
+  }
+
+  Future<Map<String, dynamic>> importClients(List<Map<String, dynamic>> clients) async {
+    final r = await http
+        .post(
+          _u('/crm/import/clients'),
+          headers: _headers(),
+          body: jsonEncode({'clients': clients}),
+        )
+        .timeout(const Duration(seconds: 60));
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
+  }
+
   void _ensure(http.Response r) {
     if (r.statusCode >= 200 && r.statusCode < 300) return;
     var msg = 'Ошибка CRM (${r.statusCode})';

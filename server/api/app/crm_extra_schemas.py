@@ -199,3 +199,17 @@ class CrmRecipeApplyResult(BaseModel):
 
 class CrmImportClients(BaseModel):
     clients: list[dict] = []
+
+
+class CrmStatsOut(BaseModel):
+    revenue_today: float = 0
+    revenue_month: float = 0
+    orders_count: float = 0
+    avg_check: float = 0
+    revenue_all: float = 0
+    open_debt: float = 0
+    top_by_count: list[dict] = []
+    top_by_revenue: list[dict] = []
+    revenue_by_day: list[dict] = []
+    master_day: list[dict] = []
+    master_day_date: str = ""

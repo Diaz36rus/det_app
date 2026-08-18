@@ -11,6 +11,7 @@ import 'app_diagnostics.dart';
 import 'app_theme.dart';
 import 'bug_report_dialog.dart';
 import 'crm/cloud_mode.dart';
+import 'database.dart';
 import 'responsive.dart';
 import 'app_toast.dart';
 import 'sync/lan_discover.dart';
@@ -135,6 +136,45 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
     if (!mounted || url == null || url.trim().isEmpty) return;
     setState(() => _urlCtrl.text = url.trim());
     await _apply(SyncRole.client);
+  }
+
+  Future<void> _importLocalClients() async {
+    if (_busy) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Импорт клиентов', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: Text(
+          'Загрузить клиентов и авто из локального файла detailing.db в облако?\n'
+          'Дубли по телефону пропускаются.',
+          style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Импорт')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final result = await DatabaseHelper().importLocalClientsToCloud();
+      if (!mounted) return;
+      final created = result['created'] ?? 0;
+      final skipped = result['skipped'] ?? 0;
+      final cars = result['cars_created'] ?? 0;
+      final total = result['local_total'] ?? 0;
+      showAppToast(
+        context,
+        'Локально: $total. Создано: $created, пропущено: $skipped, авто: $cars',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, 'Импорт не удался: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _findHosts() async {
@@ -318,9 +358,18 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                   const SizedBox(height: 10),
                   if (CloudMode.enabled) ...[
                     Text(
-                      'Облачный режим: заказы, касса и склад идут через api.det-app.ru.\n'
+                      'Облачный режим: заказы, касса, склад и статистика — через api.det-app.ru.\n'
                       'LAN-хост :7878 не нужен — оба устройства работают по интернету.',
                       style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _busy ? null : _importLocalClients,
+                      icon: const Icon(Icons.upload_file_outlined, size: 18),
+                      label: Text(
+                        'Импорт клиентов из локальной БД',
+                        style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                      ),
                     ),
                     const SizedBox(height: 14),
                   ] else ...[

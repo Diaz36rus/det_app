@@ -1026,4 +1026,71 @@ void main() {
     final row3 = items3.cast<Map>().firstWhere((e) => e['id'] == invId);
     expect((row3['quantity'] as num).toDouble(), 1);
   });
+
+  test('CRM stats + import clients (needs API 0.16+)', () async {
+    final ver = await apiVersion();
+    if (!_atLeast(ver, 0, 16)) {
+      print('SKIP stats-import: API $ver (need 0.16.0+)');
+      return;
+    }
+    final token = await ownerToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final phone = '900${(stamp % 10000000).toString().padLeft(7, '0')}';
+
+    final stats = await http
+        .get(Uri.parse('$base/crm/stats?days=30'), headers: headers)
+        .timeout(const Duration(seconds: 20));
+    expect(stats.statusCode, 200, reason: utf8.decode(stats.bodyBytes));
+    final map = jsonDecode(utf8.decode(stats.bodyBytes)) as Map<String, dynamic>;
+    expect(map.containsKey('revenue_today'), isTrue);
+    expect(map.containsKey('top_by_count'), isTrue);
+    expect(map.containsKey('master_day'), isTrue);
+
+    final imp = await http
+        .post(
+          Uri.parse('$base/crm/import/clients'),
+          headers: headers,
+          body: jsonEncode({
+            'clients': [
+              {
+                'name': 'Import $stamp',
+                'phone': phone,
+                'cars': [
+                  {'make_model': 'Import Car', 'plate': 'IMP$stamp'},
+                ],
+              },
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    expect(imp.statusCode, 200, reason: utf8.decode(imp.bodyBytes));
+    final created = jsonDecode(utf8.decode(imp.bodyBytes)) as Map<String, dynamic>;
+    expect((created['created'] as num).toInt(), 1);
+
+    final again = await http
+        .post(
+          Uri.parse('$base/crm/import/clients'),
+          headers: headers,
+          body: jsonEncode({
+            'clients': [
+              {
+                'name': 'Import dup $stamp',
+                'phone': phone,
+                'cars': [
+                  {'make_model': 'Another', 'plate': 'DUP$stamp'},
+                ],
+              },
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    expect(again.statusCode, 200, reason: utf8.decode(again.bodyBytes));
+    final dup = jsonDecode(utf8.decode(again.bodyBytes)) as Map<String, dynamic>;
+    expect((dup['skipped'] as num).toInt(), greaterThanOrEqualTo(1));
+    expect((dup['created'] as num).toInt(), 0);
+  });
 }

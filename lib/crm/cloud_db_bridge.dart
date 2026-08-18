@@ -1616,4 +1616,61 @@ class CloudDbBridge {
 
   Future<List<String>> getRolesList() async =>
       ['Универсал', 'Мойка', 'Химчистка', 'Полировка', 'Оклейка'];
+
+  Future<Map<String, dynamic>> getCompanyStats({String? masterDay, int days = 30}) async {
+    return _crm.getStats(masterDay: masterDay, days: days);
+  }
+
+  Future<double> getRevenueToday() async {
+    final s = await getCompanyStats();
+    return (s['revenue_today'] as num?)?.toDouble() ?? 0;
+  }
+
+  Future<double> getRevenueMonth() async {
+    final s = await getCompanyStats();
+    return (s['revenue_month'] as num?)?.toDouble() ?? 0;
+  }
+
+  Future<Map<String, double>> getStatsKpis() async {
+    final s = await getCompanyStats();
+    return {
+      'orders_count': (s['orders_count'] as num?)?.toDouble() ?? 0,
+      'avg_check': (s['avg_check'] as num?)?.toDouble() ?? 0,
+      'revenue_all': (s['revenue_all'] as num?)?.toDouble() ?? 0,
+      'open_debt': (s['open_debt'] as num?)?.toDouble() ?? 0,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> getRevenueByDay(int days) async {
+    final s = await getCompanyStats(days: days);
+    final list = (s['revenue_by_day'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getServicesStats() async {
+    final s = await getCompanyStats();
+    final list = (s['top_by_count'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getTopServicesByRevenue({int limit = 5}) async {
+    final s = await getCompanyStats();
+    final list = (s['top_by_revenue'] as List?) ?? const [];
+    return list
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .take(limit)
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getMasterDayStats(String dayYyyyMmDd) async {
+    final s = await getCompanyStats(masterDay: dayYyyyMmDd);
+    final list = (s['master_day'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<Map<String, dynamic>> importClientsBundle(List<Map<String, dynamic>> clients) async {
+    final result = await _crm.importClients(clients);
+    await refreshAll();
+    return result;
+  }
 }
