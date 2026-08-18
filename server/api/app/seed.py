@@ -69,6 +69,12 @@ def ensure_user_phone_column() -> None:
             ("is_workshop_completed", "BOOLEAN DEFAULT FALSE"),
         ]:
             conn.execute(text(f"ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS {col} {typ}"))
+        conn.execute(
+            text(
+                "ALTER TABLE crm_inventory_items "
+                "ADD COLUMN IF NOT EXISTS meters_per_roll DOUBLE PRECISION DEFAULT 0"
+            )
+        )
         for col, typ in [
             ("comment", "TEXT DEFAULT ''"),
             ("master_ids", "VARCHAR(200) DEFAULT ''"),
@@ -234,10 +240,11 @@ def seed_database(db: Session) -> None:
                 CrmInventoryItem(
                     company_id=company.id,
                     name="Плёнка демо",
-                    quantity=10,
+                    quantity=0,
                     unit="м",
-                    category="Оклейка",
+                    category="Плёнка оклейка",
                     min_qty=2,
+                    meters_per_roll=15,
                 )
             )
 

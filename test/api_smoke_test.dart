@@ -667,4 +667,125 @@ void main() {
     final afterItems = (jsonDecode(utf8.decode(after.bodyBytes)) as Map)['items'] as List;
     expect(afterItems, isEmpty);
   });
+
+  test('CRM film rolls + order wrap films (needs API 0.13+)', () async {
+    final ver = await apiVersion();
+    if (!_atLeast(ver, 0, 13)) {
+      print('SKIP film-rolls: API $ver');
+      return;
+    }
+    final token = await ownerToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+
+    final inv = await http
+        .post(
+          Uri.parse('$base/crm/inventory'),
+          headers: headers,
+          body: jsonEncode({
+            'name': 'Film $stamp',
+            'quantity': 0,
+            'unit': 'м',
+            'category': 'Плёнка оклейка',
+            'meters_per_roll': 15,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(inv.statusCode, 200, reason: utf8.decode(inv.bodyBytes));
+    final invId = (jsonDecode(utf8.decode(inv.bodyBytes))['id'] as num).toInt();
+
+    final rollR = await http
+        .post(
+          Uri.parse('$base/crm/film-rolls'),
+          headers: headers,
+          body: jsonEncode({
+            'inventory_id': invId,
+            'roll_number': 'R$stamp',
+            'meters_initial': 15,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(rollR.statusCode, 200, reason: utf8.decode(rollR.bodyBytes));
+    final roll = jsonDecode(utf8.decode(rollR.bodyBytes)) as Map<String, dynamic>;
+    final rollId = (roll['id'] as num).toInt();
+    expect((roll['meters_left'] as num).toDouble(), 15);
+
+    final films = await http
+        .get(Uri.parse('$base/crm/wrap-films'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(films.statusCode, 200);
+    final filmList = jsonDecode(utf8.decode(films.bodyBytes)) as List;
+    expect(filmList.any((e) => (e as Map)['id'] == invId), isTrue);
+
+    final c = await http
+        .post(
+          Uri.parse('$base/crm/clients'),
+          headers: headers,
+          body: jsonEncode({'name': 'FilmOrd $stamp', 'phone': '900999${stamp % 10000}'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final clientId = (jsonDecode(utf8.decode(c.bodyBytes))['id'] as num).toInt();
+    final carR = await http
+        .post(
+          Uri.parse('$base/crm/cars'),
+          headers: headers,
+          body: jsonEncode({'client_id': clientId, 'make_model': 'Film Car', 'plate': 'F$stamp'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final carId = (jsonDecode(utf8.decode(carR.bodyBytes))['id'] as num).toInt();
+    final o = await http
+        .post(
+          Uri.parse('$base/crm/orders'),
+          headers: headers,
+          body: jsonEncode({
+            'client_id': clientId,
+            'car_id': carId,
+            'items': [
+              {'name': 'Оклейка', 'price': 1000, 'workshop': 'Оклейка'},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    final orderId = (jsonDecode(utf8.decode(o.bodyBytes))['id'] as num).toInt();
+
+    final put = await http
+        .put(
+          Uri.parse('$base/crm/orders/$orderId/wrap-films'),
+          headers: headers,
+          body: jsonEncode({
+            'films': [
+              {'film_id': invId, 'roll_id': rollId, 'meters': 3.5},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(put.statusCode, 200, reason: utf8.decode(put.bodyBytes));
+
+    final rolls = await http
+        .get(Uri.parse('$base/crm/film-rolls?inventory_id=$invId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final rollAfter = (jsonDecode(utf8.decode(rolls.bodyBytes)) as List)
+        .cast<Map>()
+        .firstWhere((e) => e['id'] == rollId);
+    expect((rollAfter['meters_left'] as num).toDouble(), 11.5);
+
+    final clear = await http
+        .put(
+          Uri.parse('$base/crm/orders/$orderId/wrap-films'),
+          headers: headers,
+          body: jsonEncode({'films': []}),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(clear.statusCode, 200, reason: utf8.decode(clear.bodyBytes));
+    final rolls2 = await http
+        .get(Uri.parse('$base/crm/film-rolls?inventory_id=$invId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final restored = (jsonDecode(utf8.decode(rolls2.bodyBytes)) as List)
+        .cast<Map>()
+        .firstWhere((e) => e['id'] == rollId);
+    expect((restored['meters_left'] as num).toDouble(), 15);
+  });
 }

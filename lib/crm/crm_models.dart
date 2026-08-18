@@ -289,12 +289,14 @@ class CrmInventoryItem {
   final double quantity;
   final String unit;
   final String category;
+  final double metersPerRoll;
   const CrmInventoryItem({
     required this.id,
     required this.name,
     required this.quantity,
     required this.unit,
     required this.category,
+    this.metersPerRoll = 0,
   });
   factory CrmInventoryItem.fromJson(Map<String, dynamic> j) => CrmInventoryItem(
         id: (j['id'] as num).toInt(),
@@ -302,7 +304,40 @@ class CrmInventoryItem {
         quantity: (j['quantity'] as num?)?.toDouble() ?? 0,
         unit: j['unit']?.toString() ?? 'шт',
         category: j['category']?.toString() ?? '',
+        metersPerRoll: (j['meters_per_roll'] as num?)?.toDouble() ?? 0,
       );
+}
+
+class CrmFilmRoll {
+  final int id;
+  final int inventoryId;
+  final String rollNumber;
+  final double metersInitial;
+  final double metersLeft;
+
+  const CrmFilmRoll({
+    required this.id,
+    required this.inventoryId,
+    required this.rollNumber,
+    required this.metersInitial,
+    required this.metersLeft,
+  });
+
+  factory CrmFilmRoll.fromJson(Map<String, dynamic> j) => CrmFilmRoll(
+        id: (j['id'] as num).toInt(),
+        inventoryId: (j['inventory_id'] as num).toInt(),
+        rollNumber: j['roll_number']?.toString() ?? '',
+        metersInitial: (j['meters_initial'] as num?)?.toDouble() ?? 0,
+        metersLeft: (j['meters_left'] as num?)?.toDouble() ?? 0,
+      );
+
+  Map<String, dynamic> toLocalMap() => {
+        'id': id,
+        'inventory_id': inventoryId,
+        'roll_number': rollNumber,
+        'meters_initial': metersInitial,
+        'meters_left': metersLeft,
+      };
 }
 
 class CrmOrderEvent {

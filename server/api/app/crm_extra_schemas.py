@@ -72,6 +72,7 @@ class CrmInventoryCreate(BaseModel):
     unit: str = Field(default="шт", max_length=20)
     category: str = Field(default="Прочее", max_length=80)
     min_qty: float = 0
+    meters_per_roll: float = 0
 
 
 class CrmInventoryOut(BaseModel):
@@ -82,6 +83,7 @@ class CrmInventoryOut(BaseModel):
     unit: str
     category: str
     min_qty: float
+    meters_per_roll: float = 0
 
     model_config = {"from_attributes": True}
 
@@ -101,9 +103,63 @@ class CrmInventoryMoveOut(BaseModel):
     balance_after: float
     reason: str
     order_id: int | None = None
-    note: str
+    note: str = ""
 
     model_config = {"from_attributes": True}
+
+
+class CrmFilmRollCreate(BaseModel):
+    inventory_id: int
+    roll_number: str = Field(min_length=1, max_length=80)
+    meters_initial: float | None = None
+
+
+class CrmFilmRollOut(BaseModel):
+    id: int
+    company_id: int
+    inventory_id: int
+    roll_number: str
+    meters_initial: float
+    meters_left: float
+
+    model_config = {"from_attributes": True}
+
+
+class CrmWrapFilmOut(BaseModel):
+    id: int
+    name: str
+    inventory_id: int
+    stock_meters: float = 0
+    meters_per_roll: float = 0
+    inventory_category: str = ""
+    unit: str = "м"
+
+
+class CrmOrderWrapFilmIn(BaseModel):
+    film_id: int
+    roll_id: int | None = None
+    meters: float = 0
+
+
+class CrmOrderWrapFilmOut(BaseModel):
+    id: int
+    order_id: int
+    film_id: int
+    roll_id: int | None = None
+    meters: float
+    film_name: str = ""
+    roll_number: str | None = None
+    roll_meters_left: float | None = None
+    inventory_id: int | None = None
+
+
+class CrmOrderWrapFilmsPut(BaseModel):
+    films: list[CrmOrderWrapFilmIn] = []
+
+
+class CrmOrderWrapFilmsPutResult(BaseModel):
+    warnings: list[str] = []
+    films: list[CrmOrderWrapFilmOut] = []
 
 
 class CrmImportClients(BaseModel):

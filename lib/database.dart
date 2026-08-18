@@ -2413,6 +2413,7 @@ class DatabaseHelper {
 
   /// Каталог плёнок для цеха. [categories] — фильтр склада («Плёнка оклейка» / «Плёнка тонировка»).
   Future<List<Map<String, dynamic>>> listWrapFilms({List<String>? categories}) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.listWrapFilms(categories: categories);
     await syncWrapFilmsFromInventory();
     final db = await database;
     final cats = (categories ?? const <String>[])
@@ -2479,6 +2480,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getOrderWrapFilms(int orderId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderWrapFilms(orderId);
     final db = await database;
     return db.rawQuery('''
       SELECT order_wrap_films.*, wrap_films.name AS film_name,
@@ -2510,6 +2512,11 @@ class DatabaseHelper {
 
   /// Сохранить расход плёнок: на склад уходит только дельта по рулонам (без спама в журнале).
   Future<List<String>> setOrderWrapFilms(int orderId, List<Map<String, dynamic>> films) async {
+    if (CloudDbBridge.active) {
+      final w = await CloudDbBridge.instance.setOrderWrapFilms(orderId, films);
+      bumpDataRevision();
+      return w;
+    }
     final db = await database;
     final warnings = <String>[];
     final oldRows = await db.query('order_wrap_films', where: 'order_id = ?', whereArgs: [orderId]);
@@ -4081,6 +4088,9 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> listFilmRolls(int inventoryId, {bool onlyWithStock = false}) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.listFilmRolls(inventoryId, onlyWithStock: onlyWithStock);
+    }
     final db = await database;
     final where = onlyWithStock
         ? 'inventory_id = ? AND meters_left > 0.001'
@@ -4099,6 +4109,15 @@ class DatabaseHelper {
     double? metersInitial,
     int? cashFlowId,
   }) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addFilmRoll(
+        inventoryId: inventoryId,
+        rollNumber: rollNumber,
+        metersInitial: metersInitial,
+      );
+      bumpDataRevision();
+      return id;
+    }
     final db = await database;
     final rollNo = normalizeRollNumber(rollNumber);
     if (rollNo.isEmpty) throw ArgumentError('Номер рулона пуст');

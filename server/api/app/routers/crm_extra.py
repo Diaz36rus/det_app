@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.crm_extra_schemas import (
     CrmDefectCreate,
     CrmDefectOut,
+    CrmFilmRollCreate,
+    CrmFilmRollOut,
     CrmImportClients,
     CrmInventoryCreate,
     CrmInventoryMoveCreate,
@@ -15,9 +17,13 @@ from app.crm_extra_schemas import (
     CrmMasterCreate,
     CrmMasterOut,
     CrmMasterUpdate,
+    CrmOrderWrapFilmOut,
+    CrmOrderWrapFilmsPut,
+    CrmOrderWrapFilmsPutResult,
     CrmServiceCreate,
     CrmServiceOut,
     CrmServiceUpdate,
+    CrmWrapFilmOut,
 )
 from app.db import get_db
 from app.deps import require_permissions
@@ -25,10 +31,12 @@ from app.models import (
     CrmCar,
     CrmClient,
     CrmDefect,
+    CrmFilmRoll,
     CrmInventoryItem,
     CrmInventoryMove,
     CrmMaster,
     CrmOrder,
+    CrmOrderWrapFilm,
     CrmService,
     User,
 )
@@ -239,6 +247,7 @@ def create_inventory(
         unit=body.unit or "шт",
         category=body.category or "Прочее",
         min_qty=float(body.min_qty or 0),
+        meters_per_roll=float(getattr(body, "meters_per_roll", 0) or 0),
     )
     db.add(row)
     db.commit()
@@ -275,6 +284,281 @@ def create_inventory_move(
     db.commit()
     db.refresh(move)
     return move
+
+
+# --- Film rolls / wrap films ---
+
+_FILM_CATEGORIES = {"Плёнка оклейка", "Плёнка тонировка"}
+
+
+def _is_rolls_unit(unit: str | None) -> bool:
+    u = (unit or "").strip().lower().replace(" ", "")
+    return u in {"рул", "рул.", "рулон", "рулоны", "roll", "rolls"}
+
+
+def _sync_film_inventory_qty(db: Session, item: CrmInventoryItem) -> None:
+    rolls = list(
+        db.scalars(select(CrmFilmRoll).where(CrmFilmRoll.inventory_id == item.id)).all()
+    )
+    if _is_rolls_unit(item.unit):
+        item.quantity = float(sum(1 for r in rolls if float(r.meters_left or 0) > 0.001))
+    else:
+        item.quantity = float(sum(float(r.meters_left or 0) for r in rolls))
+
+
+def _order_wrap_out(
+    row: CrmOrderWrapFilm,
+    inv: CrmInventoryItem | None,
+    roll: CrmFilmRoll | None,
+) -> CrmOrderWrapFilmOut:
+    return CrmOrderWrapFilmOut(
+        id=row.id,
+        order_id=row.order_id,
+        film_id=row.film_id,
+        roll_id=row.roll_id,
+        meters=float(row.meters or 0),
+        film_name=inv.name if inv else "",
+        roll_number=roll.roll_number if roll else None,
+        roll_meters_left=float(roll.meters_left) if roll else None,
+        inventory_id=row.film_id,
+    )
+
+
+@router.get("/wrap-films", response_model=list[CrmWrapFilmOut])
+def list_wrap_films(
+    user: User = Depends(require_permissions("inventory.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    items = db.scalars(
+        select(CrmInventoryItem)
+        .where(CrmInventoryItem.company_id == cid, CrmInventoryItem.category.in_(_FILM_CATEGORIES))
+        .order_by(CrmInventoryItem.category, CrmInventoryItem.name)
+    ).all()
+    out: list[CrmWrapFilmOut] = []
+    for it in items:
+        rolls = list(db.scalars(select(CrmFilmRoll).where(CrmFilmRoll.inventory_id == it.id)).all())
+        stock = float(sum(float(r.meters_left or 0) for r in rolls))
+        out.append(
+            CrmWrapFilmOut(
+                id=it.id,
+                name=it.name,
+                inventory_id=it.id,
+                stock_meters=stock,
+                meters_per_roll=float(getattr(it, "meters_per_roll", 0) or 0),
+                inventory_category=it.category or "",
+                unit=it.unit or "м",
+            )
+        )
+    return out
+
+
+@router.get("/film-rolls", response_model=list[CrmFilmRollOut])
+def list_film_rolls(
+    inventory_id: int,
+    only_with_stock: bool = False,
+    user: User = Depends(require_permissions("inventory.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    inv = db.scalar(
+        select(CrmInventoryItem).where(
+            CrmInventoryItem.id == inventory_id, CrmInventoryItem.company_id == cid
+        )
+    )
+    if inv is None:
+        raise HTTPException(404, "Позиция не найдена")
+    q = select(CrmFilmRoll).where(
+        CrmFilmRoll.company_id == cid, CrmFilmRoll.inventory_id == inventory_id
+    )
+    if only_with_stock:
+        q = q.where(CrmFilmRoll.meters_left > 0.001)
+    return list(db.scalars(q.order_by(CrmFilmRoll.roll_number)).all())
+
+
+@router.post("/film-rolls", response_model=CrmFilmRollOut)
+def create_film_roll(
+    body: CrmFilmRollCreate,
+    user: User = Depends(require_permissions("inventory.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    inv = db.scalar(
+        select(CrmInventoryItem).where(
+            CrmInventoryItem.id == body.inventory_id, CrmInventoryItem.company_id == cid
+        )
+    )
+    if inv is None:
+        raise HTTPException(404, "Позиция не найдена")
+    roll_no = (body.roll_number or "").strip().upper()
+    if not roll_no:
+        raise HTTPException(400, "Номер рулона пуст")
+    existing = db.scalar(
+        select(CrmFilmRoll).where(
+            CrmFilmRoll.inventory_id == inv.id, CrmFilmRoll.roll_number == roll_no
+        )
+    )
+    if existing is not None:
+        raise HTTPException(400, "Рулон с таким номером уже есть")
+    per = float(getattr(inv, "meters_per_roll", 0) or 0)
+    initial = float(body.meters_initial) if body.meters_initial is not None else (per if per > 0 else 0.0)
+    row = CrmFilmRoll(
+        company_id=cid,
+        inventory_id=inv.id,
+        roll_number=roll_no,
+        meters_initial=initial,
+        meters_left=initial,
+    )
+    db.add(row)
+    db.flush()
+    _sync_film_inventory_qty(db, inv)
+    move_delta = 1.0 if _is_rolls_unit(inv.unit) else initial
+    if move_delta:
+        db.add(
+            CrmInventoryMove(
+                company_id=cid,
+                item_id=inv.id,
+                delta=move_delta,
+                balance_after=float(inv.quantity or 0),
+                reason="purchase",
+                note=f"Рулон {roll_no}",
+            )
+        )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.get("/orders/{order_id}/wrap-films", response_model=list[CrmOrderWrapFilmOut])
+def get_order_wrap_films(
+    order_id: int,
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    order = db.scalar(select(CrmOrder).where(CrmOrder.id == order_id, CrmOrder.company_id == cid))
+    if order is None:
+        raise HTTPException(404, "Заказ не найден")
+    rows = db.scalars(
+        select(CrmOrderWrapFilm)
+        .where(CrmOrderWrapFilm.order_id == order_id, CrmOrderWrapFilm.company_id == cid)
+        .order_by(CrmOrderWrapFilm.id)
+    ).all()
+    out: list[CrmOrderWrapFilmOut] = []
+    for r in rows:
+        inv = db.get(CrmInventoryItem, r.film_id)
+        roll = db.get(CrmFilmRoll, r.roll_id) if r.roll_id else None
+        out.append(_order_wrap_out(r, inv, roll))
+    return out
+
+
+@router.put("/orders/{order_id}/wrap-films", response_model=CrmOrderWrapFilmsPutResult)
+def put_order_wrap_films(
+    order_id: int,
+    body: CrmOrderWrapFilmsPut,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    order = db.scalar(select(CrmOrder).where(CrmOrder.id == order_id, CrmOrder.company_id == cid))
+    if order is None:
+        raise HTTPException(404, "Заказ не найден")
+
+    old_rows = list(
+        db.scalars(
+            select(CrmOrderWrapFilm).where(
+                CrmOrderWrapFilm.order_id == order_id, CrmOrderWrapFilm.company_id == cid
+            )
+        ).all()
+    )
+    old_usage: dict[int, float] = {}
+    for r in old_rows:
+        if r.roll_id is None:
+            continue
+        old_usage[r.roll_id] = old_usage.get(r.roll_id, 0.0) + float(r.meters or 0)
+
+    new_usage: dict[int, float] = {}
+    for f in body.films:
+        if f.roll_id is None or float(f.meters or 0) <= 0:
+            continue
+        new_usage[f.roll_id] = new_usage.get(f.roll_id, 0.0) + float(f.meters or 0)
+
+    warnings: list[str] = []
+    for roll_id in set(old_usage) | set(new_usage):
+        before = old_usage.get(roll_id, 0.0)
+        after = new_usage.get(roll_id, 0.0)
+        stock_delta = before - after  # расход вырос → остаток падает
+        if abs(stock_delta) < 0.0001:
+            continue
+        roll = db.scalar(
+            select(CrmFilmRoll).where(CrmFilmRoll.id == roll_id, CrmFilmRoll.company_id == cid)
+        )
+        if roll is None:
+            warnings.append(f"Рулон #{roll_id} не найден")
+            continue
+        left = float(roll.meters_left or 0)
+        next_left = left + stock_delta
+        if next_left < -0.001:
+            warnings.append(
+                f"Рулон {roll.roll_number}: остаток {left:.1f} м, "
+                f"списание {(-stock_delta):.1f} м — уходит в минус"
+            )
+        roll.meters_left = next_left
+        inv = db.get(CrmInventoryItem, roll.inventory_id)
+        if inv is not None:
+            _sync_film_inventory_qty(db, inv)
+
+    for r in old_rows:
+        db.delete(r)
+    db.flush()
+
+    for f in body.films:
+        meters = float(f.meters or 0)
+        if meters <= 0 and f.roll_id is None:
+            continue
+        inv = db.scalar(
+            select(CrmInventoryItem).where(
+                CrmInventoryItem.id == f.film_id, CrmInventoryItem.company_id == cid
+            )
+        )
+        if inv is None:
+            continue
+        if f.roll_id is not None:
+            roll = db.scalar(
+                select(CrmFilmRoll).where(
+                    CrmFilmRoll.id == f.roll_id,
+                    CrmFilmRoll.company_id == cid,
+                    CrmFilmRoll.inventory_id == inv.id,
+                )
+            )
+            if roll is None:
+                warnings.append(f"Рулон не подходит к плёнке {inv.name}")
+                continue
+        db.add(
+            CrmOrderWrapFilm(
+                company_id=cid,
+                order_id=order_id,
+                film_id=inv.id,
+                roll_id=f.roll_id,
+                meters=meters,
+            )
+        )
+    db.commit()
+
+    rows = db.scalars(
+        select(CrmOrderWrapFilm)
+        .where(CrmOrderWrapFilm.order_id == order_id, CrmOrderWrapFilm.company_id == cid)
+        .order_by(CrmOrderWrapFilm.id)
+    ).all()
+    films_out = [
+        _order_wrap_out(
+            r,
+            db.get(CrmInventoryItem, r.film_id),
+            db.get(CrmFilmRoll, r.roll_id) if r.roll_id else None,
+        )
+        for r in rows
+    ]
+    return CrmOrderWrapFilmsPutResult(warnings=warnings, films=films_out)
 
 
 # --- Import ---

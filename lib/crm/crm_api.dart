@@ -295,6 +295,78 @@ class CrmApi {
     _ensure(r);
   }
 
+  Future<List<Map<String, dynamic>>> listWrapFilms() async {
+    final r = await http.get(_u('/crm/wrap-films'), headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<List<CrmFilmRoll>> listFilmRolls(int inventoryId, {bool onlyWithStock = false}) async {
+    final uri = _u('/crm/film-rolls').replace(queryParameters: {
+      'inventory_id': '$inventoryId',
+      if (onlyWithStock) 'only_with_stock': 'true',
+    });
+    final r = await http.get(uri, headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => CrmFilmRoll.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<CrmFilmRoll> createFilmRoll({
+    required int inventoryId,
+    required String rollNumber,
+    double? metersInitial,
+  }) async {
+    final r = await http
+        .post(
+          _u('/crm/film-rolls'),
+          headers: _headers(),
+          body: jsonEncode({
+            'inventory_id': inventoryId,
+            'roll_number': rollNumber,
+            if (metersInitial != null) 'meters_initial': metersInitial,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmFilmRoll.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<List<Map<String, dynamic>>> getOrderWrapFilms(int orderId) async {
+    final r = await http
+        .get(_u('/crm/orders/$orderId/wrap-films'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<List<String>> putOrderWrapFilms(int orderId, List<Map<String, dynamic>> films) async {
+    final payload = films
+        .map(
+          (f) => {
+            'film_id': f['filmId'] ?? f['film_id'],
+            'roll_id': f['rollId'] ?? f['roll_id'],
+            'meters': f['meters'] ?? 0,
+          },
+        )
+        .toList();
+    final r = await http
+        .put(
+          _u('/crm/orders/$orderId/wrap-films'),
+          headers: _headers(),
+          body: jsonEncode({'films': payload}),
+        )
+        .timeout(const Duration(seconds: 20));
+    _ensure(r);
+    final map = jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+    return ((map['warnings'] as List?) ?? const []).map((e) => e.toString()).toList();
+  }
+
   Future<List<CrmOrderEvent>> listOrderEvents(int orderId) async {
     final r = await http
         .get(_u('/crm/orders/$orderId/events'), headers: _headers())

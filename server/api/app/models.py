@@ -286,6 +286,41 @@ class CrmInventoryItem(Base):
     unit: Mapped[str] = mapped_column(String(20), default="шт", nullable=False)
     category: Mapped[str] = mapped_column(String(80), default="Прочее", nullable=False)
     min_qty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    meters_per_roll: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+
+class CrmFilmRoll(Base):
+    __tablename__ = "crm_film_rolls"
+    __table_args__ = (
+        UniqueConstraint("inventory_id", "roll_number", name="uq_film_roll_inv_number"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    inventory_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_inventory_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    roll_number: Mapped[str] = mapped_column(String(80), nullable=False)
+    meters_initial: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    meters_left: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmOrderWrapFilm(Base):
+    __tablename__ = "crm_order_wrap_films"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    film_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_inventory_items.id"), nullable=False, index=True
+    )
+    roll_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crm_film_rolls.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    meters: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
 
 class CrmInventoryMove(Base):

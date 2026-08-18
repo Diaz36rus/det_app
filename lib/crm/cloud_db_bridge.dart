@@ -228,7 +228,10 @@ class CloudDbBridge {
   }
 
   Future<void> deleteOrder(int id) async {
-    // API пока без DELETE — помечаем как Выдан / игнор
+    try {
+      await _crm.putOrderWrapFilms(id, const []);
+    } catch (_) {}
+    // API пока без DELETE — помечаем как Выдан
     await _crm.patchOrder(id, {'status': 'Выдан'});
     _orders.remove(id);
   }
@@ -1312,6 +1315,40 @@ class CloudDbBridge {
   Future<void> _ensureMasters() async {
     if (_masters.isNotEmpty) return;
     _masters = await _crm.listMasters();
+  }
+
+  Future<List<Map<String, dynamic>>> listWrapFilms({List<String>? categories}) async {
+    var list = await _crm.listWrapFilms();
+    if (categories != null && categories.isNotEmpty) {
+      list = list.where((f) => categories.contains(f['inventory_category']?.toString())).toList();
+    }
+    return list;
+  }
+
+  Future<List<Map<String, dynamic>>> getOrderWrapFilms(int orderId) async {
+    return _crm.getOrderWrapFilms(orderId);
+  }
+
+  Future<List<String>> setOrderWrapFilms(int orderId, List<Map<String, dynamic>> films) async {
+    return _crm.putOrderWrapFilms(orderId, films);
+  }
+
+  Future<List<Map<String, dynamic>>> listFilmRolls(int inventoryId, {bool onlyWithStock = false}) async {
+    final rolls = await _crm.listFilmRolls(inventoryId, onlyWithStock: onlyWithStock);
+    return rolls.map((r) => r.toLocalMap()).toList();
+  }
+
+  Future<int> addFilmRoll({
+    required int inventoryId,
+    required String rollNumber,
+    double? metersInitial,
+  }) async {
+    final roll = await _crm.createFilmRoll(
+      inventoryId: inventoryId,
+      rollNumber: rollNumber,
+      metersInitial: metersInitial,
+    );
+    return roll.id;
   }
 
   Future<List<String>> getRolesList() async =>
