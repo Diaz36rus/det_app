@@ -132,6 +132,13 @@ class CrmCarCreate(BaseModel):
     category: str = Field(default="1", max_length=8)
 
 
+class CrmCarUpdate(BaseModel):
+    make_model: str | None = Field(default=None, min_length=1, max_length=200)
+    plate: str | None = Field(default=None, max_length=32)
+    vin: str | None = Field(default=None, max_length=64)
+    category: str | None = Field(default=None, max_length=8)
+
+
 class CrmCarOut(BaseModel):
     id: int
     company_id: int
@@ -145,10 +152,16 @@ class CrmCarOut(BaseModel):
 
 
 class CrmOrderItemIn(BaseModel):
+    id: int | None = None
     name: str = Field(min_length=1, max_length=300)
     price: float = 0
     workshop: str = Field(default="", max_length=80)
     is_done: bool = False
+    comment: str = Field(default="", max_length=2000)
+    master_ids: str = Field(default="", max_length=200)
+    start_time: str = Field(default="", max_length=32)
+    end_time: str = Field(default="", max_length=32)
+    parent_id: int | None = None
 
 
 class CrmOrderItemOut(BaseModel):
@@ -157,8 +170,25 @@ class CrmOrderItemOut(BaseModel):
     price: float
     workshop: str
     is_done: bool
+    comment: str = ""
+    master_ids: str = ""
+    start_time: str = ""
+    end_time: str = ""
+    parent_id: int | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CrmOrderItemPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=300)
+    price: float | None = None
+    workshop: str | None = Field(default=None, max_length=80)
+    is_done: bool | None = None
+    comment: str | None = Field(default=None, max_length=2000)
+    master_ids: str | None = Field(default=None, max_length=200)
+    start_time: str | None = Field(default=None, max_length=32)
+    end_time: str | None = Field(default=None, max_length=32)
+    parent_id: int | None = None
 
 
 class CrmOrderCreate(BaseModel):
@@ -181,6 +211,7 @@ class CrmOrderUpdate(BaseModel):
     start_time: str | None = Field(default=None, max_length=16)
     end_time: str | None = Field(default=None, max_length=16)
     paid_amount: float | None = None
+    car_id: int | None = None
     master_ids: list[int] | None = None
     items: list[CrmOrderItemIn] | None = None
 

@@ -275,4 +275,89 @@ void main() {
     final journal = jsonDecode(utf8.decode(j.bodyBytes)) as List;
     expect(journal.any((e) => (e as Map)['kind'] == 'payment' && e['order_id'] == orderId), isTrue);
   });
+
+  test('CRM order items CRUD keeps stable ids (needs API 0.9+)', () async {
+    final ver = await apiVersion();
+    if (!_atLeast(ver, 0, 9)) {
+      print('SKIP items-crud: API $ver');
+      return;
+    }
+    final token = await ownerToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final c = await http
+        .post(
+          Uri.parse('$base/crm/clients'),
+          headers: headers,
+          body: jsonEncode({'name': 'Items $stamp', 'phone': '900444${stamp % 10000}'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final clientId = (jsonDecode(utf8.decode(c.bodyBytes))['id'] as num).toInt();
+    final carR = await http
+        .post(
+          Uri.parse('$base/crm/cars'),
+          headers: headers,
+          body: jsonEncode({'client_id': clientId, 'make_model': 'Items Car', 'plate': 'I$stamp'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    final carId = (jsonDecode(utf8.decode(carR.bodyBytes))['id'] as num).toInt();
+    final o = await http
+        .post(
+          Uri.parse('$base/crm/orders'),
+          headers: headers,
+          body: jsonEncode({
+            'client_id': clientId,
+            'car_id': carId,
+            'items': [
+              {'name': 'Мойка', 'price': 1000, 'workshop': 'Мойка'},
+            ],
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(o.statusCode, 200, reason: utf8.decode(o.bodyBytes));
+    final order = jsonDecode(utf8.decode(o.bodyBytes)) as Map<String, dynamic>;
+    final orderId = (order['id'] as num).toInt();
+    final firstId = ((order['items'] as List).first as Map)['id'] as num;
+
+    final add = await http
+        .post(
+          Uri.parse('$base/crm/orders/$orderId/items'),
+          headers: headers,
+          body: jsonEncode({'name': 'Полировка', 'price': 5000, 'workshop': 'Полировка'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(add.statusCode, 200, reason: utf8.decode(add.bodyBytes));
+    final added = jsonDecode(utf8.decode(add.bodyBytes)) as Map<String, dynamic>;
+    final secondId = (added['id'] as num).toInt();
+
+    final patch = await http
+        .patch(
+          Uri.parse('$base/crm/orders/$orderId/items/$firstId'),
+          headers: headers,
+          body: jsonEncode({'is_done': true, 'price': 1200, 'comment': 'ok'}),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(patch.statusCode, 200, reason: utf8.decode(patch.bodyBytes));
+    final patched = jsonDecode(utf8.decode(patch.bodyBytes)) as Map<String, dynamic>;
+    expect(patched['id'], firstId);
+    expect(patched['is_done'], true);
+    expect((patched['price'] as num).toDouble(), 1200);
+
+    final got = await http
+        .get(Uri.parse('$base/crm/orders/$orderId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final full = jsonDecode(utf8.decode(got.bodyBytes)) as Map<String, dynamic>;
+    expect((full['price'] as num).toDouble(), 6200);
+    final ids = (full['items'] as List).map((e) => (e as Map)['id']).toSet();
+    expect(ids.contains(firstId), isTrue);
+    expect(ids.contains(secondId), isTrue);
+
+    final del = await http
+        .delete(Uri.parse('$base/crm/orders/$orderId/items/$secondId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(del.statusCode, 200, reason: utf8.decode(del.bodyBytes));
+  });
 }

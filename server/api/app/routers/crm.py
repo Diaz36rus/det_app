@@ -16,11 +16,14 @@ from app.models import (
 from app.schemas import (
     CrmCarCreate,
     CrmCarOut,
+    CrmCarUpdate,
     CrmClientCreate,
     CrmClientOut,
     CrmClientUpdate,
     CrmOrderCreate,
+    CrmOrderItemIn,
     CrmOrderItemOut,
+    CrmOrderItemPatch,
     CrmOrderOut,
     CrmOrderUpdate,
 )
@@ -37,6 +40,48 @@ def _company_id(user: User) -> int:
     if user.company_id is None:
         raise HTTPException(status_code=400, detail="Пользователь без компании")
     return user.company_id
+
+
+def _item_out(it: CrmOrderItem) -> CrmOrderItemOut:
+    return CrmOrderItemOut(
+        id=it.id,
+        name=it.name,
+        price=float(it.price or 0),
+        workshop=it.workshop or "",
+        is_done=bool(it.is_done),
+        comment=getattr(it, "comment", None) or "",
+        master_ids=getattr(it, "master_ids", None) or "",
+        start_time=getattr(it, "start_time", None) or "",
+        end_time=getattr(it, "end_time", None) or "",
+        parent_id=getattr(it, "parent_id", None),
+    )
+
+
+def _fill_item_from_in(row: CrmOrderItem, body: CrmOrderItemIn) -> None:
+    row.name = body.name.strip()
+    row.price = float(body.price or 0)
+    row.workshop = body.workshop or ""
+    row.is_done = bool(body.is_done)
+    row.comment = body.comment or ""
+    row.master_ids = body.master_ids or ""
+    row.start_time = body.start_time or ""
+    row.end_time = body.end_time or ""
+    row.parent_id = body.parent_id
+
+
+def _recalc_order_price(order: CrmOrder) -> None:
+    order.price = sum(float(it.price or 0) for it in (order.items or []))
+
+
+def _get_company_order(db: Session, order_id: int, company_id: int) -> CrmOrder:
+    order = db.scalar(
+        select(CrmOrder)
+        .where(CrmOrder.id == order_id, CrmOrder.company_id == company_id)
+        .options(selectinload(CrmOrder.items), selectinload(CrmOrder.master_links))
+    )
+    if order is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    return order
 
 
 def _default_branch_id(db: Session, user: User, company_id: int) -> int:
@@ -70,16 +115,7 @@ def _order_out(order: CrmOrder, client: CrmClient | None = None, car: CrmCar | N
         start_time=getattr(order, "start_time", None) or "",
         end_time=getattr(order, "end_time", None) or "",
         master_ids=master_ids,
-        items=[
-            CrmOrderItemOut(
-                id=it.id,
-                name=it.name,
-                price=float(it.price or 0),
-                workshop=it.workshop or "",
-                is_done=bool(it.is_done),
-            )
-            for it in (order.items or [])
-        ],
+        items=[_item_out(it) for it in (order.items or [])],
         client_name=client.name if client else None,
         car_label=(f"{car.make_model} {car.plate}".strip() if car else None),
     )
@@ -271,15 +307,9 @@ def create_order(
     db.add(order)
     db.flush()
     for it in body.items:
-        db.add(
-            CrmOrderItem(
-                order_id=order.id,
-                name=it.name.strip(),
-                price=float(it.price or 0),
-                workshop=it.workshop or "",
-                is_done=it.is_done,
-            )
-        )
+        row = CrmOrderItem(order_id=order.id)
+        _fill_item_from_in(row, it)
+        db.add(row)
     for mid in getattr(body, "master_ids", None) or []:
         db.add(CrmOrderMaster(order_id=order.id, master_id=int(mid)))
     db.commit()
@@ -318,6 +348,17 @@ def update_order(
         order.end_time = body.end_time
     if body.paid_amount is not None:
         order.paid_amount = float(body.paid_amount)
+    if body.car_id is not None:
+        car = db.scalar(
+            select(CrmCar).where(
+                CrmCar.id == body.car_id,
+                CrmCar.company_id == company_id,
+                CrmCar.client_id == order.client_id,
+            )
+        )
+        if car is None:
+            raise HTTPException(status_code=404, detail="Авто не найдено")
+        order.car_id = car.id
     if body.master_ids is not None:
         for old in list(order.master_links):
             db.delete(old)
@@ -325,23 +366,25 @@ def update_order(
         for mid in body.master_ids:
             db.add(CrmOrderMaster(order_id=order.id, master_id=int(mid)))
     if body.items is not None:
-        for old in list(order.items):
-            db.delete(old)
-        db.flush()
-        total = 0.0
+        existing = {it.id: it for it in list(order.items)}
+        keep: set[int] = set()
         for it in body.items:
-            price = float(it.price or 0)
-            total += price
-            db.add(
-                CrmOrderItem(
-                    order_id=order.id,
-                    name=it.name.strip(),
-                    price=price,
-                    workshop=it.workshop or "",
-                    is_done=it.is_done,
-                )
-            )
-        order.price = total
+            if it.id is not None and it.id in existing:
+                row = existing[it.id]
+                _fill_item_from_in(row, it)
+                keep.add(it.id)
+            else:
+                row = CrmOrderItem(order_id=order.id)
+                _fill_item_from_in(row, it)
+                db.add(row)
+                db.flush()
+                keep.add(row.id)
+        for oid, old in existing.items():
+            if oid not in keep:
+                db.delete(old)
+        db.flush()
+        db.refresh(order)
+        _recalc_order_price(order)
     db.commit()
     order = db.scalar(
         select(CrmOrder)
@@ -351,3 +394,105 @@ def update_order(
     client = db.get(CrmClient, order.client_id)  # type: ignore[union-attr]
     car = db.get(CrmCar, order.car_id)  # type: ignore[union-attr]
     return _order_out(order, client, car)  # type: ignore[arg-type]
+
+
+@router.patch("/cars/{car_id}", response_model=CrmCarOut)
+def update_car(
+    car_id: int,
+    body: CrmCarUpdate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    row = db.scalar(select(CrmCar).where(CrmCar.id == car_id, CrmCar.company_id == company_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Авто не найдено")
+    if body.make_model is not None:
+        row.make_model = body.make_model.strip()
+    if body.plate is not None:
+        row.plate = body.plate.strip()
+    if body.vin is not None:
+        row.vin = body.vin.strip()
+    if body.category is not None:
+        row.category = (body.category or "1").strip() or "1"
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.post("/orders/{order_id}/items", response_model=CrmOrderItemOut)
+def create_order_item(
+    order_id: int,
+    body: CrmOrderItemIn,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    order = _get_company_order(db, order_id, company_id)
+    row = CrmOrderItem(order_id=order.id)
+    _fill_item_from_in(row, body)
+    db.add(row)
+    db.flush()
+    db.refresh(order)
+    _recalc_order_price(order)
+    db.commit()
+    db.refresh(row)
+    return _item_out(row)
+
+
+@router.patch("/orders/{order_id}/items/{item_id}", response_model=CrmOrderItemOut)
+def patch_order_item(
+    order_id: int,
+    item_id: int,
+    body: CrmOrderItemPatch,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    order = _get_company_order(db, order_id, company_id)
+    row = next((it for it in order.items if it.id == item_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    if body.name is not None:
+        row.name = body.name.strip()
+    if body.price is not None:
+        row.price = float(body.price)
+    if body.workshop is not None:
+        row.workshop = body.workshop
+    if body.is_done is not None:
+        row.is_done = bool(body.is_done)
+    if body.comment is not None:
+        row.comment = body.comment
+    if body.master_ids is not None:
+        row.master_ids = body.master_ids
+    if body.start_time is not None:
+        row.start_time = body.start_time
+    if body.end_time is not None:
+        row.end_time = body.end_time
+    if body.parent_id is not None:
+        row.parent_id = body.parent_id
+    db.flush()
+    _recalc_order_price(order)
+    db.commit()
+    db.refresh(row)
+    return _item_out(row)
+
+
+@router.delete("/orders/{order_id}/items/{item_id}")
+def delete_order_item(
+    order_id: int,
+    item_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    order = _get_company_order(db, order_id, company_id)
+    row = next((it for it in order.items if it.id == item_id), None)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Позиция не найдена")
+    db.delete(row)
+    db.flush()
+    db.refresh(order)
+    _recalc_order_price(order)
+    db.commit()
+    return {"ok": True}

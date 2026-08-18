@@ -296,16 +296,16 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
       final dbItems = await DatabaseHelper().getOrderItems(widget.order['id']);
       _selectedWorks = dbItems.map((item) => Map<String, dynamic>.from(item)).toList();
-      final cloud = CloudDbBridge.active;
       for (var i = 0; i < _selectedWorks.length; i++) {
         final w = _selectedWorks[i];
         final current = (w['workshop'] as String?)?.trim() ?? "";
         if (current.isNotEmpty && WORKSHOPS.contains(current)) continue;
         final auto = workshopForService(name: w['name']?.toString());
         if (auto == null) continue;
-        if (!cloud && (w['id'] as num?)?.toInt() != null && (w['id'] as num).toInt() > 0) {
+        final wid = (w['id'] as num?)?.toInt() ?? 0;
+        if (wid > 0) {
           await DatabaseHelper().updateOrderItemSchedule(
-            w['id'] as int,
+            wid,
             w['start_time'] as String?,
             w['end_time'] as String?,
             auto,
@@ -339,10 +339,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             await _recalcOrderTotal(writeDb: false);
           }
         } else {
-          await _recalcOrderTotal(writeDb: !cloud);
+          await _recalcOrderTotal(writeDb: true);
         }
       } else {
-        await _recalcOrderTotal(writeDb: !cloud);
+        await _recalcOrderTotal(writeDb: true);
       }
       final rawMethod = widget.order['payment_method']?.toString() ?? CashMethods.cash;
       _paymentMethod = rawMethod == 'Не указан' || rawMethod.isEmpty ? CashMethods.cash : rawMethod;

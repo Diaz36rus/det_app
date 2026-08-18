@@ -190,10 +190,11 @@ class CloudDbBridge {
             'price': it.price,
             'workshop': it.workshop,
             'is_done': it.isDone ? 1 : 0,
-            'parent_id': null,
-            'comment': '',
-            'start_time': null,
-            'end_time': null,
+            'parent_id': it.parentId,
+            'comment': it.comment,
+            'master_ids': it.masterIds,
+            'start_time': it.startTime.isEmpty ? null : it.startTime,
+            'end_time': it.endTime.isEmpty ? null : it.endTime,
           },
         )
         .toList();
@@ -552,21 +553,16 @@ class CloudDbBridge {
     return null;
   }
 
-  Future<void> _pushItems(int orderId, List<CrmOrderItem> items) async {
-    final updated = await _crm.patchOrder(orderId, {
-      'items': items.map((e) => e.toJson()).toList(),
-    });
-    _orders[orderId] = updated;
+  Future<void> _refreshOrder(int orderId) async {
+    final list = await _crm.listOrders();
+    _orders
+      ..clear()
+      ..addEntries(list.map((o) => MapEntry(o.id, o)));
   }
 
   Future<void> syncOrderFromItems(int orderId) async {
-    final o = _orders[orderId];
-    if (o == null) {
-      await getOrderById(orderId);
-    }
-    final cur = _orders[orderId];
-    if (cur == null) return;
-    await _pushItems(orderId, cur.items);
+    // Цена пересчитывается на сервере при item CRUD; здесь только refresh.
+    await _refreshOrder(orderId);
   }
 
   Future<void> updateOrderItemSchedule(
@@ -578,17 +574,12 @@ class CloudDbBridge {
     if (itemId <= 0) return;
     final o = await _orderByItemId(itemId);
     if (o == null) return;
-    final items = o.items.map((it) {
-      if (it.id != itemId) return it;
-      return CrmOrderItem(
-        id: it.id,
-        name: it.name,
-        price: it.price,
-        workshop: workshop ?? it.workshop,
-        isDone: it.isDone,
-      );
-    }).toList();
-    await _pushItems(o.id, items);
+    await _crm.patchOrderItem(o.id, itemId, {
+      if (workshop != null) 'workshop': workshop,
+      if (startTime != null) 'start_time': startTime,
+      if (endTime != null) 'end_time': endTime,
+    });
+    await _refreshOrder(o.id);
   }
 
   Future<int> addOrderItem(
@@ -601,75 +592,59 @@ class CloudDbBridge {
     String? startTime,
     String? endTime,
   }) async {
-    await getOrderById(orderId);
-    final o = _orders[orderId];
-    if (o == null) return 0;
-    final items = [
-      ...o.items,
-      CrmOrderItem(name: name, price: price, workshop: workshop ?? ''),
-    ];
-    await _pushItems(orderId, items);
-    final refreshed = _orders[orderId];
-    if (refreshed == null || refreshed.items.isEmpty) return 0;
-    // новый — последний с таким именем
-    final match = refreshed.items.where((i) => i.name == name).toList();
-    return match.isEmpty ? (refreshed.items.last.id ?? 0) : (match.last.id ?? 0);
+    final created = await _crm.createOrderItem(
+      orderId,
+      CrmOrderItem(
+        name: name,
+        price: price,
+        workshop: workshop ?? '',
+        startTime: startTime ?? '',
+        endTime: endTime ?? '',
+      ),
+    );
+    await _refreshOrder(orderId);
+    return created.id ?? 0;
   }
 
   Future<void> deleteOrderItem(int itemId) async {
     if (itemId <= 0) return;
     final o = await _orderByItemId(itemId);
     if (o == null) return;
-    await _pushItems(o.id, o.items.where((i) => i.id != itemId).toList());
+    await _crm.deleteOrderItem(o.id, itemId);
+    await _refreshOrder(o.id);
   }
 
   Future<List<String>> updateOrderItemDone(int itemId, bool isDone) async {
     if (itemId <= 0) return [];
     final o = await _orderByItemId(itemId);
     if (o == null) return [];
-    final items = o.items
-        .map(
-          (it) => it.id == itemId
-              ? CrmOrderItem(
-                  id: it.id,
-                  name: it.name,
-                  price: it.price,
-                  workshop: it.workshop,
-                  isDone: isDone,
-                )
-              : it,
-        )
-        .toList();
-    await _pushItems(o.id, items);
+    await _crm.patchOrderItem(o.id, itemId, {'is_done': isDone});
+    await _refreshOrder(o.id);
     return [];
   }
 
   Future<void> updateOrderItemComment(int itemId, String comment) async {
-    // В API нет comment у item — no-op.
+    if (itemId <= 0) return;
+    final o = await _orderByItemId(itemId);
+    if (o == null) return;
+    await _crm.patchOrderItem(o.id, itemId, {'comment': comment});
+    await _refreshOrder(o.id);
   }
 
   Future<void> updateOrderItemMasters(int itemId, List<int> masterIds) async {
-    // Мастера на уровне заказа; привязка к item пока no-op.
+    if (itemId <= 0) return;
+    final o = await _orderByItemId(itemId);
+    if (o == null) return;
+    await _crm.patchOrderItem(o.id, itemId, {'master_ids': masterIds.join(',')});
+    await _refreshOrder(o.id);
   }
 
   Future<void> updateOrderItemPrice(int itemId, double price) async {
     if (itemId <= 0) return;
     final o = await _orderByItemId(itemId);
     if (o == null) return;
-    final items = o.items
-        .map(
-          (it) => it.id == itemId
-              ? CrmOrderItem(
-                  id: it.id,
-                  name: it.name,
-                  price: price,
-                  workshop: it.workshop,
-                  isDone: it.isDone,
-                )
-              : it,
-        )
-        .toList();
-    await _pushItems(o.id, items);
+    await _crm.patchOrderItem(o.id, itemId, {'price': price});
+    await _refreshOrder(o.id);
   }
 
   Future<void> updateOrderPrice(int orderId, double price) async {
@@ -722,10 +697,6 @@ class CloudDbBridge {
 
   Future<void> updateOrderPaymentMethod(int orderId, String method) async {}
 
-  Future<void> reassignOrderCar(int orderId, int carId) async {
-    // car_id в patch пока нет — no-op.
-  }
-
   Future<Map<String, dynamic>?> getClientByPhone(String phone) async {
     await _ensureClients();
     final digits = phone.replaceAll(RegExp(r'\D'), '');
@@ -765,7 +736,19 @@ class CloudDbBridge {
     String? vin,
     String? category,
   }) async {
-    // PATCH /crm/cars пока нет — no-op.
+    final body = <String, dynamic>{};
+    if (makeModel != null) body['make_model'] = makeModel;
+    if (plate != null) body['plate'] = plate;
+    if (vin != null) body['vin'] = vin;
+    if (category != null) body['category'] = category;
+    if (body.isEmpty) return;
+    final car = await _crm.patchCar(carId, body);
+    _cars[car.id] = car;
+  }
+
+  Future<void> reassignOrderCar(int orderId, int carId) async {
+    final o = await _crm.patchOrder(orderId, {'car_id': carId});
+    _orders[o.id] = o;
   }
 
   Future<int?> resolveRegisterIdForMethod(String method) async {

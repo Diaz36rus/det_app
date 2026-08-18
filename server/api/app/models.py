@@ -184,6 +184,13 @@ class CrmOrderItem(Base):
     price: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     workshop: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     is_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    comment: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    master_ids: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    start_time: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    end_time: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crm_order_items.id", ondelete="CASCADE"), nullable=True, index=True
+    )
 
     order: Mapped[CrmOrder] = relationship(back_populates="items")
 

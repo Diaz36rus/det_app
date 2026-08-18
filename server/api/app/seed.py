@@ -46,6 +46,14 @@ def ensure_user_phone_column() -> None:
         conn.execute(
             text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS end_time VARCHAR(16) DEFAULT ''")
         )
+        for col, typ in [
+            ("comment", "TEXT DEFAULT ''"),
+            ("master_ids", "VARCHAR(200) DEFAULT ''"),
+            ("start_time", "VARCHAR(32) DEFAULT ''"),
+            ("end_time", "VARCHAR(32) DEFAULT ''"),
+            ("parent_id", "INTEGER"),
+        ]:
+            conn.execute(text(f"ALTER TABLE crm_order_items ADD COLUMN IF NOT EXISTS {col} {typ}"))
 
 
 def _ensure_permissions(db: Session) -> dict[str, Permission]:

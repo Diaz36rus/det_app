@@ -60,6 +60,11 @@ class CrmOrderItem {
   final double price;
   final String workshop;
   final bool isDone;
+  final String comment;
+  final String masterIds;
+  final String startTime;
+  final String endTime;
+  final int? parentId;
 
   const CrmOrderItem({
     this.id,
@@ -67,6 +72,11 @@ class CrmOrderItem {
     required this.price,
     this.workshop = '',
     this.isDone = false,
+    this.comment = '',
+    this.masterIds = '',
+    this.startTime = '',
+    this.endTime = '',
+    this.parentId,
   });
 
   factory CrmOrderItem.fromJson(Map<String, dynamic> j) => CrmOrderItem(
@@ -75,14 +85,50 @@ class CrmOrderItem {
         price: (j['price'] as num?)?.toDouble() ?? 0,
         workshop: j['workshop']?.toString() ?? '',
         isDone: j['is_done'] == true || j['is_done'] == 1,
+        comment: j['comment']?.toString() ?? '',
+        masterIds: j['master_ids']?.toString() ?? '',
+        startTime: j['start_time']?.toString() ?? '',
+        endTime: j['end_time']?.toString() ?? '',
+        parentId: (j['parent_id'] as num?)?.toInt(),
       );
 
   Map<String, dynamic> toJson() => {
+        if (id != null) 'id': id,
         'name': name,
         'price': price,
         'workshop': workshop,
         'is_done': isDone,
+        'comment': comment,
+        'master_ids': masterIds,
+        'start_time': startTime,
+        'end_time': endTime,
+        if (parentId != null) 'parent_id': parentId,
       };
+
+  CrmOrderItem copyWith({
+    int? id,
+    String? name,
+    double? price,
+    String? workshop,
+    bool? isDone,
+    String? comment,
+    String? masterIds,
+    String? startTime,
+    String? endTime,
+    int? parentId,
+  }) =>
+      CrmOrderItem(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        price: price ?? this.price,
+        workshop: workshop ?? this.workshop,
+        isDone: isDone ?? this.isDone,
+        comment: comment ?? this.comment,
+        masterIds: masterIds ?? this.masterIds,
+        startTime: startTime ?? this.startTime,
+        endTime: endTime ?? this.endTime,
+        parentId: parentId ?? this.parentId,
+      );
 }
 
 class CrmOrder {
