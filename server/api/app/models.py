@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -29,6 +30,8 @@ class Company(Base):
     branches: Mapped[list[Branch]] = relationship(back_populates="company")
     roles: Mapped[list[Role]] = relationship(back_populates="company")
     users: Mapped[list[User]] = relationship(back_populates="company")
+    crm_clients: Mapped[list[CrmClient]] = relationship(back_populates="company")
+    crm_orders: Mapped[list[CrmOrder]] = relationship(back_populates="company")
 
 
 class Branch(Base):
@@ -109,3 +112,73 @@ class UserBranch(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id", ondelete="CASCADE"), nullable=False)
+
+
+class CrmClient(Base):
+    """Клиент студии (облако C1)."""
+
+    __tablename__ = "crm_clients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    is_vip: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    company: Mapped[Company] = relationship(back_populates="crm_clients")
+    cars: Mapped[list[CrmCar]] = relationship(back_populates="client", cascade="all, delete-orphan")
+
+
+class CrmCar(Base):
+    __tablename__ = "crm_cars"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("crm_clients.id", ondelete="CASCADE"), nullable=False, index=True)
+    make_model: Mapped[str] = mapped_column(String(200), nullable=False)
+    plate: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    vin: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    category: Mapped[str] = mapped_column(String(8), default="1", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    client: Mapped[CrmClient] = relationship(back_populates="cars")
+
+
+class CrmOrder(Base):
+    __tablename__ = "crm_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    branch_id: Mapped[int] = mapped_column(ForeignKey("branches.id"), nullable=False, index=True)
+    client_id: Mapped[int] = mapped_column(ForeignKey("crm_clients.id"), nullable=False, index=True)
+    car_id: Mapped[int] = mapped_column(ForeignKey("crm_cars.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(80), default="Принят в работу", nullable=False)
+    price: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    paid_amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    due_date: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    company: Mapped[Company] = relationship(back_populates="crm_orders")
+    items: Mapped[list[CrmOrderItem]] = relationship(
+        back_populates="order", cascade="all, delete-orphan"
+    )
+
+
+class CrmOrderItem(Base):
+    __tablename__ = "crm_order_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(300), nullable=False)
+    price: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    workshop: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    is_done: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    order: Mapped[CrmOrder] = relationship(back_populates="items")
