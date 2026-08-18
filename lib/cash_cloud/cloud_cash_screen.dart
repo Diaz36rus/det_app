@@ -129,7 +129,7 @@ class _CloudCashScreenState extends State<CloudCashScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Облачная касса', style: AppTheme.pageTitle),
+                    Text('Касса', style: AppTheme.pageTitle),
                     const SizedBox(height: 4),
                     Text(
                       'Смена и оплаты заказов на сервере. ${user?.email ?? ''}',
@@ -449,7 +449,7 @@ class _PayOrderDialogState extends State<_PayOrderDialog> {
 
     return AlertDialog(
       backgroundColor: AppColors.surface,
-      title: Text('Оплата облачного заказа', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+      title: Text('Оплата заказа', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
       content: SizedBox(
         width: 400,
         child: _loading
@@ -458,7 +458,7 @@ class _PayOrderDialogState extends State<_PayOrderDialog> {
                 ? Text(_error!, style: GoogleFonts.manrope(color: AppColors.danger))
                 : _orders.isEmpty
                     ? Text(
-                        'Нет облачных заказов с долгом. Создайте заказ в «Облачные заказы».',
+                        'Нет заказов с долгом. Создайте заказ на доске.',
                         style: GoogleFonts.manrope(color: AppColors.textMuted),
                       )
                     : Column(

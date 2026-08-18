@@ -95,7 +95,7 @@ class _CloudBoardScreenState extends State<CloudBoardScreen> {
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
           child: Row(
             children: [
-              Expanded(child: Text('Доска (облако)', style: AppTheme.pageTitle)),
+              Expanded(child: Text('Доска заказов', style: AppTheme.pageTitle)),
               IconButton(onPressed: _reload, icon: const Icon(Icons.refresh, color: AppColors.textMuted)),
               ElevatedButton.icon(
                 onPressed: _openCreate,
@@ -253,6 +253,7 @@ class _CreateDialogState extends State<_CreateDialog> {
         carId: car.id,
         items: items,
         masterIds: _master == null ? const [] : [_master!.id],
+        dueDate: DateTime.now().toIso8601String().substring(0, 10),
       );
       if (!mounted) return;
       Navigator.pop(context, true);

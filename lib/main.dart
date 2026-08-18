@@ -17,11 +17,15 @@ import 'auth/auth_gate.dart';
 import 'backup_helper.dart';
 import 'bug_report_dialog.dart';
 import 'conn_status_sheet.dart';
-import 'cash_cloud/cloud_cash_screen.dart';
 import 'crm/cloud_board_screen.dart';
+import 'crm/cloud_clients_screen.dart';
 import 'crm/cloud_inventory_screen.dart';
 import 'crm/cloud_mode.dart';
-import 'crm/cloud_orders_screen.dart';
+import 'crm/cloud_ops_screens.dart';
+import 'crm/cloud_search_dialog.dart';
+import 'crm/cloud_services_screen.dart';
+import 'crm/cloud_staff_screen.dart';
+import 'cash_cloud/cloud_cash_screen.dart';
 import 'tour_keys.dart';
 import 'update/update_dialog.dart';
 import 'update/update_service.dart';
@@ -200,8 +204,6 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       "subtitle": "В разработке",
     },
     {"id": AppMenuIds.completed, "icon": Icons.task_alt_outlined, "label": "Завершённые"},
-    {"id": AppMenuIds.cloudOrders, "icon": Icons.cloud_outlined, "label": "Облачные заказы"},
-    {"id": AppMenuIds.cloudCash, "icon": Icons.account_balance_outlined, "label": "Облачная касса"},
   ];
 
   Future<void> _refreshLastBackup() async {
@@ -289,15 +291,8 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   /// Пункты, видимые в текущем контексте (desktop / full phone / light).
   List<Map<String, dynamic>> _visibleMenuItems(BuildContext context) {
     final mobile = AppResponsive.isMobile(context);
-    var items = _menuItems;
-    // В cloud-режиме прячем дубли «Облачные …» — основные пункты уже на API.
-    if (CloudMode.enabled) {
-      items = items
-          .where((m) => m['id'] != AppMenuIds.cloudOrders && m['id'] != AppMenuIds.cloudCash)
-          .toList();
-    }
-    if (!mobile || _mobileFullPhone) return items;
-    return items.where((m) => !AppMenuIds.lightHidden.contains(m['id'] as int)).toList();
+    if (!mobile || _mobileFullPhone) return _menuItems;
+    return _menuItems.where((m) => !AppMenuIds.lightHidden.contains(m['id'] as int)).toList();
   }
 
   Future<void> _refreshOpenBugs() async {
@@ -440,27 +435,57 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   }
 
   Widget _buildContent() {
-    // Cloud cutover: основные экраны ходят в API.
+    // Company signed-in: все операционные экраны с сервера.
     if (CloudMode.enabled) {
+      if (_selectedIndex == AppMenuIds.workshop) {
+        return CloudWorkshopScreen(
+          key: ValueKey('cloud_ws_$_selectedWorkshop'),
+          workshop: _selectedWorkshop,
+        );
+      }
       switch (_selectedIndex) {
         case AppMenuIds.board:
-        case AppMenuIds.cloudOrders:
-          return const CloudBoardScreen(key: ValueKey('cloud_board'));
-        case AppMenuIds.cash:
-        case AppMenuIds.cloudCash:
-          return const CloudCashScreen(key: ValueKey('cloud_cash'));
-        case AppMenuIds.inventory:
-          return const CloudInventoryScreen(key: ValueKey('cloud_inv'));
         case AppMenuIds.newOrder:
-          return const CloudBoardScreen(key: ValueKey('cloud_board_new'));
+          return const CloudBoardScreen(key: ValueKey('cloud_board'));
+        case AppMenuIds.calendar:
+          final cal = _selectedCalendarDate;
+          return CloudCalendarScreen(
+            key: ValueKey('cloud_cal_${cal.year}-${cal.month}-${cal.day}'),
+            selectedDate: DateTime(cal.year, cal.month, cal.day),
+            onDateChanged: (date) {
+              setState(() {
+                _selectedCalendarDate = DateTime(date.year, date.month, date.day);
+              });
+            },
+            onCreate: () => _selectMenu(AppMenuIds.newOrder),
+          );
+        case AppMenuIds.clients:
+          return const CloudClientsScreen(key: ValueKey('cloud_clients'));
+        case AppMenuIds.cash:
+          return const CloudCashScreen(key: ValueKey('cloud_cash'));
         case AppMenuIds.stats:
           return Center(
             key: const ValueKey('cloud_stats'),
             child: Text(
-              'Статистика из облака — скоро',
+              'Статистика с сервера — скоро',
               style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 16),
             ),
           );
+        case AppMenuIds.staff:
+          return const CloudStaffScreen(key: ValueKey('cloud_staff'));
+        case AppMenuIds.services:
+          return const CloudServicesScreen(key: ValueKey('cloud_services'));
+        case AppMenuIds.inventory:
+          return const CloudInventoryScreen(key: ValueKey('cloud_inv'));
+        case AppMenuIds.completed:
+          return const CloudCompletedScreen(key: ValueKey('cloud_done'));
+        case AppMenuIds.preview:
+          return const Center(
+            key: ValueKey('cloud_preview'),
+            child: Text('Превью — в разработке', style: TextStyle(color: AppColors.textMuted)),
+          );
+        default:
+          return const CloudBoardScreen(key: ValueKey('cloud_board_fallback'));
       }
     }
     if (_selectedIndex == AppMenuIds.workshop) {
@@ -518,10 +543,6 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         );
       case AppMenuIds.completed:
         return const CompletedOrdersScreen(key: ValueKey(AppMenuIds.completed));
-      case AppMenuIds.cloudOrders:
-        return const CloudOrdersScreen(key: ValueKey(AppMenuIds.cloudOrders));
-      case AppMenuIds.cloudCash:
-        return const CloudCashScreen(key: ValueKey(AppMenuIds.cloudCash));
       default:
         return const Center(child: Text("Выберите экран", style: TextStyle(color: AppColors.textMuted)));
     }
@@ -694,7 +715,12 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
               afterTap?.call();
               await runWithPulseHighlight(
                 _pulseSearch,
-                () => showDialog(context: context, builder: (context) => const SearchDialog()),
+                () => showDialog(
+                  context: context,
+                  builder: (context) => CloudMode.enabled
+                      ? const CloudSearchDialog()
+                      : const SearchDialog(),
+                ),
               );
             },
             borderRadius: BorderRadius.circular(12),
@@ -1484,7 +1510,12 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             ConnStatusDot(onTap: () => showConnStatusSheet(context)),
             IconButton(
               tooltip: 'Поиск',
-              onPressed: () => showDialog(context: context, builder: (_) => const SearchDialog()),
+              onPressed: () => showDialog(
+                context: context,
+                builder: (_) => CloudMode.enabled
+                    ? const CloudSearchDialog()
+                    : const SearchDialog(),
+              ),
               icon: const Icon(Icons.search, color: AppColors.primary),
             ),
           ],

@@ -53,6 +53,64 @@ class CrmApi {
     return CrmClient.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
+  Future<CrmClient> patchClient(int id, Map<String, dynamic> body) async {
+    final r = await http
+        .patch(_u('/crm/clients/$id'), headers: _headers(), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmClient.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<CrmMaster> createMaster({required String name, String role = 'Универсал'}) async {
+    final r = await http
+        .post(
+          _u('/crm/masters'),
+          headers: _headers(),
+          body: jsonEncode({'name': name, 'role': role}),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmMaster.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<CrmMaster> patchMaster(int id, Map<String, dynamic> body) async {
+    final r = await http
+        .patch(_u('/crm/masters/$id'), headers: _headers(), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmMaster.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<CrmService> createService({
+    required String name,
+    String category = 'Прочее',
+    double price = 0,
+    String workshop = '',
+  }) async {
+    final r = await http
+        .post(
+          _u('/crm/services'),
+          headers: _headers(),
+          body: jsonEncode({
+            'name': name,
+            'category': category,
+            'price': price,
+            'workshop': workshop,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmService.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<CrmService> patchService(int id, Map<String, dynamic> body) async {
+    final r = await http
+        .patch(_u('/crm/services/$id'), headers: _headers(), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmService.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
   Future<List<CrmCar>> listCars({int? clientId}) async {
     final q = clientId == null ? null : {'client_id': '$clientId'};
     final r = await http.get(_u('/crm/cars', q), headers: _headers()).timeout(const Duration(seconds: 15));
@@ -96,6 +154,7 @@ class CrmApi {
     required List<CrmOrderItem> items,
     String notes = '',
     String status = 'Принят в работу',
+    String dueDate = '',
     List<int> masterIds = const [],
   }) async {
     final r = await http
@@ -107,6 +166,7 @@ class CrmApi {
             'car_id': carId,
             'status': status,
             'notes': notes,
+            'due_date': dueDate,
             'master_ids': masterIds,
             'items': items.map((e) => e.toJson()).toList(),
           }),
