@@ -950,7 +950,10 @@ class CloudDbBridge {
     if (o == null) return;
     final item = o.items.firstWhere((i) => i.id == itemId);
     if (_isZoneHeader(item.name) && item.parentId == null) {
-      // CASCADE на сервере удалит детей
+      final kids = o.items.where((i) => i.parentId == itemId).toList();
+      for (final k in kids) {
+        if (k.id != null) await _crm.deleteOrderItem(o.id, k.id!);
+      }
       await _crm.deleteOrderItem(o.id, itemId);
       await _refreshOrder(o.id);
       return;

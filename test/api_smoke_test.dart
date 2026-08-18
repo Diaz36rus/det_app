@@ -570,9 +570,9 @@ void main() {
     expect(patched['end_time'], '${day}T14:30:00');
   });
 
-  test('CRM zone package parent_id wrap/tint (needs API 0.9+)', () async {
+  test('CRM zone package parent_id wrap/tint (needs API 0.12+)', () async {
     final ver = await apiVersion();
-    if (!_atLeast(ver, 0, 9)) {
+    if (!_atLeast(ver, 0, 12)) {
       print('SKIP zone-package: API $ver');
       return;
     }

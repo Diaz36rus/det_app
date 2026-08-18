@@ -569,6 +569,10 @@ def delete_order_item(
     row = next((it for it in order.items if it.id == item_id), None)
     if row is None:
         raise HTTPException(status_code=404, detail="Позиция не найдена")
+    # Пакет оклейки/тонировки: шапка удаляет все зоны (FK CASCADE на старых БД может не быть).
+    children = [it for it in list(order.items) if it.parent_id == item_id]
+    for child in children:
+        db.delete(child)
     db.delete(row)
     db.flush()
     db.refresh(order)
