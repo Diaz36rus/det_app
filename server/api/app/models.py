@@ -416,6 +416,14 @@ class CashFlow(Base):
     method: Mapped[str] = mapped_column(String(40), default="Наличные", nullable=False)
     description: Mapped[str] = mapped_column(Text, default="", nullable=False)
     note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    counterparty: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("crm_masters.id"), nullable=True)
+    inventory_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crm_inventory_items.id"), nullable=True
+    )
+    inventory_qty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("crm_orders.id"), nullable=True)
+    template_key: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 

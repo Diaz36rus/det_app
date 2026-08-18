@@ -51,6 +51,8 @@ class CloudCashShift {
   final int branchId;
   final String status;
   final String note;
+  final DateTime? openedAt;
+  final DateTime? closedAt;
   final List<CloudCashShiftBalance> balances;
 
   const CloudCashShift({
@@ -58,21 +60,51 @@ class CloudCashShift {
     required this.branchId,
     required this.status,
     required this.note,
+    this.openedAt,
+    this.closedAt,
     this.balances = const [],
   });
 
   bool get isOpen => status == 'open';
 
-  factory CloudCashShift.fromJson(Map<String, dynamic> j) => CloudCashShift(
-        id: (j['id'] as num).toInt(),
-        branchId: (j['branch_id'] as num).toInt(),
-        status: j['status']?.toString() ?? '',
-        note: j['note']?.toString() ?? '',
-        balances: (j['balances'] as List?)
-                ?.map((e) => CloudCashShiftBalance.fromJson(e as Map<String, dynamic>))
-                .toList() ??
-            const [],
-      );
+  factory CloudCashShift.fromJson(Map<String, dynamic> j) {
+    DateTime? parse(String key) {
+      final raw = j[key]?.toString();
+      if (raw == null || raw.isEmpty) return null;
+      return DateTime.tryParse(raw);
+    }
+
+    return CloudCashShift(
+      id: (j['id'] as num).toInt(),
+      branchId: (j['branch_id'] as num).toInt(),
+      status: j['status']?.toString() ?? '',
+      note: j['note']?.toString() ?? '',
+      openedAt: parse('opened_at'),
+      closedAt: parse('closed_at'),
+      balances: (j['balances'] as List?)
+              ?.map((e) => CloudCashShiftBalance.fromJson(e as Map<String, dynamic>))
+              .toList() ??
+          const [],
+    );
+  }
+
+  Map<String, dynamic> toLocalMap() {
+    double? totalDiff;
+    for (final b in balances) {
+      if (b.fact != null && b.expected != null) {
+        totalDiff = (totalDiff ?? 0) + (b.fact! - b.expected!);
+      }
+    }
+    return {
+      'id': id,
+      'status': status,
+      'note': note,
+      'branch_id': branchId,
+      'opened_at': openedAt?.toIso8601String() ?? '',
+      'closed_at': closedAt?.toIso8601String() ?? '',
+      if (totalDiff != null) 'difference': totalDiff,
+    };
+  }
 }
 
 class CloudCashJournalEntry {
@@ -86,6 +118,8 @@ class CloudCashJournalEntry {
   final int? orderId;
   final bool isVoided;
   final DateTime? createdAt;
+  final String category;
+  final String registerName;
 
   const CloudCashJournalEntry({
     required this.kind,
@@ -98,6 +132,8 @@ class CloudCashJournalEntry {
     this.orderId,
     this.isVoided = false,
     this.createdAt,
+    this.category = '',
+    this.registerName = '',
   });
 
   factory CloudCashJournalEntry.fromJson(Map<String, dynamic> j) {
@@ -117,6 +153,8 @@ class CloudCashJournalEntry {
       orderId: (j['order_id'] as num?)?.toInt(),
       isVoided: j['is_voided'] == true,
       createdAt: at,
+      category: j['category']?.toString() ?? '',
+      registerName: j['register_name']?.toString() ?? '',
     );
   }
 }

@@ -510,16 +510,11 @@ class CloudDbBridge {
   Future<Map<String, dynamic>?> getCurrentShift() async {
     final s = await _cash.currentShift();
     if (s == null || !s.isOpen) return null;
-    return {
-      'id': s.id,
-      'status': 'open',
-      'note': s.note,
-      'branch_id': s.branchId,
-    };
+    return s.toLocalMap();
   }
 
   Future<List<Map<String, dynamic>>> getCashJournal(String start, String end) async {
-    final journal = await _cash.journal();
+    final journal = await _cash.journal(from: start, to: end);
     return journal.map(_journalToMap).toList();
   }
 
@@ -528,20 +523,33 @@ class CloudDbBridge {
     return {
       'id': e.id,
       'kind': e.kind,
+      'source': e.kind,
       'type': isPayment ? 'Приход' : (e.flowType ?? 'Приход'),
       'amount': e.amount,
       'method': e.method.isEmpty ? 'Наличные' : e.method,
-      'category': '',
+      'category': e.category.isEmpty ? (isPayment ? 'Оплата заказа' : 'Прочее') : e.category,
       'description': e.title,
+      'title': e.title,
       'created_at': e.createdAt?.toIso8601String() ?? '',
-      'register_name': '',
+      'register_name': e.registerName,
       'order_id': e.orderId,
+      'shift_id': e.shiftId,
       'is_voided': e.isVoided ? 1 : 0,
     };
   }
 
   Future<List<Map<String, dynamic>>> getShiftRegisterSnapshots(int shiftId) async {
-    final s = await _cash.currentShift();
+    CloudCashShift? s;
+    try {
+      final cur = await _cash.currentShift();
+      if (cur != null && cur.id == shiftId) {
+        s = cur;
+      } else {
+        s = await _cash.getShift(shiftId);
+      }
+    } catch (_) {
+      s = await _cash.currentShift();
+    }
     if (s == null) return getCashRegisters();
     return s.balances
         .map(
@@ -552,6 +560,7 @@ class CloudDbBridge {
             'opening': b.opening,
             'expected': b.expected ?? b.opening,
             'fact': b.fact,
+            if (b.fact != null && b.expected != null) 'difference': b.fact! - b.expected!,
           },
         )
         .toList();
@@ -1310,6 +1319,162 @@ class CloudDbBridge {
     if (existing != null && existing.isOpen) return existing.id;
     final s = await _cash.openShift(openings: openings, note: note);
     return s.id;
+  }
+
+  Future<void> closeCashShift(
+    int shiftId,
+    double factCash, {
+    String note = '',
+    Map<int, double>? facts,
+  }) async {
+    var resolved = facts;
+    if (resolved == null || resolved.isEmpty) {
+      final snaps = await getShiftRegisterSnapshots(shiftId);
+      resolved = {};
+      for (final s in snaps) {
+        final rid = (s['id'] as num).toInt();
+        final expected = (s['expected'] as num?)?.toDouble() ?? 0;
+        final moneyType = s['money_type']?.toString() ?? '';
+        resolved[rid] = moneyType == 'Наличные' ? factCash : expected;
+      }
+    }
+    await _cash.closeShift(shiftId, facts: resolved, note: note);
+  }
+
+  Future<List<Map<String, dynamic>>> getRecentShifts({int limit = 20}) async {
+    final list = await _cash.listShifts(limit: limit);
+    return list.map((s) => s.toLocalMap()).toList();
+  }
+
+  Future<Map<String, dynamic>?> getCashShiftById(int shiftId) async {
+    try {
+      final s = await _cash.getShift(shiftId);
+      return s.toLocalMap();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getCashJournalForShift(int shiftId) async {
+    final journal = await _cash.journal(shiftId: shiftId);
+    return journal.map(_journalToMap).toList();
+  }
+
+  Map<String, dynamic> _flowToLocal(Map<String, dynamic> f) {
+    var created = f['created_at']?.toString() ?? '';
+    if (created.length >= 16) {
+      created = created.substring(0, 16).replaceFirst('T', ' ');
+    }
+    return {
+      'id': (f['id'] as num).toInt(),
+      'type': f['type']?.toString() ?? '',
+      'amount': (f['amount'] as num?)?.toDouble() ?? 0,
+      'description': f['description']?.toString() ?? '',
+      'category': f['category']?.toString() ?? 'Прочее',
+      'method': f['method']?.toString() ?? 'Наличные',
+      'register_id': (f['register_id'] as num?)?.toInt(),
+      'shift_id': (f['shift_id'] as num?)?.toInt(),
+      'counterparty': f['counterparty']?.toString() ?? '',
+      'master_id': (f['master_id'] as num?)?.toInt(),
+      'inventory_id': (f['inventory_id'] as num?)?.toInt(),
+      'inventory_qty': (f['inventory_qty'] as num?)?.toDouble() ?? 0,
+      'order_id': (f['order_id'] as num?)?.toInt(),
+      'template_key': f['template_key']?.toString() ?? '',
+      'note': f['note']?.toString() ?? '',
+      'created_at': created,
+      'master_name': f['master_name']?.toString(),
+      'inventory_name': f['inventory_name']?.toString(),
+    };
+  }
+
+  Future<int> addCashFlow(
+    String type,
+    double amount,
+    String description, {
+    String category = 'Прочее',
+    String method = 'Наличные',
+    int? shiftId,
+    int? registerId,
+    String counterparty = '',
+    int? masterId,
+    int? inventoryId,
+    double inventoryQty = 0,
+    int? orderId,
+    String templateKey = '',
+    String note = '',
+    String inventoryBrand = '',
+  }) async {
+    final created = await _cash.createFlow(
+      type: type,
+      amount: amount,
+      method: method,
+      category: category,
+      description: description,
+      note: note,
+      registerId: registerId,
+      counterparty: counterparty,
+      masterId: masterId,
+      inventoryId: inventoryId,
+      inventoryQty: inventoryQty,
+      orderId: orderId,
+      templateKey: templateKey,
+    );
+    return (created['id'] as num).toInt();
+  }
+
+  Future<Map<String, dynamic>?> getCashFlowById(int id) async {
+    try {
+      return _flowToLocal(await _cash.getFlow(id));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> updateCashFlow(
+    int id, {
+    required String type,
+    required double amount,
+    required String description,
+    String category = 'Прочее',
+    String method = 'Наличные',
+    int? registerId,
+    String counterparty = '',
+    int? masterId,
+    int? inventoryId,
+    double inventoryQty = 0,
+    String templateKey = '',
+    String note = '',
+    String inventoryBrand = '',
+  }) async {
+    try {
+      await _cash.updateFlow(
+        id,
+        type: type,
+        amount: amount,
+        description: description,
+        category: category,
+        method: method,
+        registerId: registerId,
+        counterparty: counterparty,
+        masterId: masterId,
+        inventoryId: inventoryId,
+        inventoryQty: inventoryQty,
+        templateKey: templateKey,
+        note: note,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> deleteCashFlow(int id) async {
+    try {
+      await _cash.deleteFlow(id);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   // Wrap / tint packages

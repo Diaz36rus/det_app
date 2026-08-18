@@ -3267,6 +3267,10 @@ class DatabaseHelper {
     String note = '',
     Map<int, double>? facts,
   }) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.closeCashShift(shiftId, factCash, note: note, facts: facts);
+      return;
+    }
     final db = await database;
     final snaps = await getShiftRegisterSnapshots(shiftId);
     final now = DateTime.now().toIso8601String().substring(0, 16);
@@ -3312,6 +3316,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getRecentShifts({int limit = 20}) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getRecentShifts(limit: limit);
     final db = await database;
     return await db.query('cash_shifts', orderBy: 'id DESC', limit: limit);
   }
@@ -3333,6 +3338,25 @@ class DatabaseHelper {
     String note = '',
     String inventoryBrand = '',
   }) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.addCashFlow(
+        type,
+        amount,
+        description,
+        category: category,
+        method: method,
+        shiftId: shiftId,
+        registerId: registerId,
+        counterparty: counterparty,
+        masterId: masterId,
+        inventoryId: inventoryId,
+        inventoryQty: inventoryQty,
+        orderId: orderId,
+        templateKey: templateKey,
+        note: note,
+        inventoryBrand: inventoryBrand,
+      );
+    }
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     final sid = shiftId ?? (await getCurrentShift())?['id'] as int?;
@@ -3499,6 +3523,7 @@ class DatabaseHelper {
   }
 
   Future<Map<String, dynamic>?> getCashFlowById(int id) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCashFlowById(id);
     final db = await database;
     final rows = await db.rawQuery('''
       SELECT cash_flow.*, masters.name as master_name, inventory.name as inventory_name
@@ -3528,6 +3553,24 @@ class DatabaseHelper {
     String note = '',
     String inventoryBrand = '',
   }) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.updateCashFlow(
+        id,
+        type: type,
+        amount: amount,
+        description: description,
+        category: category,
+        method: method,
+        registerId: registerId,
+        counterparty: counterparty,
+        masterId: masterId,
+        inventoryId: inventoryId,
+        inventoryQty: inventoryQty,
+        templateKey: templateKey,
+        note: note,
+        inventoryBrand: inventoryBrand,
+      );
+    }
     final db = await database;
     final existing = await db.query('cash_flow', where: 'id = ?', whereArgs: [id], limit: 1);
     if (existing.isEmpty) return false;
@@ -3579,6 +3622,7 @@ class DatabaseHelper {
   }
 
   Future<bool> deleteCashFlow(int id) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.deleteCashFlow(id);
     final db = await database;
     final existing = await db.query('cash_flow', where: 'id = ?', whereArgs: [id], limit: 1);
     if (existing.isEmpty) return false;
@@ -3715,6 +3759,7 @@ class DatabaseHelper {
 
   /// Подсказка: сумма работ мастера за период (по master_ids в order_items).
   Future<double> suggestMasterPayroll(int masterId, String startDate, String endDate) async {
+    if (CloudDbBridge.active) return 0;
     final db = await database;
     final rows = await db.rawQuery('''
       SELECT COALESCE(SUM(price), 0) as total
@@ -4286,6 +4331,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getCashJournalForShift(int shiftId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCashJournalForShift(shiftId);
     final db = await database;
     return await db.rawQuery('''
       SELECT
@@ -4325,6 +4371,7 @@ class DatabaseHelper {
   }
 
   Future<Map<String, dynamic>?> getCashShiftById(int shiftId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCashShiftById(shiftId);
     final db = await database;
     final rows = await db.query('cash_shifts', where: 'id = ?', whereArgs: [shiftId], limit: 1);
     if (rows.isEmpty) return null;

@@ -4,22 +4,22 @@ Det App — план внедрения (кратко)
 
 A  Страховка: тесты + домашний смоук + журнал багов   ← ГОТОВО (авто)
 B  Логины в приложении                                ← ГОТОВО
-C  Полный онлайн → выключить LAN                      ← ГОТОВО (API 0.14.0)
+C  Полный онлайн → выключить LAN                      ← ГОТОВО (API 0.15.0)
 D  Визуал / адаптация мобилки (кусками параллельно)
 E  Сайт + фичи роста (в ящике)
 
 Блок C — онлайн + этапы
 -----------------------
 Postgres на Cali. Signed-in company → старые экраны через CloudDbBridge.
-API 0.14.0: этапы 1–5 (карточка…рулоны + рецепты/склад).
+API 0.15.0: этапы 1–6 (карточка…рулоны + рецепты/склад + касса).
 
 Демо: owner@demo.det-app.ru / 9000000002
 Деплой: tools\deploy_cali.ps1
 Автотесты: tools\run_regression.ps1 (local + api smoke)
 
-Дальше (этапы 6–7): касса 1:1, статистика.
+Дальше (этап 7): статистика + импорт + финальный polish.
 
-API 0.14.0: recipes CRUD + deduct/restore; PATCH inventory; inventory moves list.
+API 0.15.0: full cash — close shift, flows CRUD + inventory stock-in, journal filters, shifts list/get.
 
 Блок A — как гонять
 -------------------

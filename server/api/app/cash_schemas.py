@@ -54,6 +54,28 @@ class CashFlowCreate(BaseModel):
     register_id: int | None = None
     description: str = Field(default="", max_length=2000)
     note: str = Field(default="", max_length=2000)
+    counterparty: str = Field(default="", max_length=200)
+    master_id: int | None = None
+    inventory_id: int | None = None
+    inventory_qty: float = 0
+    order_id: int | None = None
+    template_key: str = Field(default="", max_length=80)
+
+
+class CashFlowUpdate(BaseModel):
+    type: str | None = Field(default=None, min_length=1, max_length=20)
+    amount: float | None = Field(default=None, gt=0)
+    category: str | None = Field(default=None, max_length=80)
+    method: str | None = Field(default=None, max_length=40)
+    register_id: int | None = None
+    description: str | None = Field(default=None, max_length=2000)
+    note: str | None = Field(default=None, max_length=2000)
+    counterparty: str | None = Field(default=None, max_length=200)
+    master_id: int | None = None
+    inventory_id: int | None = None
+    inventory_qty: float | None = None
+    order_id: int | None = None
+    template_key: str | None = Field(default=None, max_length=80)
 
 
 class CashFlowOut(BaseModel):
@@ -66,7 +88,15 @@ class CashFlowOut(BaseModel):
     shift_id: int
     description: str
     note: str
+    counterparty: str = ""
+    master_id: int | None = None
+    inventory_id: int | None = None
+    inventory_qty: float = 0
+    order_id: int | None = None
+    template_key: str = ""
     created_at: datetime | None = None
+    master_name: str | None = None
+    inventory_name: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -103,3 +133,5 @@ class CashJournalEntry(BaseModel):
     order_id: int | None = None
     flow_type: str | None = None
     is_voided: bool = False
+    category: str = ""
+    register_name: str = ""

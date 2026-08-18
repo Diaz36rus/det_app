@@ -886,4 +886,144 @@ void main() {
     expect((patched['quantity'] as num).toDouble(), 4);
     expect((patched['min_qty'] as num).toDouble(), 5);
   });
+
+  test('Cash flows CRUD + inventory purchase (needs API 0.15+)', () async {
+    final ver = await apiVersion();
+    if (!_atLeast(ver, 0, 15)) {
+      print('SKIP cash-flows: API $ver (need 0.15.0+)');
+      return;
+    }
+    final token = await ownerToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+
+    final cur = await http
+        .get(Uri.parse('$base/cash/shifts/current'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(cur.statusCode, 200, reason: utf8.decode(cur.bodyBytes));
+    Map<String, dynamic>? shift;
+    if (cur.body.trim().isNotEmpty && cur.body.trim() != 'null') {
+      shift = jsonDecode(utf8.decode(cur.bodyBytes)) as Map<String, dynamic>;
+    }
+    if (shift == null || shift['status'] != 'open') {
+      final open = await http
+          .post(
+            Uri.parse('$base/cash/shifts/open'),
+            headers: headers,
+            body: jsonEncode({'openings': {}, 'note': 'smoke-flow'}),
+          )
+          .timeout(const Duration(seconds: 15));
+      expect(open.statusCode, 200, reason: utf8.decode(open.bodyBytes));
+      shift = jsonDecode(utf8.decode(open.bodyBytes)) as Map<String, dynamic>;
+    }
+    final shiftId = (shift!['id'] as num).toInt();
+
+    final invR = await http
+        .post(
+          Uri.parse('$base/crm/inventory'),
+          headers: headers,
+          body: jsonEncode({
+            'name': 'Cash inv $stamp',
+            'unit': 'шт',
+            'category': 'Прочее',
+            'quantity': 1,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(invR.statusCode, 200, reason: utf8.decode(invR.bodyBytes));
+    final invId = (jsonDecode(utf8.decode(invR.bodyBytes))['id'] as num).toInt();
+
+    final flow = await http
+        .post(
+          Uri.parse('$base/cash/flows'),
+          headers: headers,
+          body: jsonEncode({
+            'type': 'Расход',
+            'amount': 500,
+            'category': 'Закупка',
+            'method': 'Наличные',
+            'description': 'Smoke purchase $stamp',
+            'inventory_id': invId,
+            'inventory_qty': 3,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(flow.statusCode, 200, reason: utf8.decode(flow.bodyBytes));
+    final flowMap = jsonDecode(utf8.decode(flow.bodyBytes)) as Map<String, dynamic>;
+    final flowId = (flowMap['id'] as num).toInt();
+    expect(flowMap['inventory_id'], invId);
+
+    final gotFlow = await http
+        .get(Uri.parse('$base/cash/flows/$flowId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(gotFlow.statusCode, 200, reason: utf8.decode(gotFlow.bodyBytes));
+
+    final invList = await http
+        .get(Uri.parse('$base/crm/inventory'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final items = jsonDecode(utf8.decode(invList.bodyBytes)) as List;
+    final row = items.cast<Map>().firstWhere((e) => e['id'] == invId);
+    expect((row['quantity'] as num).toDouble(), 4);
+
+    final patch = await http
+        .patch(
+          Uri.parse('$base/cash/flows/$flowId'),
+          headers: headers,
+          body: jsonEncode({
+            'type': 'Расход',
+            'amount': 600,
+            'description': 'Smoke purchase patched $stamp',
+            'category': 'Закупка',
+            'method': 'Наличные',
+            'inventory_id': invId,
+            'inventory_qty': 2,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(patch.statusCode, 200, reason: utf8.decode(patch.bodyBytes));
+
+    final afterPatch = await http
+        .get(Uri.parse('$base/crm/inventory'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final items2 = jsonDecode(utf8.decode(afterPatch.bodyBytes)) as List;
+    final row2 = items2.cast<Map>().firstWhere((e) => e['id'] == invId);
+    expect((row2['quantity'] as num).toDouble(), 3);
+
+    final j = await http
+        .get(
+          Uri.parse('$base/cash/journal?shift_id=$shiftId'),
+          headers: headers,
+        )
+        .timeout(const Duration(seconds: 15));
+    expect(j.statusCode, 200, reason: utf8.decode(j.bodyBytes));
+    final journal = jsonDecode(utf8.decode(j.bodyBytes)) as List;
+    expect(
+      journal.any((e) => (e as Map)['kind'] == 'flow' && e['id'] == flowId),
+      isTrue,
+    );
+    expect(
+      journal.any((e) => (e as Map)['category'] == 'Закупка'),
+      isTrue,
+    );
+
+    final shifts = await http
+        .get(Uri.parse('$base/cash/shifts?limit=5'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(shifts.statusCode, 200, reason: utf8.decode(shifts.bodyBytes));
+
+    final del = await http
+        .delete(Uri.parse('$base/cash/flows/$flowId'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    expect(del.statusCode, 204, reason: utf8.decode(del.bodyBytes));
+
+    final afterDel = await http
+        .get(Uri.parse('$base/crm/inventory'), headers: headers)
+        .timeout(const Duration(seconds: 15));
+    final items3 = jsonDecode(utf8.decode(afterDel.bodyBytes)) as List;
+    final row3 = items3.cast<Map>().firstWhere((e) => e['id'] == invId);
+    expect((row3['quantity'] as num).toDouble(), 1);
+  });
 }
