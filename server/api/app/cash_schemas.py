@@ -14,6 +14,19 @@ class CashRegisterOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CashRegisterCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    money_type: str = Field(min_length=1, max_length=40)
+    sort_order: int = 100
+
+
+class CashRegisterUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    money_type: str | None = Field(default=None, min_length=1, max_length=40)
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+
 class CashShiftBalanceOut(BaseModel):
     register_id: int
     register_name: str | None = None
@@ -105,6 +118,12 @@ class CashPaymentCreate(BaseModel):
     order_id: int
     amount: float = Field(gt=0)
     method: str = Field(default="Наличные", max_length=40)
+    register_id: int | None = None
+
+
+class CashPaymentUpdate(BaseModel):
+    amount: float | None = Field(default=None, gt=0)
+    method: str | None = Field(default=None, max_length=40)
     register_id: int | None = None
 
 

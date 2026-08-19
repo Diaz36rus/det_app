@@ -354,9 +354,30 @@ class CrmServiceRecipe(Base):
     qty: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
 
 
+class CrmWorkshopRole(Base):
+    __tablename__ = "crm_workshop_roles"
+    __table_args__ = (UniqueConstraint("company_id", "name", name="uq_crm_workshop_role"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+
+
+class CrmPromocode(Base):
+    __tablename__ = "crm_promocodes"
+    __table_args__ = (UniqueConstraint("company_id", "code", name="uq_crm_promocode_code"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    code: Mapped[str] = mapped_column(String(80), nullable=False)
+    discount_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    discount_fixed: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
 class CashRegister(Base):
     __tablename__ = "cash_registers"
-    __table_args__ = (UniqueConstraint("company_id", "money_type", name="uq_cash_reg_company_type"),)
+    __table_args__ = (UniqueConstraint("company_id", "name", name="uq_cash_reg_company_name"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)

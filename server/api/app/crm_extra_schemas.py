@@ -213,3 +213,33 @@ class CrmStatsOut(BaseModel):
     revenue_by_day: list[dict] = []
     master_day: list[dict] = []
     master_day_date: str = ""
+
+
+class CrmWorkshopRoleCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+
+
+class CrmWorkshopRoleOut(BaseModel):
+    id: int
+    company_id: int
+    name: str
+
+    model_config = {"from_attributes": True}
+
+
+class CrmPromocodeCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=80)
+    discount_percent: float = 0
+    discount_fixed: float = 0
+    is_active: bool = True
+
+
+class CrmPromocodeOut(BaseModel):
+    id: int
+    company_id: int
+    code: str
+    discount_percent: float = 0
+    discount_fixed: float = 0
+    is_active: bool = True
+
+    model_config = {"from_attributes": True}

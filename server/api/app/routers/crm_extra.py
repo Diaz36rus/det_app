@@ -2,7 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
@@ -23,6 +23,8 @@ from app.crm_extra_schemas import (
     CrmOrderWrapFilmOut,
     CrmOrderWrapFilmsPut,
     CrmOrderWrapFilmsPutResult,
+    CrmPromocodeCreate,
+    CrmPromocodeOut,
     CrmRecipeApply,
     CrmRecipeApplyResult,
     CrmRecipeOut,
@@ -31,6 +33,8 @@ from app.crm_extra_schemas import (
     CrmServiceOut,
     CrmServiceUpdate,
     CrmStatsOut,
+    CrmWorkshopRoleCreate,
+    CrmWorkshopRoleOut,
     CrmWrapFilmOut,
 )
 from app.db import get_db
@@ -46,8 +50,10 @@ from app.models import (
     CrmMaster,
     CrmOrder,
     CrmOrderWrapFilm,
+    CrmPromocode,
     CrmService,
     CrmServiceRecipe,
+    CrmWorkshopRole,
     User,
 )
 from app.routers.crm import _company_id
@@ -1117,3 +1123,165 @@ def company_stats(
         master_day=master_day_rows,
         master_day_date=day,
     )
+
+
+# --- Workshop roles ---
+
+
+@router.get("/workshop-roles", response_model=list[CrmWorkshopRoleOut])
+def list_workshop_roles(
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    return list(
+        db.scalars(
+            select(CrmWorkshopRole)
+            .where(CrmWorkshopRole.company_id == cid)
+            .order_by(CrmWorkshopRole.name)
+        ).all()
+    )
+
+
+@router.post("/workshop-roles", response_model=CrmWorkshopRoleOut)
+def create_workshop_role(
+    body: CrmWorkshopRoleCreate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Пустое имя роли")
+    existing = db.scalar(
+        select(CrmWorkshopRole).where(
+            CrmWorkshopRole.company_id == cid, CrmWorkshopRole.name == name
+        )
+    )
+    if existing is not None:
+        return existing
+    row = CrmWorkshopRole(company_id=cid, name=name)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/workshop-roles/{role_id}", status_code=204)
+def delete_workshop_role_by_id(
+    role_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmWorkshopRole).where(
+            CrmWorkshopRole.id == role_id, CrmWorkshopRole.company_id == cid
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Роль не найдена")
+    db.delete(row)
+    db.commit()
+    return Response(status_code=204)
+
+
+@router.delete("/workshop-roles", status_code=204)
+def delete_workshop_role_by_name(
+    name: str = Query(..., min_length=1),
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmWorkshopRole).where(
+            CrmWorkshopRole.company_id == cid, CrmWorkshopRole.name == name.strip()
+        )
+    )
+    if row is not None:
+        db.delete(row)
+        db.commit()
+    return Response(status_code=204)
+
+
+# --- Promocodes ---
+
+
+@router.get("/promocodes", response_model=list[CrmPromocodeOut])
+def list_promocodes(
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    return list(
+        db.scalars(
+            select(CrmPromocode).where(CrmPromocode.company_id == cid).order_by(CrmPromocode.code)
+        ).all()
+    )
+
+
+@router.get("/promocodes/{code}", response_model=CrmPromocodeOut)
+def get_promocode(
+    code: str,
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmPromocode).where(
+            CrmPromocode.company_id == cid,
+            CrmPromocode.code == code.strip().upper(),
+            CrmPromocode.is_active.is_(True),
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Промокод не найден")
+    return row
+
+
+@router.post("/promocodes", response_model=CrmPromocodeOut)
+def upsert_promocode(
+    body: CrmPromocodeCreate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    code = body.code.strip().upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Пустой код")
+    row = db.scalar(
+        select(CrmPromocode).where(CrmPromocode.company_id == cid, CrmPromocode.code == code)
+    )
+    if row is None:
+        row = CrmPromocode(
+            company_id=cid,
+            code=code,
+            discount_percent=float(body.discount_percent or 0),
+            discount_fixed=float(body.discount_fixed or 0),
+            is_active=bool(body.is_active),
+        )
+        db.add(row)
+    else:
+        row.discount_percent = float(body.discount_percent or 0)
+        row.discount_fixed = float(body.discount_fixed or 0)
+        row.is_active = bool(body.is_active)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/promocodes/{promo_id}", status_code=204)
+def delete_promocode(
+    promo_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmPromocode).where(CrmPromocode.id == promo_id, CrmPromocode.company_id == cid)
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Промокод не найден")
+    db.delete(row)
+    db.commit()
+    return Response(status_code=204)

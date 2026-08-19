@@ -28,7 +28,10 @@ from app.cash_schemas import (
     CashJournalEntry,
     CashPaymentCreate,
     CashPaymentOut,
+    CashPaymentUpdate,
+    CashRegisterCreate,
     CashRegisterOut,
+    CashRegisterUpdate,
     CashShiftClose,
     CashShiftOpen,
     CashShiftOut,
@@ -430,6 +433,79 @@ def list_registers(
 ):
     company_id = _company_id(user)
     return ensure_registers(db, company_id)
+
+
+@router.post("/registers", response_model=CashRegisterOut)
+def create_register(
+    body: CashRegisterCreate,
+    user: User = Depends(require_permissions("cash.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    ensure_registers(db, company_id)
+    name = body.name.strip()
+    money_type = body.money_type.strip()
+    if not name or not money_type:
+        raise HTTPException(status_code=400, detail="name и money_type обязательны")
+    existing = db.scalar(
+        select(CashRegister).where(
+            CashRegister.company_id == company_id,
+            CashRegister.name == name,
+        )
+    )
+    if existing is not None:
+        raise HTTPException(status_code=400, detail="Касса с таким именем уже есть")
+    row = CashRegister(
+        company_id=company_id,
+        name=name,
+        money_type=money_type,
+        is_active=True,
+        sort_order=int(body.sort_order),
+    )
+    db.add(row)
+    db.flush()
+    branch_id = _default_branch_id(db, user, company_id)
+    shift = _current_open_shift(db, company_id, branch_id)
+    if shift is not None:
+        db.add(
+            CashShiftBalance(
+                shift_id=shift.id,
+                register_id=row.id,
+                opening=0.0,
+            )
+        )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.patch("/registers/{register_id}", response_model=CashRegisterOut)
+def update_register(
+    register_id: int,
+    body: CashRegisterUpdate,
+    user: User = Depends(require_permissions("cash.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    row = db.scalar(
+        select(CashRegister).where(
+            CashRegister.id == register_id, CashRegister.company_id == company_id
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Касса не найдена")
+    data = body.model_dump(exclude_unset=True)
+    if "name" in data and data["name"] is not None:
+        row.name = data["name"].strip()
+    if "money_type" in data and data["money_type"] is not None:
+        row.money_type = data["money_type"].strip()
+    if "is_active" in data and data["is_active"] is not None:
+        row.is_active = bool(data["is_active"])
+    if "sort_order" in data and data["sort_order"] is not None:
+        row.sort_order = int(data["sort_order"])
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.get("/shifts/current", response_model=CashShiftOut | None)
@@ -929,6 +1005,62 @@ def list_payments(
         q = q.where(CashPayment.is_voided.is_(False))
     rows = db.scalars(q.order_by(CashPayment.id.desc())).all()
     return list(rows)
+
+
+@router.patch("/payments/{payment_id}", response_model=CashPaymentOut)
+def update_payment(
+    payment_id: int,
+    body: CashPaymentUpdate,
+    user: User = Depends(require_permissions("cash.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    row = db.scalar(
+        select(CashPayment).where(
+            CashPayment.id == payment_id, CashPayment.company_id == company_id
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Оплата не найдена")
+    if row.is_voided:
+        raise HTTPException(status_code=400, detail="Нельзя менять отменённую оплату")
+    shift = db.get(CashShift, row.shift_id)
+    if shift is None or shift.status != "open":
+        raise HTTPException(status_code=400, detail="Править можно только в открытой смене")
+
+    data = body.model_dump(exclude_unset=True)
+    old_amount = float(row.amount or 0)
+    new_amount = float(data["amount"]) if "amount" in data and data["amount"] is not None else old_amount
+    if new_amount <= 0:
+        raise HTTPException(status_code=400, detail="amount должен быть > 0")
+
+    if "register_id" in data and data["register_id"] is not None:
+        reg = db.scalar(
+            select(CashRegister).where(
+                CashRegister.id == data["register_id"], CashRegister.company_id == company_id
+            )
+        )
+        if reg is None:
+            raise HTTPException(status_code=404, detail="Касса не найдена")
+        row.register_id = reg.id
+        if "method" not in data or not data.get("method"):
+            row.method = reg.money_type
+    elif "method" in data and data["method"]:
+        reg = _register_by_method(db, company_id, data["method"])
+        row.register_id = reg.id
+        row.method = data["method"]
+
+    if "method" in data and data["method"] is not None:
+        row.method = data["method"]
+
+    delta = new_amount - old_amount
+    row.amount = new_amount
+    order = db.get(CrmOrder, row.crm_order_id)
+    if order is not None and abs(delta) > 0.0001:
+        order.paid_amount = max(0.0, float(order.paid_amount or 0) + delta)
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.delete("/payments/{payment_id}", response_model=CashPaymentOut)

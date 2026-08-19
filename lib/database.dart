@@ -1429,6 +1429,7 @@ class DatabaseHelper {
   }
 
   Future<Map<String, dynamic>?> getPromocode(String code) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getPromocode(code);
     final db = await database;
     final rows = await db.query(
       'promocodes',
@@ -1439,11 +1440,17 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getPromocodes() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getPromocodes();
     final db = await database;
     return await db.query('promocodes', orderBy: 'code ASC');
   }
 
   Future<void> upsertPromocode(String code, double percent, double fixed) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.upsertPromocode(code, percent, fixed);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.insert(
       'promocodes',
@@ -1458,6 +1465,11 @@ class DatabaseHelper {
   }
 
   Future<void> deletePromocode(int id) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deletePromocode(id);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.delete('promocodes', where: 'id = ?', whereArgs: [id]);
   }
@@ -1506,7 +1518,9 @@ class DatabaseHelper {
 
   /// Причины, почему нельзя поставить «Выдан». Пустой список = можно.
   Future<List<String>> validateIssueOrder(int orderId) async {
-    if (CloudDbBridge.active) return [];
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.validateIssueOrder(orderId);
+    }
     final db = await database;
     // Подтянуть шапки пакетов по зонам (старые заказы могли «висеть» незакрытыми).
     final packageHeaders = await db.query(
@@ -2464,6 +2478,16 @@ class DatabaseHelper {
     double metersPerRoll = 0,
     String unit = FilmUnits.meters,
   }) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addWrapFilm(
+        name,
+        category: category,
+        metersPerRoll: metersPerRoll,
+        unit: unit,
+      );
+      bumpDataRevision();
+      return id;
+    }
     final trimmed = name.trim();
     if (trimmed.isEmpty) throw ArgumentError.value(name, 'name', 'Название плёнки не может быть пустым');
     final filmUnit = FilmUnits.normalize(unit);
@@ -2581,6 +2605,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getOrdersByPlate(String plate) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrdersByPlate(plate);
     final db = await database;
     final normalized = plate.trim();
     if (normalized.isEmpty) return [];
@@ -2724,6 +2749,16 @@ class DatabaseHelper {
     int? registerId,
   }) async {
     if (amount <= 0) return false;
+    if (CloudDbBridge.active) {
+      final ok = await CloudDbBridge.instance.updatePayment(
+        paymentId,
+        amount: amount,
+        method: method,
+        registerId: registerId,
+      );
+      if (ok) bumpDataRevision();
+      return ok;
+    }
     final db = await database;
     final rows = await db.query('payments', where: 'id = ?', whereArgs: [paymentId], limit: 1);
     if (rows.isEmpty) return false;
@@ -2821,6 +2856,7 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getClientHistory(int clientId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getClientHistory(clientId);
     final db = await database;
     return await db.rawQuery('''
       SELECT orders.id, orders.created_at, orders.notes, orders.price, orders.paid_amount,
@@ -2840,6 +2876,9 @@ class DatabaseHelper {
     required int clientId,
     int? carId,
   }) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.getLastOrderCartLines(clientId: clientId, carId: carId);
+    }
     final db = await database;
     final where = carId != null ? 'client_id = ? AND car_id = ?' : 'client_id = ?';
     final args = carId != null ? <Object>[clientId, carId] : <Object>[clientId];
@@ -3074,11 +3113,21 @@ class DatabaseHelper {
   }
 
   Future<void> addRole(String name) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.addRole(name);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.insert('roles', {'name': name}, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 
   Future<void> deleteRole(String name) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteRole(name);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.delete('roles', where: 'name = ?', whereArgs: [name]);
   }
@@ -3108,6 +3157,11 @@ class DatabaseHelper {
   }
 
   Future<int> addCashRegister(String name, String moneyType, {int sortOrder = 100}) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addCashRegister(name, moneyType, sortOrder: sortOrder);
+      bumpDataRevision();
+      return id;
+    }
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 16);
     final id = await db.insert('cash_registers', {
@@ -3134,6 +3188,11 @@ class DatabaseHelper {
   }
 
   Future<void> setCashRegisterActive(int registerId, bool active) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.setCashRegisterActive(registerId, active);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.update(
       'cash_registers',
@@ -3777,6 +3836,7 @@ class DatabaseHelper {
   }
 
   Future<double> getClientDebtTotal(int clientId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getClientDebtTotal(clientId);
     final db = await database;
     final rows = await db.rawQuery('''
       SELECT COALESCE(SUM(CASE WHEN price - paid_amount > 0.01 THEN price - paid_amount ELSE 0 END), 0) as debt
@@ -3798,7 +3858,9 @@ class DatabaseHelper {
 
   /// Подсказка: сумма работ мастера за период (по master_ids в order_items).
   Future<double> suggestMasterPayroll(int masterId, String startDate, String endDate) async {
-    if (CloudDbBridge.active) return 0;
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.suggestMasterPayroll(masterId, startDate, endDate);
+    }
     final db = await database;
     final rows = await db.rawQuery('''
       SELECT COALESCE(SUM(price), 0) as total
@@ -4185,6 +4247,9 @@ class DatabaseHelper {
   }
 
   Future<List<String>> listInventoryBrands({String query = ''}) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.listInventoryBrands(query: query);
+    }
     final db = await database;
     final q = query.trim().toLowerCase();
     final rows = q.isEmpty
@@ -4200,6 +4265,9 @@ class DatabaseHelper {
 
   /// Сохраняет бренд в справочник (если новый). Возвращает нормализованное имя.
   Future<String> ensureInventoryBrand(String? raw) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.ensureInventoryBrand(raw);
+    }
     final name = InventoryBrands.normalize(raw);
     if (name.isEmpty) return '';
     final db = await database;

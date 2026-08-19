@@ -604,6 +604,77 @@ class CrmApi {
     return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
   }
 
+  Future<List<Map<String, dynamic>>> listWorkshopRoles() async {
+    final r = await http.get(_u('/crm/workshop-roles'), headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> createWorkshopRole(String name) async {
+    final r = await http
+        .post(
+          _u('/crm/workshop-roles'),
+          headers: _headers(),
+          body: jsonEncode({'name': name}),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
+  }
+
+  Future<void> deleteWorkshopRoleByName(String name) async {
+    final uri = _u('/crm/workshop-roles').replace(queryParameters: {'name': name});
+    final r = await http.delete(uri, headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+  }
+
+  Future<List<Map<String, dynamic>>> listPromocodes() async {
+    final r = await http.get(_u('/crm/promocodes'), headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>?> getPromocode(String code) async {
+    final enc = Uri.encodeComponent(code.trim().toUpperCase());
+    final r = await http.get(_u('/crm/promocodes/$enc'), headers: _headers()).timeout(const Duration(seconds: 15));
+    if (r.statusCode == 404) return null;
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
+  }
+
+  Future<Map<String, dynamic>> upsertPromocode({
+    required String code,
+    double percent = 0,
+    double fixed = 0,
+    bool isActive = true,
+  }) async {
+    final r = await http
+        .post(
+          _u('/crm/promocodes'),
+          headers: _headers(),
+          body: jsonEncode({
+            'code': code,
+            'discount_percent': percent,
+            'discount_fixed': fixed,
+            'is_active': isActive,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
+  }
+
+  Future<void> deletePromocode(int id) async {
+    final r = await http
+        .delete(_u('/crm/promocodes/$id'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+  }
+
   void _ensure(http.Response r) {
     if (r.statusCode >= 200 && r.statusCode < 300) return;
     var msg = 'Ошибка CRM (${r.statusCode})';

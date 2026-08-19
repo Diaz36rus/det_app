@@ -133,6 +133,16 @@ def ensure_user_phone_column() -> None:
             ("template_key", "VARCHAR(80) DEFAULT ''"),
         ]:
             conn.execute(text(f"ALTER TABLE cash_flows ADD COLUMN IF NOT EXISTS {col} {typ}"))
+        # Несколько касс с одним money_type (как в локальной SQLite).
+        conn.execute(
+            text("ALTER TABLE cash_registers DROP CONSTRAINT IF EXISTS uq_cash_reg_company_type")
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_cash_reg_company_name "
+                "ON cash_registers (company_id, name)"
+            )
+        )
 
 
 def _ensure_permissions(db: Session) -> dict[str, Permission]:

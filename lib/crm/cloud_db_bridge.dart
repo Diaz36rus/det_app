@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../cash_cloud/cash_cloud_api.dart';
 import '../cash_cloud/cash_cloud_models.dart';
 import 'cloud_mode.dart';
@@ -214,11 +216,67 @@ class CloudDbBridge {
         .toList();
   }
 
+  Future<List<String>> validateIssueOrder(int orderId) async {
+    await _ensureOrders();
+    final order = _orders[orderId];
+    if (order == null) return ['Заказ не найден'];
+
+    final reasons = <String>[];
+    final debt = order.price - order.paidAmount;
+    if (debt > 0.01) {
+      final debtStr = debt.toStringAsFixed(debt == debt.roundToDouble() ? 0 : 2);
+      reasons.add('Долг: $debtStr ₽');
+    }
+
+    final incomplete = order.items.where((it) {
+      if (it.isDone) return false;
+      final name = it.name.trim();
+      if ((name == 'Оклейка' || name == 'Тонировка') && it.parentId == null) return false;
+      return true;
+    }).toList();
+    if (incomplete.isNotEmpty) {
+      final labels = incomplete.map((w) {
+        final name = w.name.trim();
+        final ws = w.workshop.trim();
+        final base = name.isEmpty ? 'Без названия' : name;
+        if (ws.isNotEmpty) return '$base ($ws)';
+        return base;
+      }).toList();
+      reasons.add(
+        'Не выполнены работы (${labels.length}):\n'
+        '${labels.map((n) => '— $n').join('\n')}',
+      );
+    }
+
+    const handoverLabels = <String, String>{
+      'handover_notified': 'Клиент уведомлён о готовности',
+      'handover_works': 'Работы проверены (QC)',
+      'handover_inspect': 'Авто осмотрено с клиентом',
+      'handover_payment': 'Оплата проверена / закрыта',
+      'handover_keys': 'Ключи и документы переданы',
+    };
+    final handover = await getOrderHandover(orderId);
+    final missingHandover = handoverLabels.entries
+        .where((e) => (handover[e.key] as num?)?.toInt() != 1)
+        .map((e) => e.value)
+        .toList();
+    if (missingHandover.isNotEmpty) {
+      reasons.add(
+        'Чек-лист выдачи не заполнен (${missingHandover.length}):\n'
+        '${missingHandover.map((n) => '— $n').join('\n')}',
+      );
+    }
+    return reasons;
+  }
+
   Future<bool> updateStatus(int orderId, String newStatus) async {
+    if (newStatus == 'Выдан') {
+      final reasons = await validateIssueOrder(orderId);
+      if (reasons.isNotEmpty) return false;
+    }
     await _crm.patchOrder(orderId, {'status': newStatus});
     final prev = _orders[orderId];
     if (prev != null) {
-      // refresh from server for consistency
       final list = await _crm.listOrders();
       _orders
         ..clear()
@@ -499,14 +557,35 @@ class CloudDbBridge {
     required List<String> photosB64,
   }) async {
     final photos = photosB64.where((p) => p.isNotEmpty).toList();
-    final photo = photos.isEmpty ? '' : photos.first;
-    final created = await _crm.addDefect(
+    if (photos.isEmpty) {
+      final created = await _crm.addDefect(
+        orderId,
+        description: description,
+        workshop: workshop,
+        photoB64: '',
+      );
+      return (created['id'] as num).toInt();
+    }
+    // Первое фото — основной дефект; остальные — отдельные строки «фото N».
+    final first = await _crm.addDefect(
       orderId,
       description: description,
       workshop: workshop,
-      photoB64: photo,
+      photoB64: photos.first,
     );
-    return (created['id'] as num).toInt();
+    final firstId = (first['id'] as num).toInt();
+    for (var i = 1; i < photos.length; i++) {
+      final suffix = description.trim().isEmpty
+          ? 'фото ${i + 1}'
+          : '${description.trim()} · фото ${i + 1}';
+      await _crm.addDefect(
+        orderId,
+        description: suffix,
+        workshop: workshop,
+        photoB64: photos[i],
+      );
+    }
+    return firstId;
   }
 
   Future<void> deleteOrderDefect(int defectId) async {
@@ -514,19 +593,35 @@ class CloudDbBridge {
   }
 
   Map<String, dynamic> _defectToLocalMap(Map<String, dynamic> d) {
-    final photo = (d['photo_b64'] ?? '').toString();
+    final raw = (d['photo_b64'] ?? '').toString();
+    final photos = <Map<String, dynamic>>[];
+    if (raw.isNotEmpty) {
+      if (raw.trimLeft().startsWith('[')) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is List) {
+            for (final e in decoded) {
+              final p = e.toString();
+              if (p.isNotEmpty) photos.add({'photo_b64': p});
+            }
+          } else {
+            photos.add({'photo_b64': raw});
+          }
+        } catch (_) {
+          photos.add({'photo_b64': raw});
+        }
+      } else {
+        photos.add({'photo_b64': raw});
+      }
+    }
     return {
       'id': (d['id'] as num).toInt(),
       'order_id': (d['order_id'] as num).toInt(),
       'workshop': d['workshop']?.toString() ?? '',
       'description': d['description']?.toString() ?? '',
-      'photo_b64': photo,
+      'photo_b64': photos.isEmpty ? '' : photos.first['photo_b64'],
       'created_at': d['created_at']?.toString() ?? '',
-      'photos': photo.isEmpty
-          ? <Map<String, dynamic>>[]
-          : [
-              {'photo_b64': photo},
-            ],
+      'photos': photos,
     };
   }
 
@@ -614,6 +709,19 @@ class CloudDbBridge {
         .toList();
   }
 
+  Future<int> addCashRegister(String name, String moneyType, {int sortOrder = 100}) async {
+    final r = await _cash.createRegister(
+      name: name.trim(),
+      moneyType: moneyType,
+      sortOrder: sortOrder,
+    );
+    return r.id;
+  }
+
+  Future<void> setCashRegisterActive(int registerId, bool active) async {
+    await _cash.patchRegister(registerId, isActive: active);
+  }
+
   Future<Map<String, dynamic>?> getCurrentShift() async {
     final s = await _cash.currentShift();
     if (s == null || !s.isOpen) return null;
@@ -685,7 +793,12 @@ class CloudDbBridge {
 
   Future<double> getTotalDebt() async {
     await _ensureOrders();
-    return _orders.values.fold<double>(0, (sum, o) => sum + o.debt);
+    return _orders.values
+        .where((o) => o.status != 'Выдан')
+        .fold<double>(0, (sum, o) {
+      final d = o.price - o.paidAmount;
+      return sum + (d > 0.01 ? d : 0);
+    });
   }
 
   Future<List<Map<String, dynamic>>> getOrderPayments(int orderId) async {
@@ -1408,6 +1521,35 @@ class CloudDbBridge {
       ..addEntries(list.map((o) => MapEntry(o.id, o)));
   }
 
+  Future<bool> updatePayment(
+    int paymentId, {
+    required double amount,
+    required String method,
+    int? registerId,
+  }) async {
+    if (amount <= 0) return false;
+    try {
+      final updated = await _cash.patchPayment(
+        paymentId,
+        amount: amount,
+        method: method,
+        registerId: registerId,
+      );
+      final orderId = (updated['crm_order_id'] as num?)?.toInt();
+      if (orderId != null) {
+        await _refreshOrder(orderId);
+      } else {
+        final list = await _crm.listOrders();
+        _orders
+          ..clear()
+          ..addEntries(list.map((o) => MapEntry(o.id, o)));
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<Map<String, dynamic>?> voidPayment(int paymentId) async {
     try {
       final voided = await _cash.voidPayment(paymentId);
@@ -1695,6 +1837,30 @@ class CloudDbBridge {
     return list;
   }
 
+  Future<int> addWrapFilm(
+    String name, {
+    String category = 'Плёнка оклейка',
+    double metersPerRoll = 0,
+    String unit = 'м',
+  }) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) throw ArgumentError.value(name, 'name', 'Название плёнки не может быть пустым');
+    final existing = await listWrapFilms();
+    for (final f in existing) {
+      if ((f['name']?.toString() ?? '').trim().toLowerCase() == trimmed.toLowerCase()) {
+        return (f['id'] as num).toInt();
+      }
+    }
+    // В облаке film id == inventory id (listWrapFilms).
+    return addInventoryItem(
+      trimmed,
+      0,
+      unit,
+      category: category,
+      metersPerRoll: metersPerRoll,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> getOrderWrapFilms(int orderId) async {
     return _crm.getOrderWrapFilms(orderId);
   }
@@ -1721,8 +1887,220 @@ class CloudDbBridge {
     return roll.id;
   }
 
-  Future<List<String>> getRolesList() async =>
-      ['Универсал', 'Мойка', 'Химчистка', 'Полировка', 'Оклейка'];
+  Future<List<String>> getRolesList() async {
+    final fixed = <String>{
+      'Администратор',
+      'Приемщик',
+      'Мойка',
+      'Химчистка',
+      'Полировка',
+      'Оклейка',
+      'Интерьер',
+      'Оборудование',
+      'Кузовные работы',
+      'Тюнинг/Интерьер',
+      'Универсал',
+    };
+    try {
+      final api = await _crm.listWorkshopRoles();
+      for (final r in api) {
+        final n = r['name']?.toString().trim() ?? '';
+        if (n.isNotEmpty) fixed.add(n);
+      }
+    } catch (_) {}
+    return fixed.toList()..sort();
+  }
+
+  Future<void> addRole(String name) async {
+    final n = name.trim();
+    if (n.isEmpty) return;
+    await _crm.createWorkshopRole(n);
+  }
+
+  Future<void> deleteRole(String name) async {
+    final n = name.trim();
+    if (n.isEmpty) return;
+    await _crm.deleteWorkshopRoleByName(n);
+  }
+
+  Future<Map<String, dynamic>?> getPromocode(String code) async {
+    final row = await _crm.getPromocode(code);
+    if (row == null) return null;
+    return _promoToLocal(row);
+  }
+
+  Future<List<Map<String, dynamic>>> getPromocodes() async {
+    final list = await _crm.listPromocodes();
+    return list.map(_promoToLocal).toList();
+  }
+
+  Future<void> upsertPromocode(String code, double percent, double fixed) async {
+    await _crm.upsertPromocode(code: code, percent: percent, fixed: fixed);
+  }
+
+  Future<void> deletePromocode(int id) async {
+    await _crm.deletePromocode(id);
+  }
+
+  Map<String, dynamic> _promoToLocal(Map<String, dynamic> p) => {
+        'id': (p['id'] as num).toInt(),
+        'code': p['code']?.toString() ?? '',
+        'discount_percent': (p['discount_percent'] as num?)?.toDouble() ?? 0,
+        'discount_fixed': (p['discount_fixed'] as num?)?.toDouble() ?? 0,
+        'is_active': (p['is_active'] == true || p['is_active'] == 1) ? 1 : 0,
+      };
+
+  Future<List<String>> listInventoryBrands({String query = ''}) async {
+    // Облако не ведёт отдельный справочник брендов.
+    return const [];
+  }
+
+  Future<String> ensureInventoryBrand(String? raw) async {
+    return (raw ?? '').trim();
+  }
+
+  Future<List<Map<String, dynamic>>> getClientHistory(int clientId) async {
+    await _ensureOrders();
+    await _ensureCars();
+    final out = <Map<String, dynamic>>[];
+    for (final o in _orders.values) {
+      if (o.clientId != clientId) continue;
+      final car = _cars[o.carId];
+      final debt = o.price - o.paidAmount;
+      out.add({
+        'id': o.id,
+        'created_at': o.startTime.isNotEmpty ? o.startTime : o.dueDate,
+        'notes': o.notes,
+        'price': o.price,
+        'paid_amount': o.paidAmount,
+        'status': o.status,
+        'is_completed': o.status == 'Выдан' ? 1 : 0,
+        'debt': debt,
+        'make_model': car?.makeModel ?? '',
+        'plate': car?.plate ?? '',
+      });
+    }
+    out.sort((a, b) => (b['id'] as int).compareTo(a['id'] as int));
+    return out;
+  }
+
+  Future<List<Map<String, dynamic>>> getOrdersByPlate(String plate) async {
+    await _ensureOrders();
+    await _ensureCars();
+    await _ensureClients();
+    final normalized = plate.replaceAll(' ', '').toUpperCase();
+    if (normalized.isEmpty) return [];
+    final out = <Map<String, dynamic>>[];
+    for (final o in _orders.values) {
+      final car = _cars[o.carId];
+      if (car == null) continue;
+      final p = car.plate.replaceAll(' ', '').toUpperCase();
+      if (p != normalized) continue;
+      final m = orderToMap(o);
+      out.add(m);
+    }
+    out.sort((a, b) {
+      final sa = (a['start_time']?.toString() ?? '').compareTo(b['start_time']?.toString() ?? '');
+      if (sa != 0) return -sa;
+      return (b['id'] as int).compareTo(a['id'] as int);
+    });
+    return out.take(20).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getLastOrderCartLines({
+    required int clientId,
+    int? carId,
+  }) async {
+    await _ensureOrders();
+    final candidates = _orders.values.where((o) {
+      if (o.clientId != clientId) return false;
+      if (carId != null && o.carId != carId) return false;
+      return true;
+    }).toList()
+      ..sort((a, b) => b.id.compareTo(a.id));
+    if (candidates.isEmpty) return [];
+    final order = candidates.first;
+    final items = order.items;
+    final result = <Map<String, dynamic>>[];
+    for (final item in items) {
+      if (item.parentId != null) continue;
+      final name = item.name.trim();
+      if (name.isEmpty) continue;
+      final price = item.price;
+      var ws = item.workshop.trim();
+      if (ws.isEmpty) ws = _workshopFromName(name) ?? '';
+
+      final isWrap = name == 'Оклейка';
+      final isTint = name == 'Тонировка';
+      if (isWrap || isTint) {
+        final headerId = item.id;
+        final kids = items.where((x) => x.parentId == headerId).toList();
+        if (kids.isNotEmpty) {
+          final zones = kids.map((k) => k.name).toList();
+          final kidSum = kids.fold<double>(0, (s, k) => s + k.price);
+          result.add({
+            'name': zones.length == 1 ? zones.first : '$name · ${zones.length} поз.',
+            'price': price > 0 ? price : kidSum,
+            'category': isWrap ? 'Оклейка (Пленка)' : 'Тонировка',
+            'workshop': ws.isNotEmpty ? ws : (isWrap ? 'Оклейка' : 'Тонировка'),
+            'wrapZones': zones,
+          });
+          continue;
+        }
+      }
+
+      result.add({
+        'name': name,
+        'price': price,
+        'category': '',
+        'workshop': ws,
+      });
+    }
+    return result;
+  }
+
+  Future<double> getClientDebtTotal(int clientId) async {
+    await _ensureOrders();
+    return _orders.values
+        .where((o) => o.clientId == clientId && o.status != 'Выдан')
+        .fold<double>(0, (sum, o) {
+      final d = o.price - o.paidAmount;
+      return sum + (d > 0.01 ? d : 0);
+    });
+  }
+
+  Future<double> suggestMasterPayroll(int masterId, String startDate, String endDate) async {
+    await _ensureOrders();
+    final start = startDate.length >= 10 ? startDate.substring(0, 10) : startDate;
+    final end = endDate.length >= 10 ? endDate.substring(0, 10) : endDate;
+    double total = 0;
+    for (final o in _orders.values) {
+      for (final it in o.items) {
+        if (!_itemHasMaster(it.masterIds, masterId)) continue;
+        final day = _itemDay(it, o);
+        if (day == null) continue;
+        if (day.compareTo(start) < 0 || day.compareTo(end) > 0) continue;
+        total += it.price;
+      }
+    }
+    return total;
+  }
+
+  bool _itemHasMaster(String masterIds, int masterId) {
+    final raw = masterIds.trim();
+    if (raw.isEmpty) return false;
+    for (final part in raw.split(',')) {
+      if (int.tryParse(part.trim()) == masterId) return true;
+    }
+    return false;
+  }
+
+  String? _itemDay(CrmOrderItem it, CrmOrder o) {
+    final fromItem = _dayPart(it.startTime.isNotEmpty ? it.startTime : it.endTime);
+    if (fromItem != null) return fromItem;
+    final fromOrder = _dayPart(o.startTime.isNotEmpty ? o.startTime : o.dueDate);
+    return fromOrder;
+  }
 
   Future<Map<String, dynamic>> getCompanyStats({String? masterDay, int days = 30}) async {
     return _crm.getStats(masterDay: masterDay, days: days);

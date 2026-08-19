@@ -40,6 +40,46 @@ class CashCloudApi {
     return list.map((e) => CloudCashRegister.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  Future<CloudCashRegister> createRegister({
+    required String name,
+    required String moneyType,
+    int sortOrder = 100,
+  }) async {
+    final r = await http
+        .post(
+          _u('/cash/registers'),
+          headers: _headers(),
+          body: jsonEncode({
+            'name': name,
+            'money_type': moneyType,
+            'sort_order': sortOrder,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CloudCashRegister.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<CloudCashRegister> patchRegister(
+    int registerId, {
+    String? name,
+    String? moneyType,
+    bool? isActive,
+    int? sortOrder,
+  }) async {
+    final body = <String, dynamic>{
+      if (name != null) 'name': name,
+      if (moneyType != null) 'money_type': moneyType,
+      if (isActive != null) 'is_active': isActive,
+      if (sortOrder != null) 'sort_order': sortOrder,
+    };
+    final r = await http
+        .patch(_u('/cash/registers/$registerId'), headers: _headers(), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CloudCashRegister.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
   Future<CloudCashShift?> currentShift() async {
     final r =
         await http.get(_u('/cash/shifts/current'), headers: _headers()).timeout(const Duration(seconds: 15));
@@ -216,6 +256,24 @@ class CashCloudApi {
         )
         .timeout(const Duration(seconds: 15));
     _ensure(r);
+  }
+
+  Future<Map<String, dynamic>> patchPayment(
+    int paymentId, {
+    double? amount,
+    String? method,
+    int? registerId,
+  }) async {
+    final body = <String, dynamic>{
+      if (amount != null) 'amount': amount,
+      if (method != null) 'method': method,
+      if (registerId != null) 'register_id': registerId,
+    };
+    final r = await http
+        .patch(_u('/cash/payments/$paymentId'), headers: _headers(), body: jsonEncode(body))
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
   }
 
   Future<List<Map<String, dynamic>>> listPayments({int? orderId, bool includeVoided = false}) async {
