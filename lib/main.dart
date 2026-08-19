@@ -17,6 +17,7 @@ import 'auth/auth_gate.dart';
 import 'backup_helper.dart';
 import 'bug_report_dialog.dart';
 import 'conn_status_sheet.dart';
+import 'crm/cloud_db_bridge.dart';
 import 'crm/cloud_mode.dart';
 import 'tour_keys.dart';
 import 'update/update_dialog.dart';
@@ -352,6 +353,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   Future<void> _confirmWipeDatabase() async {
     final pinCtrl = TextEditingController();
     var pinOk = false;
+    final cloud = CloudMode.enabled;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -359,7 +361,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         builder: (ctx, setInner) => AlertDialog(
           backgroundColor: AppColors.surface,
           title: Text(
-            'Очистить базу данных?',
+            cloud ? 'Очистить доску заказов?' : 'Очистить базу данных?',
             style: GoogleFonts.manrope(fontWeight: FontWeight.w800, color: AppColors.danger),
           ),
           content: SizedBox(
@@ -369,8 +371,11 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Будут удалены заказы, клиенты, оплаты, касса и прочие данные. '
-                  'Перед очисткой создастся бэкап. После очистки приложение перезапустится.',
+                  cloud
+                      ? 'В облаке удалятся все заказы, клиенты и авто. '
+                          'Прайс и склад останутся.'
+                      : 'Будут удалены заказы, клиенты, оплаты, касса и прочие данные. '
+                          'Перед очисткой создастся бэкап. После очистки приложение перезапустится.',
                   style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13, height: 1.35),
                 ),
                 const SizedBox(height: 14),
@@ -395,7 +400,10 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 disabledBackgroundColor: AppColors.danger.withOpacity(0.25),
               ),
               onPressed: pinOk ? () => Navigator.pop(ctx, true) : null,
-              child: Text('Очистить', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+              child: Text(
+                cloud ? 'Очистить' : 'Очистить',
+                style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+              ),
             ),
           ],
         ),
@@ -403,6 +411,25 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     );
     pinCtrl.dispose();
     if (confirmed != true || !mounted) return;
+
+    if (cloud) {
+      try {
+        final res = await CloudDbBridge.instance.clearBoard(clients: true);
+        if (!mounted) return;
+        final orders = res['deleted'] ?? res['cleared'] ?? 0;
+        final clientsN = res['deleted_clients'] ?? 0;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Очищено: заказов $orders, клиентов $clientsN')),
+        );
+        setState(() => _selectedIndex = AppMenuIds.board);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось очистить доску: $e')),
+        );
+      }
+      return;
+    }
 
     await BackupHelper.forceBackupNow();
     await DatabaseHelper().resetDatabase();

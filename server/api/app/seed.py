@@ -18,7 +18,48 @@ from app.models import (
     UserRole,
 )
 from app.permissions_catalog import COMPANY_ROLE_PRESETS, PERMISSIONS
+from app.price_catalog import iter_price_catalog
 from app.security import hash_password
+
+
+def ensure_company_price_catalog(db: Session, company_id: int) -> dict[str, int]:
+    """Upsert полного прайса: создаёт недостающие, обновляет category/price/workshop."""
+    existing = {
+        row.name: row
+        for row in db.scalars(select(CrmService).where(CrmService.company_id == company_id)).all()
+    }
+    created = updated = 0
+    for item in iter_price_catalog():
+        row = existing.get(item["name"])
+        if row is None:
+            db.add(
+                CrmService(
+                    company_id=company_id,
+                    name=item["name"],
+                    category=item["category"],
+                    price=item["price"],
+                    workshop=item["workshop"],
+                    is_active=True,
+                )
+            )
+            created += 1
+            continue
+        changed = False
+        if row.category != item["category"]:
+            row.category = item["category"]
+            changed = True
+        if float(row.price or 0) != float(item["price"]):
+            row.price = item["price"]
+            changed = True
+        if (row.workshop or "") != (item["workshop"] or ""):
+            row.workshop = item["workshop"]
+            changed = True
+        if not row.is_active:
+            row.is_active = True
+            changed = True
+        if changed:
+            updated += 1
+    return {"created": created, "updated": updated, "total": len(iter_price_catalog())}
 
 _DEFAULT_CASH_REGISTERS = [
     ("Касса наличные", "Наличные", 0),
@@ -226,21 +267,8 @@ def seed_database(db: Session) -> None:
         if db.scalars(select(CrmMaster).where(CrmMaster.company_id == company.id).limit(1)).first() is None:
             db.add(CrmMaster(company_id=company.id, name="Иван Мастер", role="Универсал"))
             db.add(CrmMaster(company_id=company.id, name="Алексей", role="Полировка"))
-        if db.scalars(select(CrmService).where(CrmService.company_id == company.id).limit(1)).first() is None:
-            for name, cat, price, ws in [
-                ("Мойка кузова", "Мойка", 3000, "Мойка"),
-                ("Химчистка салона", "Химчистка", 12000, "Химчистка"),
-                ("Полировка в 1 этап", "Полировка", 15000, "Полировка"),
-            ]:
-                db.add(
-                    CrmService(
-                        company_id=company.id,
-                        name=name,
-                        category=cat,
-                        price=price,
-                        workshop=ws,
-                    )
-                )
+        # Полный прайс (SERVICES_TREE + оклейка) — upsert, не только пустая база
+        ensure_company_price_catalog(db, company.id)
         if (
             db.scalars(select(CrmInventoryItem).where(CrmInventoryItem.company_id == company.id).limit(1)).first()
             is None

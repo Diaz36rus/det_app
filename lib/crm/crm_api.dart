@@ -61,6 +61,13 @@ class CrmApi {
     return CrmClient.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
+  Future<void> deleteClient(int id) async {
+    final r = await http
+        .delete(_u('/crm/clients/$id'), headers: _headers())
+        .timeout(const Duration(seconds: 30));
+    _ensure(r);
+  }
+
   Future<CrmMaster> createMaster({required String name, String role = 'Универсал'}) async {
     final r = await http
         .post(
@@ -79,6 +86,13 @@ class CrmApi {
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmMaster.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<void> deleteMaster(int id) async {
+    final r = await http
+        .delete(_u('/crm/masters/$id'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
   }
 
   Future<CrmService> createService({
@@ -109,6 +123,13 @@ class CrmApi {
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmService.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<void> deleteService(int id) async {
+    final r = await http
+        .delete(_u('/crm/services/$id'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
   }
 
   Future<List<CrmCar>> listCars({int? clientId}) async {
@@ -184,6 +205,33 @@ class CrmApi {
     return CrmOrder.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
+  /// Снять активные заказы с доски.
+  /// [hard] — удалить заказы; [clients] — также клиентов и авто (включает hard).
+  Future<Map<String, dynamic>> clearBoardOrders({
+    bool hard = false,
+    bool clients = false,
+  }) async {
+    final q = <String, String>{};
+    if (hard || clients) q['hard'] = 'true';
+    if (clients) q['clients'] = 'true';
+    final r = await http
+        .post(
+          _u('/crm/orders/clear-board', q.isEmpty ? null : q),
+          headers: _headers(),
+          body: '{}',
+        )
+        .timeout(const Duration(seconds: 60));
+    _ensure(r);
+    return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteOrder(int id) async {
+    final r = await http
+        .delete(_u('/crm/orders/$id'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+  }
+
   Future<CrmOrderItem> createOrderItem(int orderId, CrmOrderItem item) async {
     final r = await http
         .post(
@@ -223,6 +271,13 @@ class CrmApi {
     return CrmCar.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
+  Future<void> deleteCar(int id) async {
+    final r = await http
+        .delete(_u('/crm/cars/$id'), headers: _headers())
+        .timeout(const Duration(seconds: 30));
+    _ensure(r);
+  }
+
   Future<List<CrmMaster>> listMasters() async {
     final r = await http.get(_u('/crm/masters'), headers: _headers()).timeout(const Duration(seconds: 15));
     _ensure(r);
@@ -239,7 +294,12 @@ class CrmApi {
         .toList();
   }
 
-  Future<void> addDefect(int orderId, {required String description, String workshop = '', String photoB64 = ''}) async {
+  Future<Map<String, dynamic>> addDefect(
+    int orderId, {
+    required String description,
+    String workshop = '',
+    String photoB64 = '',
+  }) async {
     final r = await http
         .post(
           _u('/crm/orders/$orderId/defects'),
@@ -251,6 +311,24 @@ class CrmApi {
           }),
         )
         .timeout(const Duration(seconds: 30));
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> listDefects(int orderId) async {
+    final r = await http
+        .get(_u('/crm/orders/$orderId/defects'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<void> deleteDefect(int defectId) async {
+    final r = await http
+        .delete(_u('/crm/defects/$defectId'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
     _ensure(r);
   }
 
@@ -294,6 +372,13 @@ class CrmApi {
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmInventoryItem.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<void> deleteInventoryItem(int id) async {
+    final r = await http
+        .delete(_u('/crm/inventory/$id'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
   }
 
   Future<List<Map<String, dynamic>>> listInventoryMoves({int? itemId, int limit = 100}) async {

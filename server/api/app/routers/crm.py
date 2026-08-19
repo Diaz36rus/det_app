@@ -1,13 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.deps import require_permissions
 from app.models import (
     Branch,
+    CashFlow,
+    CashPayment,
     CrmCar,
     CrmClient,
+    CrmInventoryMove,
     CrmOrder,
     CrmOrderEvent,
     CrmOrderItem,
@@ -70,6 +73,21 @@ def _fill_item_from_in(row: CrmOrderItem, body: CrmOrderItemIn) -> None:
     row.start_time = body.start_time or ""
     row.end_time = body.end_time or ""
     row.parent_id = body.parent_id
+
+
+def _purge_orders_by_ids(db: Session, ids: list[int]) -> int:
+    """FK cleanup before deleting orders (same as delete_order / clear-board)."""
+    if not ids:
+        return 0
+    db.execute(delete(CashPayment).where(CashPayment.crm_order_id.in_(ids)))
+    db.execute(update(CashFlow).where(CashFlow.order_id.in_(ids)).values(order_id=None))
+    db.execute(
+        update(CrmInventoryMove).where(CrmInventoryMove.order_id.in_(ids)).values(order_id=None)
+    )
+    orders = list(db.scalars(select(CrmOrder).where(CrmOrder.id.in_(ids))).all())
+    for o in orders:
+        db.delete(o)
+    return len(orders)
 
 
 def _recalc_order_price(order: CrmOrder) -> None:
@@ -206,6 +224,38 @@ def update_client(
     return row
 
 
+@router.delete("/clients/{client_id}")
+def delete_client(
+    client_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    row = db.scalar(
+        select(CrmClient).where(CrmClient.id == client_id, CrmClient.company_id == company_id)
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Клиент не найден")
+    order_ids = list(
+        db.scalars(
+            select(CrmOrder.id).where(
+                CrmOrder.company_id == company_id, CrmOrder.client_id == client_id
+            )
+        ).all()
+    )
+    deleted_orders = _purge_orders_by_ids(db, order_ids)
+    cars = list(
+        db.scalars(
+            select(CrmCar).where(CrmCar.company_id == company_id, CrmCar.client_id == client_id)
+        ).all()
+    )
+    for car in cars:
+        db.delete(car)
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deleted": client_id, "deleted_orders": deleted_orders, "deleted_cars": len(cars)}
+
+
 @router.get("/cars", response_model=list[CrmCarOut])
 def list_cars(
     client_id: int | None = None,
@@ -267,6 +317,83 @@ def list_orders(
         c.id: c for c in db.scalars(select(CrmCar).where(CrmCar.id.in_(car_ids))).all()
     } if car_ids else {}
     return [_order_out(o, clients.get(o.client_id), cars.get(o.car_id)) for o in orders]
+
+
+@router.post("/orders/clear-board")
+def clear_board_orders(
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+    hard: bool = False,
+    clients: bool = False,
+):
+    """Снять активные заказы с доски.
+
+    По умолчанию: status → «Выдан» (прайс/клиенты не трогаем).
+    hard=1: физически удалить все заказы компании (и оплаты по ним).
+    clients=1: также удалить всех клиентов и авто (подразумевает hard).
+    """
+    company_id = _company_id(user)
+    if clients:
+        hard = True
+
+    deleted_orders = 0
+    deleted_clients = 0
+
+    if hard:
+        orders = list(
+            db.scalars(select(CrmOrder).where(CrmOrder.company_id == company_id)).all()
+        )
+        ids = [o.id for o in orders]
+        if ids:
+            deleted_orders = _purge_orders_by_ids(db, ids)
+
+        if clients:
+            cl_rows = list(
+                db.scalars(select(CrmClient).where(CrmClient.company_id == company_id)).all()
+            )
+            # авто: cascade delete-orphan с клиента; на всякий случай удалим явно
+            db.execute(delete(CrmCar).where(CrmCar.company_id == company_id))
+            for c in cl_rows:
+                db.delete(c)
+            deleted_clients = len(cl_rows)
+
+        db.commit()
+        return {
+            "ok": True,
+            "mode": "hard+clients" if clients else "hard",
+            "deleted": deleted_orders,
+            "deleted_clients": deleted_clients,
+        }
+
+    active = list(
+        db.scalars(
+            select(CrmOrder).where(
+                CrmOrder.company_id == company_id,
+                CrmOrder.status != "Выдан",
+            )
+        ).all()
+    )
+    for o in active:
+        o.status = "Выдан"
+    db.commit()
+    return {"ok": True, "mode": "board", "cleared": len(active), "deleted_clients": 0}
+
+
+@router.delete("/orders/{order_id}")
+def delete_order(
+    order_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    order = db.scalar(
+        select(CrmOrder).where(CrmOrder.id == order_id, CrmOrder.company_id == company_id)
+    )
+    if order is None:
+        raise HTTPException(status_code=404, detail="Заказ не найден")
+    _purge_orders_by_ids(db, [order_id])
+    db.commit()
+    return {"ok": True, "deleted": order_id}
 
 
 @router.get("/orders/{order_id}", response_model=CrmOrderOut)
@@ -497,6 +624,27 @@ def update_car(
     db.commit()
     db.refresh(row)
     return row
+
+
+@router.delete("/cars/{car_id}")
+def delete_car(
+    car_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    row = db.scalar(select(CrmCar).where(CrmCar.id == car_id, CrmCar.company_id == company_id))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Авто не найдено")
+    order_ids = list(
+        db.scalars(
+            select(CrmOrder.id).where(CrmOrder.company_id == company_id, CrmOrder.car_id == car_id)
+        ).all()
+    )
+    deleted_orders = _purge_orders_by_ids(db, order_ids)
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deleted": car_id, "deleted_orders": deleted_orders}
 
 
 @router.post("/orders/{order_id}/items", response_model=CrmOrderItemOut)

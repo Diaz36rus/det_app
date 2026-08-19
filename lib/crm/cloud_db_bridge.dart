@@ -231,9 +231,23 @@ class CloudDbBridge {
     try {
       await _crm.putOrderWrapFilms(id, const []);
     } catch (_) {}
-    // API пока без DELETE — помечаем как Выдан
-    await _crm.patchOrder(id, {'status': 'Выдан'});
+    try {
+      await _crm.deleteOrder(id);
+    } catch (_) {
+      // Старый API без DELETE — уводим с доски
+      await _crm.patchOrder(id, {'status': 'Выдан'});
+    }
     _orders.remove(id);
+  }
+
+  /// Очистить доску в облаке. [clients] — удалить и клиентов/авто.
+  Future<Map<String, dynamic>> clearBoard({
+    bool hard = false,
+    bool clients = false,
+  }) async {
+    final res = await _crm.clearBoardOrders(hard: hard || clients, clients: clients);
+    await refreshAll();
+    return res;
   }
 
   Future<List<Map<String, dynamic>>> getClientsList() async {
@@ -306,9 +320,29 @@ class CloudDbBridge {
     _clients[id] = c;
   }
 
+  Future<void> deleteClient(int clientId) async {
+    await _crm.deleteClient(clientId);
+    final orderIds = _orders.values.where((o) => o.clientId == clientId).map((o) => o.id).toList();
+    for (final id in orderIds) {
+      _orders.remove(id);
+    }
+    _cars.removeWhere((_, c) => c.clientId == clientId);
+    _clients.remove(clientId);
+  }
+
+  Future<void> deleteCar(int carId) async {
+    await _crm.deleteCar(carId);
+    final orderIds = _orders.values.where((o) => o.carId == carId).map((o) => o.id).toList();
+    for (final id in orderIds) {
+      _orders.remove(id);
+    }
+    _cars.remove(carId);
+  }
+
   Future<List<Map<String, dynamic>>> getAllMastersFull() async {
     _masters = await _crm.listMasters();
     return _masters
+        .where((m) => m.isActive)
         .map(
           (m) => {
             'id': m.id,
@@ -333,9 +367,29 @@ class CloudDbBridge {
     _masters = _masters.map((e) => e.id == id ? m : e).toList();
   }
 
+  Future<void> deleteMasterById(int id) async {
+    await _crm.deleteMaster(id);
+    _masters = _masters.map((e) {
+      if (e.id != id) return e;
+      return CrmMaster(id: e.id, name: e.name, role: e.role, isActive: false);
+    }).toList();
+  }
+
+  Future<void> deleteMaster(String name) async {
+    final n = name.trim();
+    if (n.isEmpty) return;
+    if (_masters.isEmpty) {
+      _masters = await _crm.listMasters();
+    }
+    final match = _masters.where((e) => e.name == n && e.isActive).toList();
+    if (match.isEmpty) return;
+    await deleteMasterById(match.first.id);
+  }
+
   Future<List<Map<String, dynamic>>> getAllServices() async {
     _services = await _crm.listServices();
     return _services
+        .where((s) => s.isActive)
         .map(
           (s) => {
             'id': s.id,
@@ -343,7 +397,7 @@ class CloudDbBridge {
             'category': s.category,
             'price': s.price,
             'workshop': s.workshop,
-            'is_active': s.isActive ? 1 : 0,
+            'is_active': 1,
             // локальный прайс ждёт колонки вроде price_1 — дублируем
             'price_1': s.price,
             'price_2': s.price,
@@ -351,6 +405,11 @@ class CloudDbBridge {
           },
         )
         .toList();
+  }
+
+  Future<void> deleteService(int id) async {
+    await _crm.deleteService(id);
+    _services = _services.where((e) => e.id != id).toList();
   }
 
   Future<void> updateServicePrice(String name, String field, double price) async {
@@ -421,6 +480,54 @@ class CloudDbBridge {
     if (body.isEmpty) return;
     await _crm.patchInventory(id, body);
     _inventory = await _crm.listInventory();
+  }
+
+  Future<void> deleteInventoryItem(int id) async {
+    await _crm.deleteInventoryItem(id);
+    _inventory = _inventory.where((e) => e.id != id).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getOrderDefects(int orderId) async {
+    final rows = await _crm.listDefects(orderId);
+    return rows.map(_defectToLocalMap).toList();
+  }
+
+  Future<int> addOrderDefect({
+    required int orderId,
+    String workshop = '',
+    String description = '',
+    required List<String> photosB64,
+  }) async {
+    final photos = photosB64.where((p) => p.isNotEmpty).toList();
+    final photo = photos.isEmpty ? '' : photos.first;
+    final created = await _crm.addDefect(
+      orderId,
+      description: description,
+      workshop: workshop,
+      photoB64: photo,
+    );
+    return (created['id'] as num).toInt();
+  }
+
+  Future<void> deleteOrderDefect(int defectId) async {
+    await _crm.deleteDefect(defectId);
+  }
+
+  Map<String, dynamic> _defectToLocalMap(Map<String, dynamic> d) {
+    final photo = (d['photo_b64'] ?? '').toString();
+    return {
+      'id': (d['id'] as num).toInt(),
+      'order_id': (d['order_id'] as num).toInt(),
+      'workshop': d['workshop']?.toString() ?? '',
+      'description': d['description']?.toString() ?? '',
+      'photo_b64': photo,
+      'created_at': d['created_at']?.toString() ?? '',
+      'photos': photo.isEmpty
+          ? <Map<String, dynamic>>[]
+          : [
+              {'photo_b64': photo},
+            ],
+    };
   }
 
   Future<void> adjustInventoryQuantity(

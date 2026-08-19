@@ -21,6 +21,7 @@ API 0.16.0: этапы 1–7 (карточка…касса + статистик
 
 API 0.16.0: GET /crm/stats; import clients с дедупом по телефону;
 локальный импорт из detailing.db; StatsScreen в облаке.
+Прайс: полный SERVICES_TREE + оклейка в seed upsert + tools\\sync_cloud_price.py.
 
 Блок A — как гонять
 -------------------

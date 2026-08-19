@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.crm_extra_schemas import (
@@ -36,6 +36,7 @@ from app.crm_extra_schemas import (
 from app.db import get_db
 from app.deps import require_permissions
 from app.models import (
+    CashFlow,
     CrmCar,
     CrmClient,
     CrmDefect,
@@ -116,6 +117,23 @@ def update_master(
     return row
 
 
+@router.delete("/masters/{master_id}")
+def delete_master(
+    master_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete: is_active=False (заказы/смены могут ссылаться на мастера)."""
+    cid = _company_id(user)
+    row = db.scalar(select(CrmMaster).where(CrmMaster.id == master_id, CrmMaster.company_id == cid))
+    if row is None:
+        raise HTTPException(404, "Мастер не найден")
+    row.is_active = False
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "deleted": master_id, "is_active": False}
+
+
 # --- Services ---
 
 
@@ -178,6 +196,23 @@ def update_service(
     return row
 
 
+@router.delete("/services/{service_id}")
+def delete_service(
+    service_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    """Soft-delete: is_active=False."""
+    cid = _company_id(user)
+    row = db.scalar(select(CrmService).where(CrmService.id == service_id, CrmService.company_id == cid))
+    if row is None:
+        raise HTTPException(404, "Услуга не найдена")
+    row.is_active = False
+    db.commit()
+    db.refresh(row)
+    return {"ok": True, "deleted": service_id, "is_active": False}
+
+
 # --- Defects ---
 
 
@@ -236,6 +271,48 @@ def create_defect(
         photo_b64=row.photo_b64 or "",
         created_at=row.created_at.isoformat() if row.created_at else None,
     )
+
+
+@router.delete("/defects/{defect_id}")
+def delete_defect(
+    defect_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmDefect).where(CrmDefect.id == defect_id, CrmDefect.company_id == cid)
+    )
+    if row is None:
+        raise HTTPException(404, "Дефект не найден")
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deleted": defect_id}
+
+
+@router.delete("/orders/{order_id}/defects/{defect_id}")
+def delete_order_defect(
+    order_id: int,
+    defect_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    order = db.scalar(select(CrmOrder).where(CrmOrder.id == order_id, CrmOrder.company_id == cid))
+    if order is None:
+        raise HTTPException(404, "Заказ не найден")
+    row = db.scalar(
+        select(CrmDefect).where(
+            CrmDefect.id == defect_id,
+            CrmDefect.order_id == order_id,
+            CrmDefect.company_id == cid,
+        )
+    )
+    if row is None:
+        raise HTTPException(404, "Дефект не найден")
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deleted": defect_id}
 
 
 # --- Inventory ---
@@ -319,6 +396,30 @@ def update_inventory(
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.delete("/inventory/{item_id}")
+def delete_inventory(
+    item_id: int,
+    user: User = Depends(require_permissions("inventory.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    item = db.scalar(
+        select(CrmInventoryItem).where(
+            CrmInventoryItem.id == item_id, CrmInventoryItem.company_id == cid
+        )
+    )
+    if item is None:
+        raise HTTPException(404, "Позиция не найдена")
+    db.execute(delete(CrmOrderWrapFilm).where(CrmOrderWrapFilm.film_id == item_id))
+    db.execute(
+        update(CashFlow).where(CashFlow.inventory_id == item_id).values(inventory_id=None)
+    )
+    # rolls / moves / recipes cascade via ondelete=CASCADE
+    db.delete(item)
+    db.commit()
+    return {"ok": True, "deleted": item_id}
 
 
 @router.get("/inventory/moves", response_model=list[CrmInventoryMoveOut])

@@ -2275,6 +2275,16 @@ class DatabaseHelper {
     String description = '',
     required List<String> photosB64,
   }) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addOrderDefect(
+        orderId: orderId,
+        workshop: workshop,
+        description: description,
+        photosB64: photosB64,
+      );
+      bumpDataRevision();
+      return id;
+    }
     final db = await database;
     await _ensureDefectTables(db);
     final now = DateTime.now().toIso8601String();
@@ -2302,6 +2312,9 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getOrderDefects(int orderId) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.getOrderDefects(orderId);
+    }
     final db = await database;
     await _ensureDefectTables(db);
     final defects = await db.query(
@@ -2330,6 +2343,11 @@ class DatabaseHelper {
   }
 
   Future<void> deleteOrderDefect(int defectId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteOrderDefect(defectId);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.transaction((txn) async {
       await txn.delete('order_defect_photos', where: 'defect_id = ?', whereArgs: [defectId]);
@@ -2890,11 +2908,21 @@ class DatabaseHelper {
   }
 
   Future<void> deleteClient(int clientId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteClient(clientId);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.delete('clients', where: 'id = ?', whereArgs: [clientId]);
   }
 
   Future<void> deleteCar(int carId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteCar(carId);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.delete('cars', where: 'id = ?', whereArgs: [carId]);
   }
@@ -2942,11 +2970,21 @@ class DatabaseHelper {
   }
 
   Future<void> deleteMaster(String name) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteMaster(name);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.delete('masters', where: 'name = ?', whereArgs: [name]);
   }
 
   Future<void> deleteMasterById(int id) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteMasterById(id);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.delete('masters', where: 'id = ?', whereArgs: [id]);
   }
@@ -4384,6 +4422,11 @@ class DatabaseHelper {
   }
 
   Future<void> deleteInventoryItem(int id) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteInventoryItem(id);
+      bumpDataRevision();
+      return;
+    }
     final db = await database;
     await db.delete('service_recipes', where: 'inventory_id = ?', whereArgs: [id]);
     await db.delete('film_rolls', where: 'inventory_id = ?', whereArgs: [id]);
