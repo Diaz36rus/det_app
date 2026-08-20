@@ -239,10 +239,11 @@ def list_users(
 @router.post("/users", response_model=UserOut)
 def create_user(
     body: UserCreate,
+    company_id: int | None = Query(default=None),
     user: User = Depends(require_permissions("users.manage")),
     db: Session = Depends(get_db),
 ):
-    company_id = _ensure_company_user(user, db)
+    cid = _resolve_company_id(user, db, company_id)
     email = body.email.lower().strip()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=400, detail="Email уже занят")
@@ -250,32 +251,88 @@ def create_user(
     if phone and db.scalar(select(User).where(User.phone == phone)):
         raise HTTPException(status_code=400, detail="Телефон уже занят")
 
+    role_names = [n.strip() for n in body.role_names if n and n.strip()]
+    roles: list[Role] = []
+    if body.role_ids:
+        roles = list(
+            db.scalars(
+                select(Role).where(Role.id.in_(body.role_ids), Role.company_id == cid)
+            ).all()
+        )
+    if role_names:
+        by_name = list(
+            db.scalars(select(Role).where(Role.company_id == cid, Role.name.in_(role_names))).all()
+        )
+        found = {r.name for r in by_name}
+        missing = [n for n in role_names if n not in found]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Нет ролей: {', '.join(missing)}")
+        # merge unique by id
+        seen = {r.id for r in roles}
+        for r in by_name:
+            if r.id not in seen:
+                roles.append(r)
+                seen.add(r.id)
+
+    if not roles:
+        raise HTTPException(status_code=400, detail="Укажите хотя бы одну должность")
+
+    workshops = [w.strip() for w in body.workshops if w and w.strip()]
+    bad = [w for w in workshops if w not in KNOWN_WORKSHOPS]
+    if bad:
+        raise HTTPException(status_code=400, detail=f"Неизвестные цеха: {', '.join(bad)}")
+
     new_user = User(
         email=email,
         phone=phone,
         password_hash=hash_password(body.password),
         full_name=body.full_name.strip(),
-        company_id=company_id,
+        company_id=cid,
         is_active=True,
         is_platform_admin=False,
-        pending_assignment=not bool(body.role_ids),
+        pending_assignment=False,
     )
     db.add(new_user)
     db.flush()
 
-    if body.role_ids:
-        roles = db.scalars(
-            select(Role).where(Role.id.in_(body.role_ids), Role.company_id == company_id)
-        ).all()
-        for role in roles:
-            db.add(UserRole(user_id=new_user.id, role_id=role.id))
+    for role in roles:
+        db.add(UserRole(user_id=new_user.id, role_id=role.id))
 
-    if body.branch_ids:
+    branch_ids = list(body.branch_ids)
+    if not branch_ids:
+        main = db.scalar(select(Branch).where(Branch.company_id == cid).order_by(Branch.id))
+        if main is not None:
+            branch_ids = [main.id]
+    if branch_ids:
         branches = db.scalars(
-            select(Branch).where(Branch.id.in_(body.branch_ids), Branch.company_id == company_id)
+            select(Branch).where(Branch.id.in_(branch_ids), Branch.company_id == cid)
         ).all()
         for branch in branches:
             db.add(UserBranch(user_id=new_user.id, branch_id=branch.id))
+
+    role_name_set = {r.name for r in roles}
+    if body.link_master and (workshops or "Мастер" in role_name_set):
+        role_csv = ", ".join(workshops) if workshops else "Универсал"
+        master = CrmMaster(
+            company_id=cid,
+            name=new_user.full_name or new_user.email,
+            role=role_csv,
+            is_active=True,
+        )
+        db.add(master)
+        db.flush()
+        new_user.master_id = master.id
+    elif workshops:
+        role_csv = ", ".join(workshops)
+        master = CrmMaster(
+            company_id=cid,
+            name=new_user.full_name or new_user.email,
+            role=role_csv,
+            is_active=True,
+        )
+        db.add(master)
+        db.flush()
+        new_user.master_id = master.id
 
     db.commit()
     created = db.scalar(

@@ -68,6 +68,38 @@ class CompanyApi {
     return (map['items'] as List?)?.map((e) => e.toString()).toList() ?? const [];
   }
 
+  Future<AuthUser> createUser({
+    required String accessToken,
+    required String email,
+    required String password,
+    required String fullName,
+    String? phone,
+    required List<String> roleNames,
+    List<int> branchIds = const [],
+    List<String> workshops = const [],
+  }) async {
+    final r = await http
+        .post(
+          _u('/company/users'),
+          headers: _auth(accessToken),
+          body: jsonEncode({
+            'email': email.trim().toLowerCase(),
+            'password': password,
+            'full_name': fullName.trim(),
+            if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
+            'role_names': roleNames,
+            'branch_ids': branchIds,
+            'workshops': workshops,
+            'link_master': true,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+    if (r.statusCode != 200 && r.statusCode != 201) {
+      throw AuthApiException(_err(r), statusCode: r.statusCode);
+    }
+    return AuthUser.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
   Future<AuthUser> assignUser({
     required String accessToken,
     required int userId,

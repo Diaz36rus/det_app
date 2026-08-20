@@ -29,6 +29,22 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 81,
+    version: '1.0.1',
+    items: [
+      'Добавление сотрудника: должность (владелец/управляющий/админ/мастер) + филиал + цеха',
+      'Кнопка в панели связи — сразу с доступом, без очереди назначений',
+    ],
+  ),
+  PatchRelease(
+    build: 80,
+    version: '1.0.1',
+    items: [
+      'Панель связи: облако-first (статус api.det-app.ru, студия, QR приглашения)',
+      'LAN Хост/Клиент убран с первого экрана — только «Офлайн · Wi‑Fi»',
+    ],
+  ),
+  PatchRelease(
     build: 79,
     version: '1.0.1',
     items: [

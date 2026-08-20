@@ -7,13 +7,15 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
+
 import 'access_model.dart';
-import 'auth/auth_controller.dart';
-import 'auth/auth_models.dart';
-import 'auth/company_api.dart';
 import 'app_diagnostics.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
+import 'auth/auth_api.dart';
+import 'auth/auth_controller.dart';
+import 'auth/auth_models.dart';
+import 'auth/company_api.dart';
 import 'bug_report_dialog.dart';
 import 'crm/cloud_mode.dart';
 import 'database.dart';
@@ -26,6 +28,10 @@ import 'sync/sync_qr.dart';
 import 'update/update_channel.dart';
 
 bool get _canScanSyncQr => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+/// Публичная точка облака (приглашение / health).
+const _kCloudBase = AuthApi.defaultBaseUrl;
+const _kInviteUrl = AuthApi.defaultBaseUrl;
 
 Future<void> showConnStatusSheet(BuildContext context) async {
   await showModalBottomSheet<void>(
@@ -46,7 +52,7 @@ class _ConnStatusSheet extends StatefulWidget {
   State<_ConnStatusSheet> createState() => _ConnStatusSheetState();
 }
 
-class _ConnStatusSheetState extends State<_ConnStatusSheet> {
+class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerProviderStateMixin {
   final _urlCtrl = TextEditingController();
   bool _busy = false;
   bool _scanning = false;
@@ -60,19 +66,63 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
   String? _apkLabel;
   String? _apkError;
 
+  bool? _cloudOk;
+  bool _cloudChecking = false;
+  String _cloudDetail = '';
+  final _studioKey = GlobalKey<_StudioAccessBlockState>();
+
+  late final AnimationController _pulse;
+
   @override
   void initState() {
     super.initState();
+    _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 1400))
+      ..repeat(reverse: true);
     final sync = SyncController.instance;
     _urlCtrl.text = sync.config.isClient
         ? sync.config.normalizedBaseUrl
         : (sync.suggestedClientUrl ?? '');
+    _pingCloud();
   }
 
   @override
   void dispose() {
+    _pulse.dispose();
     _urlCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pingCloud() async {
+    if (_cloudChecking) return;
+    setState(() {
+      _cloudChecking = true;
+    });
+    try {
+      final r = await http
+          .get(Uri.parse('$_kCloudBase/health'))
+          .timeout(const Duration(seconds: 6));
+      final ok = r.statusCode >= 200 && r.statusCode < 500;
+      if (!mounted) return;
+      setState(() {
+        _cloudOk = ok;
+        _cloudDetail = ok ? 'api.det-app.ru' : 'Сервер ответил ${r.statusCode}';
+        _cloudChecking = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _cloudOk = false;
+        _cloudDetail = 'Нет связи с облаком';
+        _cloudChecking = false;
+      });
+    }
+  }
+
+  Future<void> _refreshAll() async {
+    await Future.wait([
+      _pingCloud(),
+      AppDiagnostics.instance.refreshConnection(force: true),
+    ]);
   }
 
   Future<void> _ensureApkQr() async {
@@ -83,8 +133,6 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
       _apkError = null;
     });
     try {
-      // Постоянная ссылка (после деплоя API /updates/android).
-      // Если её ещё нет — берём прямой android_url из latest.json.
       String qrUrl = UpdateChannel.cloudApkUrl;
       String? label;
       try {
@@ -196,7 +244,6 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
         port: sync.config.port,
         onProgress: (done, total) {
           if (!mounted) return;
-          // Не дёргаем UI на каждый IP.
           if (done != total && done % 12 != 0) return;
           setState(() {
             _scanDone = done;
@@ -210,42 +257,33 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
         _scanning = false;
       });
       if (hosts.isEmpty) {
-        if (mounted) {
-          showAppToast(
-            context,
-            'Хост не найден. ПК в режиме «Хост» и в той же Wi‑Fi?',
-          );
-        }
-        return;
-      }
-      if (hosts.length == 1) {
-        _urlCtrl.text = hosts.first.baseUrl;
-        await _apply(SyncRole.client); // тост с URL — внутри _apply
-        return;
-      }
-      // Несколько — подставим первый, выбор ниже в списке.
-      _urlCtrl.text = hosts.first.baseUrl;
-      if (mounted) {
         showAppToast(
           context,
-          'Найдено хостов: ${hosts.length}. Выберите нужный.',
+          'Хост не найден. ПК в режиме «Хост» и в той же Wi‑Fi?',
         );
+      } else if (hosts.length == 1) {
+        _urlCtrl.text = hosts.first.baseUrl;
+        await _apply(SyncRole.client);
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _scanning = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Поиск не удался: $e')),
-      );
+      showAppToast(context, 'Поиск не удался: $e');
     }
   }
 
   Future<void> _apply(SyncRole role) async {
+    if (_busy) return;
     setState(() => _busy = true);
     final sync = SyncController.instance;
     String? err;
     if (role == SyncRole.client) {
-      err = await sync.applyRole(role: role, baseUrl: _urlCtrl.text);
+      final url = _urlCtrl.text.trim();
+      if (url.isEmpty) {
+        err = 'Укажите ссылку хоста';
+      } else {
+        err = await sync.applyRole(role: role, baseUrl: url);
+      }
     } else {
       err = await sync.applyRole(role: role);
     }
@@ -256,10 +294,10 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
       } else {
         final msg = role == SyncRole.host
-            ? 'Хост запущен. Клиенты: «Найти хост» или URL с этого ПК.'
+            ? 'Локальный хост запущен'
             : role == SyncRole.client
-                ? 'Подключено к ${_urlCtrl.text.trim().isNotEmpty ? _urlCtrl.text.trim() : 'хосту'} — заказы общие'
-                : 'Локальный режим (данные только на этом устройстве).';
+                ? 'Подключено к ${_urlCtrl.text.trim()}'
+                : 'Локальный режим (один ПК)';
         showAppToast(context, msg);
       }
     }
@@ -295,8 +333,9 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
     final diag = AppDiagnostics.instance;
     final sync = SyncController.instance;
     final mq = MediaQuery.of(context);
-    // SafeArea + padding уже съедают высоту — не брать 0.82 от полного экрана.
     final h = (mq.size.height - mq.padding.vertical - mq.viewInsets.bottom) * 0.88;
+    final signedIn = CloudMode.sessionActive;
+    final user = AuthController.instance.user;
 
     return SafeArea(
       child: Padding(
@@ -305,9 +344,8 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
           height: h.clamp(320.0, mq.size.height),
           width: AppResponsive.dialogWidth(context, desktop: 520),
           child: ListenableBuilder(
-            listenable: Listenable.merge([diag, sync]),
+            listenable: Listenable.merge([diag, sync, AuthController.instance]),
             builder: (context, _) {
-              final ok = diag.isOk;
               final role = sync.config.role;
               final hostUrl = sync.suggestedClientUrl;
 
@@ -324,554 +362,106 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
                       Text(
-                        'Связь и синхронизация',
+                        'Связь',
                         style: GoogleFonts.manrope(
                           color: AppColors.text,
                           fontWeight: FontWeight.w800,
-                          fontSize: 17,
+                          fontSize: 18,
+                          letterSpacing: -0.3,
                         ),
                       ),
                       const Spacer(),
                       IconButton(
                         tooltip: 'Обновить',
-                        onPressed: _busy
-                            ? null
-                            : () => diag.refreshConnection(force: true),
-                        icon: const Icon(Icons.refresh, color: AppColors.primary),
+                        onPressed: _busy ? null : _refreshAll,
+                        icon: const Icon(Icons.refresh_rounded, color: AppColors.primary),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Expanded(
                     child: SingleChildScrollView(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                  _SyncStatusBanner(
-                    role: role,
-                    ok: ok,
-                    detail: diag.statusDetail,
-                    hostUrl: hostUrl,
-                    clientUrl: role == SyncRole.client ? sync.config.normalizedBaseUrl : null,
-                    isHosting: sync.isHosting,
-                  ),
-                  const SizedBox(height: 10),
-                  _StudioAccessBlock(),
-                  const SizedBox(height: 12),
-                  if (CloudMode.enabled) ...[
-                    Text(
-                      'Облачный режим: заказы, касса, склад и статистика — через api.det-app.ru.\n'
-                      'LAN-хост :7878 не нужен — оба устройства работают по интернету.',
-                      style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: _busy ? null : _importLocalClients,
-                      icon: const Icon(Icons.upload_file_outlined, size: 18),
-                      label: Text(
-                        'Импорт клиентов из локальной БД',
-                        style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                  ] else ...[
-                  Text(
-                    'Обновления и APK — с сервера api.det-app.ru.\n'
-                    'Общая база ПК↔телефон пока по Wi‑Fi (хост ниже) — до облачных логинов.',
-                    style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'Режим работы',
-                    style: GoogleFonts.manrope(
-                      color: AppColors.textMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      _roleChip(
-                        label: 'Один ПК',
-                        selected: role == SyncRole.local,
-                        onSelected: _busy ? null : (_) => _apply(SyncRole.local),
-                      ),
-                      _roleChip(
-                        label: sync.isHosting ? 'Хост ●' : 'Хост',
-                        selected: role == SyncRole.host,
-                        onSelected: _busy ? null : (_) => _apply(SyncRole.host),
-                        accent: AppColors.primary,
-                      ),
-                      _roleChip(
-                        label: 'Клиент',
-                        selected: role == SyncRole.client,
-                        onSelected: _busy
-                            ? null
-                            : (_) {
-                                _apply(SyncRole.client);
-                              },
-                        accent: const Color(0xFF22D3EE),
-                      ),
-                    ],
-                  ),
-                  if (_busy) ...[
-                    const SizedBox(height: 8),
-                    const LinearProgressIndicator(minHeight: 2),
-                  ],
-                  const SizedBox(height: 12),
-                  if (role == SyncRole.host) ...[
-                    Text(
-                      'Этот ПК — хост. База здесь. Телефон и другой ПК — в той же Wi‑Fi.',
-                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Ссылка для другого ПК',
-                      style: GoogleFonts.manrope(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface2,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: SelectableText(
-                        hostUrl ?? 'IP не найден — проверьте Wi‑Fi',
-                        style: GoogleFonts.manrope(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 15,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: hostUrl == null
-                            ? null
-                            : () async {
-                                await Clipboard.setData(ClipboardData(text: hostUrl));
-                                if (!context.mounted) return;
-                                showAppToast(context, 'Ссылка скопирована — вставьте на другом ПК');
-                              },
-                        icon: const Icon(Icons.copy, size: 18),
-                        label: const Text('Копировать ссылку'),
-                      ),
-                    ),
-                    if (sync.lanIps.length > 1) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        'Если не подключается — попробуйте другой адрес:\n'
-                        '${sync.lanIps.skip(1).map((ip) => 'http://$ip:${sync.config.port}').join('\n')}',
-                        style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 11, height: 1.35),
-                      ),
-                    ],
-                    if (hostUrl != null) ...[
-                      const SizedBox(height: 16),
-                      Text(
-                        'QR для телефона',
-                        style: GoogleFonts.manrope(
-                          color: AppColors.textMuted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Center(
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.border),
-                          ),
-                          child: QrImageView(
-                            data: encodeSyncQrPayload(hostUrl),
-                            version: QrVersions.auto,
-                            size: 180,
-                            backgroundColor: Colors.white,
-                            eyeStyle: const QrEyeStyle(
-                              eyeShape: QrEyeShape.square,
-                              color: Color(0xFF111827),
+                          if (signedIn) ...[
+                            _CloudHero(
+                              pulse: _pulse,
+                              checking: _cloudChecking,
+                              ok: _cloudOk,
+                              detail: _cloudDetail,
+                              user: user!,
                             ),
-                            dataModuleStyle: const QrDataModuleStyle(
-                              dataModuleShape: QrDataModuleShape.square,
-                              color: Color(0xFF111827),
+                            const SizedBox(height: 12),
+                            _StudioAccessBlock(key: _studioKey),
+                            const SizedBox(height: 12),
+                            _InviteBlock(
+                              inviteUrl: _kInviteUrl,
+                              canManage: canManageAssignments(accessRankOf(user)),
+                              onStaffCreated: () => _studioKey.currentState?.reloadPending(),
                             ),
+                            const SizedBox(height: 8),
+                          ] else ...[
+                            _GuestCloudPrompt(onRefresh: _pingCloud, cloudOk: _cloudOk),
+                            const SizedBox(height: 12),
+                          ],
+                          _SoftExpansion(
+                            icon: Icons.android_rounded,
+                            title: 'Приложение для телефона',
+                            subtitle: 'QR на APK с сервера',
+                            initiallyExpanded: false,
+                            onOpen: () {
+                              setState(() => _apkExpanded = true);
+                              _ensureApkQr();
+                            },
+                            child: _buildApkBody(context),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'На телефоне: лампочка → «Сканировать QR хоста» '
-                        'или камера → QR → «Открыть Det App».',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
-                      ),
-                    ],
-                    const SizedBox(height: 10),
-                    Text(
-                      'Windows может спросить firewall — разрешите в частных сетях.\n'
-                      'Хост не уводить в сон, пока клиенты подключены.',
-                      style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
-                    ),
-                  ] else ...[
-                    Text(
-                      role == SyncRole.client
-                          ? 'Вставьте ссылку с хоста или найдите его в Wi‑Fi'
-                          : 'На хосте: «Хост» → скопируйте ссылку / покажите QR.\n'
-                              'Здесь: вставьте ссылку, «Найти хост» или сканируйте QR.',
-                      style: GoogleFonts.manrope(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (_canScanSyncQr) ...[
-                      ElevatedButton.icon(
-                        onPressed: (_busy || _scanning) ? null : _scanHostQr,
-                        icon: const Icon(Icons.qr_code_scanner, size: 20),
-                        label: const Text('Сканировать QR хоста'),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    OutlinedButton.icon(
-                      onPressed: (_busy || _scanning) ? null : _findHosts,
-                      icon: _scanning
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.wifi_find, size: 18),
-                      label: Text(
-                        _scanning
-                            ? (_scanTotal > 0
-                                ? 'Поиск… $_scanDone/$_scanTotal'
-                                : 'Поиск в сети…')
-                            : 'Найти хост в Wi‑Fi',
-                      ),
-                    ),
-                    if (_scanning) ...[
-                      const SizedBox(height: 6),
-                      LinearProgressIndicator(
-                        minHeight: 2,
-                        value: _scanTotal > 0 ? _scanDone / _scanTotal : null,
-                      ),
-                    ],
-                    if (_foundHosts.length > 1) ...[
-                      const SizedBox(height: 8),
-                      ..._foundHosts.map(
-                        (h) => Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
-                          child: Material(
-                            color: AppColors.surface2,
-                            borderRadius: BorderRadius.circular(10),
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(10),
-                              onTap: _busy
-                                  ? null
-                                  : () async {
-                                      _urlCtrl.text = h.baseUrl;
-                                      await _apply(SyncRole.client);
-                                    },
+                          if (signedIn && CloudMode.enabled)
+                            _SoftExpansion(
+                              icon: Icons.upload_file_outlined,
+                              title: 'Импорт локальных клиентов',
+                              subtitle: 'Из detailing.db в облако',
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.dns_outlined, size: 18, color: AppColors.primary),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        h.baseUrl,
-                                        style: GoogleFonts.manrope(
-                                          color: AppColors.text,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      'Подключить',
-                                      style: GoogleFonts.manrope(
-                                        color: AppColors.primary,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: _urlCtrl,
-                      enabled: !_busy && !_scanning,
-                      decoration: const InputDecoration(
-                        hintText: 'http://192.168.0.10:7878',
-                        isDense: true,
-                        labelText: 'Ссылка с хоста',
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: ElevatedButton(
-                            onPressed: (_busy || _scanning) ? null : () => _apply(SyncRole.client),
-                            child: const Text('Подключить как клиент'),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        TextButton(
-                          onPressed: (_busy || _scanning)
-                              ? null
-                              : () async {
-                                  _urlCtrl.clear();
-                                  setState(() => _foundHosts = const []);
-                                  await _apply(SyncRole.local);
-                                },
-                          child: const Text('Сброс'),
-                        ),
-                      ],
-                    ),
-                  ],
-                  ], // end !CloudMode LAN host UI
-                  const SizedBox(height: 10),
-                  Theme(
-                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
-                      initiallyExpanded: false,
-                      tilePadding: EdgeInsets.zero,
-                      childrenPadding: const EdgeInsets.only(bottom: 8),
-                      onExpansionChanged: (open) {
-                        setState(() => _apkExpanded = open);
-                        if (open) _ensureApkQr();
-                      },
-                      leading: Icon(
-                        Icons.android,
-                        color: _apkExpanded ? AppColors.primary : AppColors.textMuted,
-                        size: 22,
-                      ),
-                      title: Text(
-                        'QR на скачивание APK',
-                        style: GoogleFonts.manrope(
-                          color: AppColors.text,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                        ),
-                      ),
-                      subtitle: Text(
-                        'Актуальная мобилка с сервера',
-                        style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
-                      ),
-                      children: [
-                        if (_apkLoading)
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
-                          )
-                        else if (_apkError != null)
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                Text(
-                                  _apkError!,
-                                  style: GoogleFonts.manrope(color: AppColors.danger, fontSize: 12),
-                                ),
-                                TextButton(
-                                  onPressed: () {
-                                    setState(() {
-                                      _apkQrUrl = null;
-                                      _apkError = null;
-                                    });
-                                    _ensureApkQr();
-                                  },
-                                  child: const Text('Повторить'),
-                                ),
-                              ],
-                            ),
-                          )
-                        else if (_apkQrUrl != null) ...[
-                          if (_apkLabel != null)
-                            Text(
-                              'Сборка $_apkLabel',
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.manrope(
-                                color: AppColors.textDim,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          const SizedBox(height: 8),
-                          Center(
-                            child: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: AppColors.border),
-                              ),
-                              child: QrImageView(
-                                data: _apkQrUrl!,
-                                version: QrVersions.auto,
-                                size: 150,
-                                backgroundColor: Colors.white,
-                                eyeStyle: const QrEyeStyle(
-                                  eyeShape: QrEyeShape.square,
-                                  color: Color(0xFF111827),
-                                ),
-                                dataModuleStyle: const QrDataModuleStyle(
-                                  dataModuleShape: QrDataModuleShape.square,
-                                  color: Color(0xFF111827),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          SelectableText(
-                            _apkQrUrl!,
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.manrope(
-                              color: AppColors.primary,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                await Clipboard.setData(ClipboardData(text: _apkQrUrl!));
-                                if (!context.mounted) return;
-                                showAppToast(context, 'Ссылка на APK скопирована');
-                              },
-                              icon: const Icon(Icons.copy, size: 18),
-                              label: const Text('Копировать ссылку на APK'),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Телефон: камера → QR → скачать → установить',
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Последние события',
-                    style: GoogleFonts.manrope(
-                      color: AppColors.textMuted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Container(
-                    height: 120,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppColors.bg,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: diag.recentErrors.isEmpty
-                        ? Center(
-                            child: Text(
-                              'Лог пока пуст',
-                              style: GoogleFonts.manrope(color: AppColors.textDim),
-                            ),
-                          )
-                        : ListView.builder(
-                            itemCount: diag.recentErrors.length,
-                            itemBuilder: (_, i) {
-                              final e = diag.recentErrors[diag.recentErrors.length - 1 - i];
-                              return Padding(
                                 padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(
-                                  e.format(),
-                                  style: GoogleFonts.manrope(
-                                    color: e.level == 'error' || e.level == 'fatal'
-                                        ? AppColors.danger
-                                        : AppColors.textMuted,
-                                    fontSize: 11,
-                                    height: 1.3,
+                                child: OutlinedButton.icon(
+                                  onPressed: _busy ? null : _importLocalClients,
+                                  icon: const Icon(Icons.upload_file_outlined, size: 18),
+                                  label: Text(
+                                    'Запустить импорт',
+                                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
                                   ),
                                 ),
-                              );
-                            },
+                              ),
+                            ),
+                          _SoftExpansion(
+                            icon: Icons.wifi_tethering_rounded,
+                            title: 'Офлайн · Wi‑Fi',
+                            subtitle: sync.isHosting
+                                ? 'Локальный хост ещё запущен'
+                                : 'Аварийный режим без интернета',
+                            accent: sync.isHosting ? const Color(0xFFE8A838) : null,
+                            child: _buildLanBody(
+                              context,
+                              role: role,
+                              hostUrl: hostUrl,
+                              sync: sync,
+                            ),
                           ),
-                  ),
+                          _SoftExpansion(
+                            icon: Icons.bug_report_outlined,
+                            title: 'Диагностика',
+                            subtitle: diag.recentErrors.isEmpty
+                                ? 'Лог пуст'
+                                : '${diag.recentErrors.length} записей',
+                            child: _buildDiagBody(context, diag),
+                          ),
                         ],
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () async {
-                            final text = diag.formatLogForBugReport();
-                            await Clipboard.setData(ClipboardData(text: text));
-                            if (!context.mounted) return;
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Лог скопирован')),
-                            );
-                          },
-                          icon: const Icon(Icons.copy, size: 18),
-                          label: const Text('Копировать лог'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-                          onPressed: () async {
-                            final ok = await showDialog<bool>(
-                              context: context,
-                              builder: (_) => BugReportDialog(
-                                initialDetails: diag.formatLogForBugReport(limit: 30),
-                                initialPlace: 'Индикатор связи',
-                                initialSituation: diag.statusDetail,
-                              ),
-                            );
-                            if (ok == true) {
-                              await diag.acknowledgeLocalErrors();
-                              if (context.mounted) Navigator.pop(context);
-                            }
-                          },
-                          icon: const Icon(Icons.bug_report, size: 18),
-                          label: const Text('В баг-репорт'),
-                        ),
-                      ),
-                    ],
                   ),
                 ],
               );
@@ -881,104 +471,432 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
       ),
     );
   }
+
+  Widget _buildApkBody(BuildContext context) {
+    if (_apkLoading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      );
+    }
+    if (_apkError != null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(_apkError!, style: GoogleFonts.manrope(color: AppColors.danger, fontSize: 12)),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _apkQrUrl = null;
+                  _apkError = null;
+                });
+                _ensureApkQr();
+              },
+              child: const Text('Повторить'),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_apkQrUrl == null) {
+      if (!_apkExpanded) return const SizedBox.shrink();
+      return const SizedBox.shrink();
+    }
+    return Column(
+      children: [
+        if (_apkLabel != null)
+          Text(
+            'Сборка $_apkLabel',
+            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        const SizedBox(height: 8),
+        Center(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: QrImageView(
+              data: _apkQrUrl!,
+              version: QrVersions.auto,
+              size: 140,
+              backgroundColor: Colors.white,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: _apkQrUrl!));
+            if (!context.mounted) return;
+            showAppToast(context, 'Ссылка на APK скопирована');
+          },
+          icon: const Icon(Icons.copy, size: 18),
+          label: const Text('Копировать ссылку'),
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+
+  Widget _buildLanBody(
+    BuildContext context, {
+    required SyncRole role,
+    required String? hostUrl,
+    required SyncController sync,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Только если нет интернета. Обычная работа — через облако.',
+          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+        ),
+        if (sync.isHosting) ...[
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _apply(SyncRole.local),
+            icon: const Icon(Icons.stop_circle_outlined, size: 18),
+            label: const Text('Остановить локальный хост'),
+          ),
+        ],
+        const SizedBox(height: 10),
+        Text(
+          'Режим',
+          style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _roleChip(
+              label: 'Один ПК',
+              selected: role == SyncRole.local,
+              onSelected: _busy ? null : (_) => _apply(SyncRole.local),
+            ),
+            _roleChip(
+              label: sync.isHosting ? 'Хост ●' : 'Хост',
+              selected: role == SyncRole.host,
+              onSelected: _busy ? null : (_) => _apply(SyncRole.host),
+              accent: AppColors.primary,
+            ),
+            _roleChip(
+              label: 'Клиент',
+              selected: role == SyncRole.client,
+              onSelected: _busy ? null : (_) => _apply(SyncRole.client),
+              accent: const Color(0xFF22D3EE),
+            ),
+          ],
+        ),
+        if (_busy) ...[
+          const SizedBox(height: 8),
+          const LinearProgressIndicator(minHeight: 2),
+        ],
+        const SizedBox(height: 12),
+        if (role == SyncRole.host) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.bg.withOpacity(0.55),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: SelectableText(
+              hostUrl ?? 'IP не найден',
+              style: GoogleFonts.manrope(color: AppColors.primary, fontWeight: FontWeight.w800, fontSize: 14),
+            ),
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(
+            onPressed: hostUrl == null
+                ? null
+                : () async {
+                    await Clipboard.setData(ClipboardData(text: hostUrl));
+                    if (!context.mounted) return;
+                    showAppToast(context, 'Ссылка скопирована');
+                  },
+            icon: const Icon(Icons.copy, size: 18),
+            label: const Text('Копировать ссылку'),
+          ),
+          if (hostUrl != null) ...[
+            const SizedBox(height: 12),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
+                child: QrImageView(
+                  data: encodeSyncQrPayload(hostUrl),
+                  version: QrVersions.auto,
+                  size: 150,
+                  backgroundColor: Colors.white,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'QR для телефона в той же Wi‑Fi',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
+            ),
+          ],
+        ] else ...[
+          if (_canScanSyncQr) ...[
+            ElevatedButton.icon(
+              onPressed: (_busy || _scanning) ? null : _scanHostQr,
+              icon: const Icon(Icons.qr_code_scanner, size: 20),
+              label: const Text('Сканировать QR хоста'),
+            ),
+            const SizedBox(height: 8),
+          ],
+          OutlinedButton.icon(
+            onPressed: (_busy || _scanning) ? null : _findHosts,
+            icon: _scanning
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.wifi_find, size: 18),
+            label: Text(
+              _scanning
+                  ? (_scanTotal > 0 ? 'Поиск… $_scanDone/$_scanTotal' : 'Поиск…')
+                  : 'Найти хост в Wi‑Fi',
+            ),
+          ),
+          if (_foundHosts.length > 1) ...[
+            const SizedBox(height: 8),
+            ..._foundHosts.map(
+              (h) => Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Material(
+                  color: AppColors.bg.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: _busy
+                        ? null
+                        : () async {
+                            _urlCtrl.text = h.baseUrl;
+                            await _apply(SyncRole.client);
+                          },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      child: Text(
+                        h.baseUrl,
+                        style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          TextField(
+            controller: _urlCtrl,
+            enabled: !_busy && !_scanning,
+            decoration: const InputDecoration(
+              hintText: 'http://192.168.0.10:7878',
+              isDense: true,
+              labelText: 'Ссылка с хоста',
+            ),
+          ),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            onPressed: (_busy || _scanning) ? null : () => _apply(SyncRole.client),
+            child: const Text('Подключить как клиент'),
+          ),
+        ],
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  Widget _buildDiagBody(BuildContext context, AppDiagnostics diag) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          height: 110,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppColors.bg,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: diag.recentErrors.isEmpty
+              ? Center(
+                  child: Text('Лог пуст', style: GoogleFonts.manrope(color: AppColors.textDim)),
+                )
+              : ListView.builder(
+                  itemCount: diag.recentErrors.length,
+                  itemBuilder: (_, i) {
+                    final e = diag.recentErrors[diag.recentErrors.length - 1 - i];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        e.format(),
+                        style: GoogleFonts.manrope(
+                          color: e.level == 'error' || e.level == 'fatal'
+                              ? AppColors.danger
+                              : AppColors.textMuted,
+                          fontSize: 11,
+                          height: 1.3,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: diag.formatLogForBugReport()));
+                  if (!context.mounted) return;
+                  showAppToast(context, 'Лог скопирован');
+                },
+                icon: const Icon(Icons.copy, size: 18),
+                label: const Text('Лог'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+                onPressed: () async {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder: (_) => BugReportDialog(
+                      initialDetails: diag.formatLogForBugReport(limit: 30),
+                      initialPlace: 'Индикатор связи',
+                      initialSituation: _cloudDetail.isNotEmpty ? _cloudDetail : diag.statusDetail,
+                    ),
+                  );
+                  if (ok == true) {
+                    await diag.acknowledgeLocalErrors();
+                    if (context.mounted) Navigator.pop(context);
+                  }
+                },
+                icon: const Icon(Icons.bug_report, size: 18),
+                label: const Text('Баг'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
 }
 
-class _SyncStatusBanner extends StatelessWidget {
-  final SyncRole role;
-  final bool ok;
-  final String detail;
-  final String? hostUrl;
-  final String? clientUrl;
-  final bool isHosting;
+// --- Visual blocks -----------------------------------------------------------
 
-  const _SyncStatusBanner({
-    required this.role,
+class _CloudHero extends StatelessWidget {
+  const _CloudHero({
+    required this.pulse,
+    required this.checking,
     required this.ok,
     required this.detail,
-    required this.hostUrl,
-    required this.clientUrl,
-    required this.isHosting,
+    required this.user,
   });
+
+  final AnimationController pulse;
+  final bool checking;
+  final bool? ok;
+  final String detail;
+  final AuthUser user;
 
   @override
   Widget build(BuildContext context) {
-    late final Color accent;
-    late final IconData icon;
-    late final String title;
-    late final String subtitle;
-
-    switch (role) {
-      case SyncRole.host:
-        accent = isHosting && ok ? AppColors.success : AppColors.primary;
-        icon = Icons.dns_outlined;
-        title = isHosting ? 'Хост активен — база на этом ПК' : 'Хост (запуск…)';
-        subtitle = hostUrl?.isNotEmpty == true
-            ? 'Клиенты подключаются к $hostUrl'
-            : detail;
-      case SyncRole.client:
-        accent = ok ? AppColors.success : AppColors.danger;
-        icon = ok ? Icons.cloud_done_outlined : Icons.cloud_off_outlined;
-        title = ok ? 'Клиент подключён — заказы общие' : 'Клиент: хост недоступен';
-        subtitle = (clientUrl != null && clientUrl!.isNotEmpty) ? clientUrl! : detail;
-      case SyncRole.local:
-        accent = AppColors.textMuted;
-        icon = Icons.computer_outlined;
-        title = 'Один ПК — данные только здесь';
-        subtitle = detail.isNotEmpty ? detail : 'Телефон/второй ПК не синхронизируются';
-    }
+    final online = ok == true;
+    final accent = checking
+        ? AppColors.textMuted
+        : online
+            ? AppColors.success
+            : (ok == false ? AppColors.danger : AppColors.primary);
+    final title = checking
+        ? 'Проверка облака…'
+        : online
+            ? 'Облако онлайн'
+            : (ok == false ? 'Облако недоступно' : 'Облако');
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
-        color: accent.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border(
-          left: BorderSide(color: accent.withOpacity(0.9), width: 3.5),
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primarySoft.withOpacity(0.55),
+            AppColors.surface2,
+            AppColors.bg.withOpacity(0.9),
+          ],
         ),
+        border: Border.all(color: AppColors.borderSoft),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: accent, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
+          Row(
+            children: [
+              AnimatedBuilder(
+                animation: pulse,
+                builder: (_, __) {
+                  final t = online ? (0.55 + pulse.value * 0.45) : 1.0;
+                  return Container(
+                    width: 10,
+                    height: 10,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: accent.withOpacity(t),
+                      boxShadow: online
+                          ? [
+                              BoxShadow(
+                                color: accent.withOpacity(0.35 * pulse.value),
+                                blurRadius: 10,
+                                spreadRadius: 1,
+                              ),
+                            ]
+                          : null,
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
                   title,
                   style: GoogleFonts.manrope(
                     color: AppColors.text,
                     fontWeight: FontWeight.w800,
-                    fontSize: 14,
+                    fontSize: 16,
+                    letterSpacing: -0.2,
                   ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  subtitle,
-                  style: GoogleFonts.manrope(
-                    color: AppColors.textMuted,
-                    fontSize: 12,
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
+              ),
+              Icon(Icons.cloud_outlined, color: accent.withOpacity(0.9), size: 22),
+            ],
           ),
-          Container(
-            width: 10,
-            height: 10,
-            margin: const EdgeInsets.only(top: 4),
-            decoration: BoxDecoration(
-              color: ok ? AppColors.success : AppColors.danger,
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: (ok ? AppColors.success : AppColors.danger).withOpacity(0.45),
-                  blurRadius: 6,
-                ),
-              ],
-            ),
+          const SizedBox(height: 6),
+          Text(
+            detail.isNotEmpty ? detail : 'api.det-app.ru',
+            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            user.displayLabel,
+            style: GoogleFonts.manrope(color: AppColors.text, fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            user.email.isNotEmpty ? user.email : (user.phone ?? ''),
+            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
           ),
         ],
       ),
@@ -986,8 +904,274 @@ class _SyncStatusBanner extends StatelessWidget {
   }
 }
 
+class _GuestCloudPrompt extends StatelessWidget {
+  const _GuestCloudPrompt({required this.onRefresh, required this.cloudOk});
+
+  final VoidCallback onRefresh;
+  final bool? cloudOk;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        color: AppColors.surface2,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Войдите в аккаунт',
+            style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Общая база студии — через облако api.det-app.ru. '
+            'Wi‑Fi-хост нужен только без интернета.',
+            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13, height: 1.35),
+          ),
+          if (cloudOk != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              cloudOk == true ? 'Сервер доступен' : 'Сервер недоступен',
+              style: GoogleFonts.manrope(
+                color: cloudOk == true ? AppColors.success : AppColors.danger,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(onPressed: onRefresh, child: const Text('Проверить')),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InviteBlock extends StatelessWidget {
+  const _InviteBlock({
+    required this.inviteUrl,
+    required this.canManage,
+    this.onStaffCreated,
+  });
+
+  final String inviteUrl;
+  final bool canManage;
+  final VoidCallback? onStaffCreated;
+
+  Future<void> _openCreate(BuildContext context) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final created = await showDialog<AuthUser>(
+      context: context,
+      builder: (ctx) => _CreateStaffDialog(accessToken: token),
+    );
+    if (created != null && context.mounted) {
+      showAppToast(context, 'Создан: ${created.displayLabel}');
+      onStaffCreated?.call();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: AppColors.surface2,
+        border: Border.all(color: AppColors.borderSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            canManage ? 'Пригласить в студию' : 'Подключение',
+            style: GoogleFonts.manrope(
+              color: AppColors.textDim,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+            ),
+          ),
+          if (canManage) ...[
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () => _openCreate(context),
+              icon: const Icon(Icons.person_add_alt_1, size: 18),
+              label: Text(
+                'Добавить с должностью',
+                style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Владелец / управляющий / админ / мастер — сразу с филиалом и доступом.',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Или по QR (сам запросит доступ)',
+              style: GoogleFonts.manrope(
+                color: AppColors.textMuted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Center(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: QrImageView(
+                data: inviteUrl,
+                version: QrVersions.auto,
+                size: canManage ? 132 : 148,
+                backgroundColor: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            canManage
+                ? 'Сотрудник ставит приложение и запрашивает доступ — появится в «Назначениях».'
+                : 'Облако Det App · api.det-app.ru',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: inviteUrl));
+              if (!context.mounted) return;
+              showAppToast(context, 'Ссылка скопирована');
+            },
+            icon: const Icon(Icons.link_rounded, size: 18),
+            label: const Text('Скопировать ссылку'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SoftExpansion extends StatefulWidget {
+  const _SoftExpansion({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.child,
+    this.onOpen,
+    this.initiallyExpanded = false,
+    this.accent,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget child;
+  final VoidCallback? onOpen;
+  final bool initiallyExpanded;
+  final Color? accent;
+
+  @override
+  State<_SoftExpansion> createState() => _SoftExpansionState();
+}
+
+class _SoftExpansionState extends State<_SoftExpansion> {
+  late bool _open;
+
+  @override
+  void initState() {
+    super.initState();
+    _open = widget.initiallyExpanded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = widget.accent ?? AppColors.textMuted;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _open ? AppColors.border : AppColors.borderSoft),
+          color: _open ? AppColors.surface2.withOpacity(0.65) : Colors.transparent,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: () {
+                setState(() => _open = !_open);
+                if (_open) widget.onOpen?.call();
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Icon(widget.icon, size: 20, color: _open ? AppColors.primary : accent),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            style: GoogleFonts.manrope(
+                              color: AppColors.text,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13,
+                            ),
+                          ),
+                          Text(
+                            widget.subtitle,
+                            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                    AnimatedRotation(
+                      turns: _open ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: const Icon(Icons.expand_more, color: AppColors.textDim),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            AnimatedCrossFade(
+              firstChild: const SizedBox(width: double.infinity),
+              secondChild: Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: widget.child,
+              ),
+              crossFadeState: _open ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              duration: const Duration(milliseconds: 200),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Филиал + должность + алерты назначения (по уровню доступа).
 class _StudioAccessBlock extends StatefulWidget {
+  const _StudioAccessBlock({super.key});
+
   @override
   State<_StudioAccessBlock> createState() => _StudioAccessBlockState();
 }
@@ -1006,6 +1190,8 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
       _loadPending();
     }
   }
+
+  void reloadPending() => _loadPending();
 
   Future<void> _loadPending() async {
     final token = AuthController.instance.accessToken;
@@ -1043,6 +1229,19 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
     }
   }
 
+  Future<void> _openCreate() async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final created = await showDialog<AuthUser>(
+      context: context,
+      builder: (ctx) => _CreateStaffDialog(accessToken: token),
+    );
+    if (created != null && mounted) {
+      showAppToast(context, 'Создан: ${created.displayLabel}');
+      await _loadPending();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = AuthController.instance.user;
@@ -1051,23 +1250,36 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
     final jobLabel = _jobLabel(user, rank);
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
         color: AppColors.surface2,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderSoft),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Студия',
-            style: GoogleFonts.manrope(
-              color: AppColors.textDim,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.6,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Студия',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textDim,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ),
+              if (canManageAssignments(rank))
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Добавить сотрудника',
+                  onPressed: _openCreate,
+                  icon: const Icon(Icons.person_add_alt_1, size: 18, color: AppColors.primary),
+                ),
+            ],
           ),
           const SizedBox(height: 8),
           _kv('Филиал', branchLabel),
@@ -1110,14 +1322,10 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
               ],
             ),
             if (_error != null)
-              Text(
-                _error!,
-                style: GoogleFonts.manrope(color: Colors.redAccent, fontSize: 11),
-              )
+              Text(_error!, style: GoogleFonts.manrope(color: Colors.redAccent, fontSize: 11))
             else if (_pending.isEmpty)
               Text(
-                'Пока никто не ждёт роль. Когда сотрудник подключится к филиалу, '
-                'он появится здесь — назначьте должность и цех.',
+                'Никто не ждёт роль. Новый сотрудник появится здесь после подключения.',
                 style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
               )
             else
@@ -1224,6 +1432,250 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
   }
 }
 
+class _CreateStaffDialog extends StatefulWidget {
+  const _CreateStaffDialog({required this.accessToken});
+
+  final String accessToken;
+
+  @override
+  State<_CreateStaffDialog> createState() => _CreateStaffDialogState();
+}
+
+class _CreateStaffDialogState extends State<_CreateStaffDialog> {
+  final _api = CompanyApi();
+  final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _passCtrl = TextEditingController();
+  bool _busy = false;
+  bool _obscure = true;
+  String? _error;
+  List<CompanyRole> _roles = const [];
+  List<CompanyBranch> _branches = const [];
+  List<String> _workshops = const [];
+  final Set<String> _pickedRoles = {};
+  final Set<String> _pickedWorkshops = {};
+  int? _branchId;
+
+  @override
+  void initState() {
+    super.initState();
+    _pickedRoles.add(JobTitles.admin);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _phoneCtrl.dispose();
+    _passCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final roles = await _api.listRoles(accessToken: widget.accessToken);
+      final branches = await _api.listBranches(accessToken: widget.accessToken);
+      final workshops = await _api.listWorkshops(accessToken: widget.accessToken);
+      if (!mounted) return;
+      setState(() {
+        _roles = roles
+            .where((r) => JobTitles.all.contains(r.name) || r.name == JobTitles.legacyCompanyAdmin)
+            .toList();
+        if (_roles.isEmpty) _roles = roles;
+        _branches = branches;
+        _workshops = workshops;
+        _branchId = branches.isNotEmpty ? branches.first.id : null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _save() async {
+    final name = _nameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    final pass = _passCtrl.text;
+    if (name.isEmpty) {
+      setState(() => _error = 'Укажите ФИО');
+      return;
+    }
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = 'Укажите корректный email');
+      return;
+    }
+    if (pass.length < 6) {
+      setState(() => _error = 'Пароль не короче 6 символов');
+      return;
+    }
+    if (_pickedRoles.isEmpty) {
+      setState(() => _error = 'Выберите должность');
+      return;
+    }
+    if (_branchId == null) {
+      setState(() => _error = 'Выберите филиал');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final created = await _api.createUser(
+        accessToken: widget.accessToken,
+        email: email,
+        password: pass,
+        fullName: name,
+        phone: _phoneCtrl.text.trim().isEmpty ? null : _phoneCtrl.text.trim(),
+        roleNames: _pickedRoles.toList(),
+        branchIds: [_branchId!],
+        workshops: _pickedWorkshops.toList(),
+      );
+      if (!mounted) return;
+      Navigator.pop(context, created);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      title: Text(
+        'Новый сотрудник',
+        style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16),
+      ),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _nameCtrl,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(labelText: 'ФИО', isDense: true),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(labelText: 'Email (логин)', isDense: true),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _phoneCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: 'Телефон (необязательно)', isDense: true),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _passCtrl,
+                obscureText: _obscure,
+                decoration: InputDecoration(
+                  labelText: 'Временный пароль',
+                  isDense: true,
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Должность',
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _roles.map((r) {
+                  final on = _pickedRoles.contains(r.name);
+                  return FilterChip(
+                    label: Text(r.name),
+                    selected: on,
+                    onSelected: (v) => setState(() {
+                      if (v) {
+                        _pickedRoles.add(r.name);
+                      } else {
+                        _pickedRoles.remove(r.name);
+                      }
+                    }),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Филиал',
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              if (_branches.isEmpty)
+                Text(
+                  'Филиалы не загружены',
+                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                )
+              else
+                DropdownButtonFormField<int>(
+                  value: _branchId,
+                  items: _branches
+                      .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _branchId = v),
+                ),
+              const SizedBox(height: 14),
+              Text(
+                'Цех (для мастера, можно несколько)',
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _workshops.map((w) {
+                  final on = _pickedWorkshops.contains(w);
+                  return FilterChip(
+                    label: Text(w),
+                    selected: on,
+                    onSelected: (v) => setState(() {
+                      if (v) {
+                        _pickedWorkshops.add(w);
+                      } else {
+                        _pickedWorkshops.remove(w);
+                      }
+                    }),
+                  );
+                }).toList(),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: GoogleFonts.manrope(color: Colors.redAccent, fontSize: 12)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Отмена')),
+        FilledButton(
+          onPressed: _busy ? null : _save,
+          child: _busy
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Создать'),
+        ),
+      ],
+    );
+  }
+}
+
 class _AssignUserDialog extends StatefulWidget {
   const _AssignUserDialog({required this.user, required this.accessToken});
 
@@ -1258,7 +1710,9 @@ class _AssignUserDialogState extends State<_AssignUserDialog> {
       final workshops = await _api.listWorkshops(accessToken: widget.accessToken);
       if (!mounted) return;
       setState(() {
-        _roles = roles.where((r) => JobTitles.all.contains(r.name) || r.name == JobTitles.legacyCompanyAdmin).toList();
+        _roles = roles
+            .where((r) => JobTitles.all.contains(r.name) || r.name == JobTitles.legacyCompanyAdmin)
+            .toList();
         if (_roles.isEmpty) _roles = roles;
         _branches = branches;
         _workshops = workshops;
@@ -1313,7 +1767,10 @@ class _AssignUserDialogState extends State<_AssignUserDialog> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Должность', style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700)),
+              Text(
+                'Должность',
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
@@ -1334,7 +1791,10 @@ class _AssignUserDialogState extends State<_AssignUserDialog> {
                 }).toList(),
               ),
               const SizedBox(height: 14),
-              Text('Цех (можно несколько)', style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700)),
+              Text(
+                'Цех (можно несколько)',
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700),
+              ),
               const SizedBox(height: 6),
               Wrap(
                 spacing: 6,
@@ -1356,7 +1816,10 @@ class _AssignUserDialogState extends State<_AssignUserDialog> {
               ),
               if (_branches.isNotEmpty) ...[
                 const SizedBox(height: 14),
-                Text('Филиал', style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700)),
+                Text(
+                  'Филиал',
+                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700),
+                ),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<int>(
                   value: _branchId,

@@ -99,7 +99,11 @@ class UserCreate(BaseModel):
     full_name: str = Field(default="", max_length=200)
     phone: str | None = Field(default=None, max_length=32)
     role_ids: list[int] = []
+    ## Удобнее для UI: имена должностей (Владелец / Управляющий / …).
+    role_names: list[str] = Field(default_factory=list, max_length=8)
     branch_ids: list[int] = []
+    workshops: list[str] = Field(default_factory=list, max_length=16)
+    link_master: bool = True
 
 
 class UserAssign(BaseModel):
