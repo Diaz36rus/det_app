@@ -3,8 +3,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'app_datetime.dart';
 import 'app_menu.dart';
 import 'app_theme.dart';
+import 'app_toast.dart';
 import 'database.dart';
+import 'duplicate_guard.dart';
 import 'input_masks.dart';
+import 'master_picker.dart';
 import 'quick_datetime_picker.dart';
 import 'responsive.dart';
 import 'schedule_conflict.dart';
@@ -393,6 +396,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
     final startTimeStr = fmtDb(_startDateTime);
     final endTimeStr = fmtDb(_endDateTime);
 
+    if (!mounted) return;
     final okSlot = await confirmNoScheduleConflict(
       context,
       startTime: startTimeStr,
@@ -400,25 +404,53 @@ class _OrdersScreenState extends State<OrdersScreen> {
     );
     if (!okSlot || !mounted) return;
 
-    var client = await DatabaseHelper().getClientByPhone(phone);
+    final vin = VinUtils.normalize(_vinController.text);
+    final identity = await findIdentityMatch(phone: phone, plate: plate, vin: vin);
     int clientId;
+    int? carId = _selectedClientCarId;
 
-    if (client == null) {
-      clientId = await DatabaseHelper().addClient(_nameController.text, phone);
+    if (identity != null) {
+      if (!mounted) return;
+      final reused = await confirmIdentityReuse(context, identity);
+      if (reused == null || !mounted) return;
+      clientId = reused.clientId;
+      if (reused.carId != null) {
+        carId = reused.carId;
+      }
+      // Подставим имя существующего клиента в заказ (на случай другого ввода).
+      if (_nameController.text.trim() != reused.clientName && reused.clientName.isNotEmpty) {
+        _nameController.text = reused.clientName;
+      }
     } else {
-      clientId = client['id'];
+      var client = await DatabaseHelper().getClientByPhone(phone);
+      if (client == null) {
+        clientId = await DatabaseHelper().addClient(_nameController.text, phone);
+      } else {
+        clientId = client['id'] as int;
+      }
     }
 
-    int? carId = _selectedClientCarId ?? await DatabaseHelper().getCarId(clientId, plate);
-    final vin = VinUtils.normalize(_vinController.text);
+    carId ??= await DatabaseHelper().getCarId(clientId, plate);
     if (carId == null) {
-      carId = await DatabaseHelper().addCar(
-        clientId,
-        _carController.text,
-        plate,
-        vin: vin,
-        category: _selectedCarCategory,
-      );
+      // Повторная страховка: госномер мог появиться у другого клиента между проверками.
+      final plateHit = plate.isEmpty
+          ? null
+          : await findIdentityMatch(plate: plate, excludeClientId: clientId);
+      if (plateHit != null) {
+        if (!mounted) return;
+        final reused = await confirmIdentityReuse(context, plateHit);
+        if (reused == null || reused.carId == null) return;
+        clientId = reused.clientId;
+        carId = reused.carId;
+      } else {
+        carId = await DatabaseHelper().addCar(
+          clientId,
+          _carController.text,
+          plate,
+          vin: vin,
+          category: _selectedCarCategory,
+        );
+      }
     } else {
       await DatabaseHelper().updateCar(
         carId,
@@ -428,6 +460,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
         category: _selectedCarCategory,
       );
     }
+    final resolvedCarId = carId;
+    if (resolvedCarId == null) return;
 
     String dueDateStr =
         "${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}";
@@ -460,13 +494,24 @@ class _OrdersScreenState extends State<OrdersScreen> {
 
     await DatabaseHelper().addOrderWithItems(
       clientId,
-      carId,
+      resolvedCarId,
       orderItems,
       dueDate: dueDateStr,
       startTime: startTimeStr,
       endTime: endTimeStr,
       endDate: endDateStr,
     );
+
+    if (mounted) {
+      final masters = await DatabaseHelper().getAllMastersFull();
+      final missing = workshopsWithoutMasters(
+        orderItems.map((i) => i['workshop']?.toString()),
+        masters,
+      );
+      if (mounted && missing.isNotEmpty) {
+        showAppToast(context, missingMastersMessage(missing));
+      }
+    }
 
     setState(() {
       _statusMessage = "Заказ создан";

@@ -1,7 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
+import 'app_toast.dart';
 import 'database.dart';
+
+/// Мастера, чья роль подходит цеху (без уже выбранных «чужих»).
+List<Map<String, dynamic>> mastersForWorkshop(
+  List<Map<String, dynamic>> masters,
+  String workshop,
+) {
+  final ws = workshop.trim();
+  if (ws.isEmpty) return const [];
+  return masters
+      .where((m) => masterRoleFitsWorkshop(m['role']?.toString(), ws))
+      .toList();
+}
+
+/// Уникальные цеха из списка, для которых нет ни одного подходящего мастера.
+List<String> workshopsWithoutMasters(
+  Iterable<String?> workshops,
+  List<Map<String, dynamic>> masters,
+) {
+  final seen = <String>{};
+  final missing = <String>[];
+  for (final raw in workshops) {
+    final ws = (raw ?? '').trim();
+    if (ws.isEmpty || !WORKSHOPS.contains(ws) || !seen.add(ws)) continue;
+    if (mastersForWorkshop(masters, ws).isEmpty) missing.add(ws);
+  }
+  return missing;
+}
+
+String missingMastersMessage(List<String> workshops) {
+  if (workshops.isEmpty) return '';
+  if (workshops.length == 1) {
+    return 'Нет мастера на цех «${workshops.first}» — назначьте вручную.';
+  }
+  return 'Нет мастера на цеха: ${workshops.map((w) => '«$w»').join(', ')} — назначьте вручную.';
+}
 
 /// Multi-select мастеров для цеха. Возвращает выбранные id или `null` при отмене.
 Future<List<int>?> pickWorkshopMasters(
@@ -18,6 +54,10 @@ Future<List<int>?> pickWorkshopMasters(
     return masterRoleFitsWorkshop(m['role']?.toString(), workshop);
   }).toList();
 
+  if (filtered.isEmpty) {
+    showAppToast(context, missingMastersMessage([workshop]));
+  }
+
   return showDialog<List<int>>(
     context: context,
     builder: (context) {
@@ -33,7 +73,7 @@ Future<List<int>?> pickWorkshopMasters(
               width: 300,
               child: filtered.isEmpty
                   ? Text(
-                      "Нет мастеров с ролью для цеха «$workshop».\nДобавь их в разделе Сотрудники.",
+                      "${missingMastersMessage([workshop])}\nДобавьте сотрудников в разделе «Сотрудники».",
                       style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
                     )
                   : ListView(

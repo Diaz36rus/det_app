@@ -9,6 +9,8 @@ import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
 import 'access_model.dart';
 import 'auth/auth_controller.dart';
+import 'auth/auth_models.dart';
+import 'auth/company_api.dart';
 import 'app_diagnostics.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
@@ -985,7 +987,62 @@ class _SyncStatusBanner extends StatelessWidget {
 }
 
 /// Филиал + должность + алерты назначения (по уровню доступа).
-class _StudioAccessBlock extends StatelessWidget {
+class _StudioAccessBlock extends StatefulWidget {
+  @override
+  State<_StudioAccessBlock> createState() => _StudioAccessBlockState();
+}
+
+class _StudioAccessBlockState extends State<_StudioAccessBlock> {
+  final _api = CompanyApi();
+  List<AuthUser> _pending = const [];
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final rank = accessRankOf(AuthController.instance.user);
+    if (canManageAssignments(rank)) {
+      _loadPending();
+    }
+  }
+
+  Future<void> _loadPending() async {
+    final token = AuthController.instance.accessToken;
+    if (token == null || token.isEmpty) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final rows = await _api.listUsers(accessToken: token, pending: true);
+      if (!mounted) return;
+      setState(() {
+        _pending = rows;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _openAssign(AuthUser u) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _AssignUserDialog(user: u, accessToken: token),
+    );
+    if (ok == true) {
+      showAppToast(context, 'Назначено: ${u.displayLabel}');
+      await _loadPending();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = AuthController.instance.user;
@@ -1016,22 +1073,103 @@ class _StudioAccessBlock extends StatelessWidget {
           _kv('Филиал', branchLabel),
           const SizedBox(height: 4),
           _kv('Должность', jobLabel),
+          if (user?.pendingAssignment == true) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Ожидаете назначение должности администратором.',
+              style: GoogleFonts.manrope(color: const Color(0xFFE8A838), fontSize: 12, height: 1.35),
+            ),
+          ],
           if (canManageAssignments(rank)) ...[
             const SizedBox(height: 10),
-            Text(
-              'Назначения',
-              style: GoogleFonts.manrope(
-                color: AppColors.textMuted,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Назначения',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (_loading)
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: 'Обновить',
+                    onPressed: _loadPending,
+                    icon: const Icon(Icons.refresh, size: 18, color: AppColors.textDim),
+                  ),
+              ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Пока никто не ждёт роль. Когда сотрудник подключится к филиалу, '
-              'он появится здесь — назначьте должность и цех.',
-              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
-            ),
+            if (_error != null)
+              Text(
+                _error!,
+                style: GoogleFonts.manrope(color: Colors.redAccent, fontSize: 11),
+              )
+            else if (_pending.isEmpty)
+              Text(
+                'Пока никто не ждёт роль. Когда сотрудник подключится к филиалу, '
+                'он появится здесь — назначьте должность и цех.',
+                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+              )
+            else
+              ..._pending.map((p) {
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Material(
+                    color: AppColors.bg.withOpacity(0.55),
+                    borderRadius: BorderRadius.circular(10),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => _openAssign(p),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.person_outline, size: 18, color: Color(0xFFE8A838)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    p.displayLabel,
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.text,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    p.email,
+                                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Text(
+                              'Назначить',
+                              style: GoogleFonts.manrope(
+                                color: AppColors.primary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
           ] else if (rank == AccessRank.master) ...[
             const SizedBox(height: 8),
             Text(
@@ -1058,8 +1196,9 @@ class _StudioAccessBlock extends StatelessWidget {
   static String _jobLabel(dynamic user, AccessRank rank) {
     if (user == null) return '—';
     if (rank == AccessRank.platformOwner) return 'Владелец приложения';
+    if (user.pendingAssignment == true) return 'Ожидает назначение';
     final roles = (user.roles as List?)?.map((e) => e.toString()).toList() ?? const [];
-    if (roles.isEmpty) return 'Мастер (без должности в облаке)';
+    if (roles.isEmpty) return 'Без должности';
     return roles.join(', ');
   }
 
@@ -1079,6 +1218,169 @@ class _StudioAccessBlock extends StatelessWidget {
             v,
             style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13, fontWeight: FontWeight.w700),
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _AssignUserDialog extends StatefulWidget {
+  const _AssignUserDialog({required this.user, required this.accessToken});
+
+  final AuthUser user;
+  final String accessToken;
+
+  @override
+  State<_AssignUserDialog> createState() => _AssignUserDialogState();
+}
+
+class _AssignUserDialogState extends State<_AssignUserDialog> {
+  final _api = CompanyApi();
+  bool _busy = false;
+  String? _error;
+  List<CompanyRole> _roles = const [];
+  List<CompanyBranch> _branches = const [];
+  List<String> _workshops = const [];
+  final Set<String> _pickedRoles = {};
+  final Set<String> _pickedWorkshops = {};
+  int? _branchId;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final roles = await _api.listRoles(accessToken: widget.accessToken);
+      final branches = await _api.listBranches(accessToken: widget.accessToken);
+      final workshops = await _api.listWorkshops(accessToken: widget.accessToken);
+      if (!mounted) return;
+      setState(() {
+        _roles = roles.where((r) => JobTitles.all.contains(r.name) || r.name == JobTitles.legacyCompanyAdmin).toList();
+        if (_roles.isEmpty) _roles = roles;
+        _branches = branches;
+        _workshops = workshops;
+        _branchId = branches.isNotEmpty ? branches.first.id : null;
+        _pickedRoles.add(JobTitles.master);
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _save() async {
+    if (_pickedRoles.isEmpty) {
+      setState(() => _error = 'Выберите должность');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _api.assignUser(
+        accessToken: widget.accessToken,
+        userId: widget.user.id,
+        roleNames: _pickedRoles.toList(),
+        branchIds: _branchId != null ? [_branchId!] : const [],
+        workshops: _pickedWorkshops.toList(),
+      );
+      if (!mounted) return;
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      title: Text(
+        'Назначить · ${widget.user.displayLabel}',
+        style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16),
+      ),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Должность', style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _roles.map((r) {
+                  final on = _pickedRoles.contains(r.name);
+                  return FilterChip(
+                    label: Text(r.name),
+                    selected: on,
+                    onSelected: (v) => setState(() {
+                      if (v) {
+                        _pickedRoles.add(r.name);
+                      } else {
+                        _pickedRoles.remove(r.name);
+                      }
+                    }),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 14),
+              Text('Цех (можно несколько)', style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: _workshops.map((w) {
+                  final on = _pickedWorkshops.contains(w);
+                  return FilterChip(
+                    label: Text(w),
+                    selected: on,
+                    onSelected: (v) => setState(() {
+                      if (v) {
+                        _pickedWorkshops.add(w);
+                      } else {
+                        _pickedWorkshops.remove(w);
+                      }
+                    }),
+                  );
+                }).toList(),
+              ),
+              if (_branches.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text('Филиал', style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<int>(
+                  value: _branchId,
+                  items: _branches
+                      .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
+                      .toList(),
+                  onChanged: (v) => setState(() => _branchId = v),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: GoogleFonts.manrope(color: Colors.redAccent, fontSize: 12)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: _busy ? null : () => Navigator.pop(context, false), child: const Text('Отмена')),
+        FilledButton(
+          onPressed: _busy ? null : _save,
+          child: _busy
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Сохранить'),
         ),
       ],
     );

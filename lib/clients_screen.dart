@@ -6,6 +6,7 @@ import 'app_toast.dart';
 import 'crm/crm_api.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
+import 'duplicate_guard.dart';
 import 'input_masks.dart';
 import 'order_details_dialog.dart';
 import 'pulse_anchor.dart';
@@ -120,10 +121,30 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
       return;
     }
 
-    final clientId = await DatabaseHelper().addClient(_nameController.text.trim(), phone);
     final make = _carController.text.trim();
     final plate = PlateMaskFormatter.normalize(_plateController.text);
     final vin = VinUtils.normalize(_vinController.text);
+
+    final identity = await findIdentityMatch(phone: phone, plate: plate, vin: vin);
+    if (identity != null) {
+      if (!mounted) return;
+      final reused = await confirmIdentityReuse(context, identity);
+      if (reused == null) return;
+      // Уже есть — не создаём дубль, просто обновляем список.
+      if (mounted) {
+        showAppToast(context, 'Использован существующий клиент: ${reused.clientName}');
+      }
+      _nameController.clear();
+      _phoneController.text = PhonePlus7Formatter.prefix;
+      _carController.clear();
+      _plateController.clear();
+      _vinController.clear();
+      setState(() => _newCarCategory = '1');
+      _loadClients(_searchController.text);
+      return;
+    }
+
+    final clientId = await DatabaseHelper().addClient(_nameController.text.trim(), phone);
     if (make.isNotEmpty || plate.isNotEmpty || vin.isNotEmpty) {
       await DatabaseHelper().addCar(
         clientId,
@@ -227,6 +248,28 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                       }
                       final plateNorm = PlateMaskFormatter.normalize(plateCtrl.text);
                       final vinNorm = VinUtils.normalize(vinCtrl.text);
+                      final identity = await findIdentityMatch(
+                        plate: plateNorm,
+                        vin: vinNorm,
+                        excludeClientId: isEdit ? null : clientId,
+                        excludeCarId: carId,
+                      );
+                      // При добавлении/смене номера — чужой plate/VIN нельзя молча завести.
+                      if (identity != null &&
+                          (identity.kind == 'plate' || identity.kind == 'vin') &&
+                          identity.carId != carId) {
+                        if (!context.mounted) return;
+                        final reused = await confirmIdentityReuse(context, identity);
+                        if (reused == null) return;
+                        if (context.mounted) {
+                          showAppToast(
+                            context,
+                            'Авто уже у клиента «${reused.clientName}» — дубль не создан',
+                          );
+                          Navigator.pop(context);
+                        }
+                        return;
+                      }
                       if (isEdit) {
                         await DatabaseHelper().updateCar(
                           carId,

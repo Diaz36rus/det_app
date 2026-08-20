@@ -50,7 +50,6 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   /// Высота одного 30-минутного слота.
   final double _slotHeight = 36.0;
   final int _slotMinutes = 30;
-  final double _colWidth = 200.0;
   final double _headerHeight = 40.0;
   final int _startHour = 8;
   final int _endHour = 22;
@@ -240,6 +239,59 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
 
   bool _overlaps(DateTime a0, DateTime a1, DateTime b0, DateTime b1) {
     return a0.isBefore(b1) && a1.isAfter(b0);
+  }
+
+  /// Один заказ, один цех; между работами в таймлайне заказа нет чужого цеха
+  /// → не дробим на параллельные окна в колонке.
+  bool _sameWorkshopStream(
+    Map<String, dynamic> a,
+    Map<String, dynamic> b, {
+    required String workshop,
+    required DateTime viewDay,
+  }) {
+    final idA = (a['orderId'] as num?)?.toInt();
+    final idB = (b['orderId'] as num?)?.toInt();
+    if (idA == null || idB == null || idA != idB) return false;
+
+    DateTime? startOf(Map<String, dynamic> w) => _tryParseDateTime(
+          w['start_time']?.toString(),
+          viewDay: viewDay,
+        );
+
+    final works = _workItems.where((w) {
+      if ((w['order_id'] as num?)?.toInt() != idA) return false;
+      if (w['parent_id'] != null) return false;
+      return startOf(w) != null;
+    }).toList()
+      ..sort((x, y) => startOf(x)!.compareTo(startOf(y)!));
+
+    if (works.isEmpty) return true;
+
+    int indexOfEvent(Map<String, dynamic> e) {
+      final itemId = (e['itemId'] as num?)?.toInt();
+      if (itemId != null) {
+        final i = works.indexWhere((w) => (w['item_id'] as num?)?.toInt() == itemId);
+        if (i >= 0) return i;
+      }
+      final es = e['start'] as DateTime;
+      return works.indexWhere((w) {
+        final ws = (w['workshop'] ?? '').toString();
+        if (ws != workshop && e['isTech'] != true) return false;
+        final st = startOf(w);
+        return st != null && st.isAtSameMomentAs(es);
+      });
+    }
+
+    final ia = indexOfEvent(a);
+    final ib = indexOfEvent(b);
+    if (ia < 0 || ib < 0) return true;
+    final lo = ia < ib ? ia : ib;
+    final hi = ia < ib ? ib : ia;
+    for (var i = lo + 1; i < hi; i++) {
+      final ws = (works[i]['workshop'] ?? '').toString();
+      if (ws.isNotEmpty && ws != workshop) return false;
+    }
+    return true;
   }
 
   Future<void> _openOrder(int orderId) async {
@@ -520,10 +572,21 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final timeGutter = mobile ? 44.0 : 56.0;
-                        final detailColW = mobile ? 160.0 : _colWidth;
                         final bodyColW = (constraints.maxWidth - timeGutter).clamp(120.0, 4000.0);
                         final weekDays = _weekDays(widget.selectedDate);
-                        final weekColW = mobile ? 120.0 : 150.0;
+                        const colGap = 10.0;
+                        // «Детальное время»: колонки цехов на всю ширину (не фиксированные 200px).
+                        final detailN = detailColumns.length;
+                        final minDetailCol = mobile ? 140.0 : 160.0;
+                        final detailFit =
+                            detailN > 0 ? (bodyColW - colGap * detailN) / detailN : minDetailCol;
+                        final detailColW = detailFit < minDetailCol ? minDetailCol : detailFit;
+                        // Неделя: дни тоже растягиваем, если влезают.
+                        final weekN = weekDays.length;
+                        final minWeekCol = mobile ? 110.0 : 130.0;
+                        final weekFit =
+                            weekN > 0 ? (bodyColW - colGap * weekN) / weekN : minWeekCol;
+                        final weekColW = weekFit < minWeekCol ? minWeekCol : weekFit;
 
                         Widget timeGutterCol() => SizedBox(
                               width: timeGutter,
@@ -621,19 +684,27 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
                                   SizedBox(width: timeGutter),
-                                  Expanded(
-                                    child: _showGeneral
-                                        ? _buildColumnHeader('Общая запись', bodyColW)
-                                        : SingleChildScrollView(
-                                            controller: _hHeaderCtrl,
-                                            scrollDirection: Axis.horizontal,
-                                            child: Row(
-                                              children: detailColumns
-                                                  .map((s) => _buildColumnHeader(s, detailColW))
-                                                  .toList(),
-                                            ),
-                                          ),
-                                  ),
+                                  if (_showGeneral)
+                                    Expanded(
+                                      child: _buildColumnHeader('Общая запись', null),
+                                    )
+                                  else if (detailColW > minDetailCol + 0.5)
+                                    // Влезают на экран — растягиваем на всю ширину.
+                                    ...detailColumns.map(
+                                      (s) => Expanded(child: _buildColumnHeader(s, null)),
+                                    )
+                                  else
+                                    Expanded(
+                                      child: SingleChildScrollView(
+                                        controller: _hHeaderCtrl,
+                                        scrollDirection: Axis.horizontal,
+                                        child: Row(
+                                          children: detailColumns
+                                              .map((s) => _buildColumnHeader(s, detailColW))
+                                              .toList(),
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -644,18 +715,27 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                                   children: [
                                     timeGutterCol(),
                                     if (_showGeneral)
-                                      SizedBox(
-                                        width: bodyColW,
+                                      Expanded(
                                         child: _buildColumnBody(
                                           'Общая запись',
-                                          bodyColW,
+                                          null,
                                           gridHeight,
                                           true,
                                         ),
                                       )
+                                    else if (detailColW > minDetailCol + 0.5)
+                                      ...detailColumns.map(
+                                        (s) => Expanded(
+                                          child: _buildColumnBody(
+                                            s,
+                                            null,
+                                            gridHeight,
+                                            false,
+                                          ),
+                                        ),
+                                      )
                                     else
-                                      SizedBox(
-                                        width: bodyColW,
+                                      Expanded(
                                         child: SingleChildScrollView(
                                           controller: _hBodyCtrl,
                                           scrollDirection: Axis.horizontal,
@@ -688,7 +768,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     );
   }
 
-  Widget _buildColumnHeader(String title, double width) {
+  Widget _buildColumnHeader(String title, double? width) {
     // В «Общей» (день) — без зазора; неделя / детально — зазор между колонками.
     final gap = (!_weekMode && _showGeneral) ? 0.0 : 10.0;
     return Container(
@@ -716,7 +796,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
 
   Widget _buildColumnBody(
     String title,
-    double width,
+    double? width,
     double gridHeight,
     bool isGeneral, {
     DateTime? viewDay,
@@ -734,66 +814,73 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       ),
       child: ClipRRect(
         borderRadius: const BorderRadius.vertical(bottom: Radius.circular(AppTheme.radiusLg)),
-        child: Stack(
-          clipBehavior: Clip.hardEdge,
-          children: [
-            ...List.generate(_slotsCount, (i) {
-              final isHour = i % 2 == 0;
-              return Positioned(
-                top: i * _slotHeight,
-                left: 8,
-                right: 8,
-                child: Container(
-                  height: isHour ? 1 : 0.5,
-                  color: AppColors.borderSoft.withOpacity(isHour ? 0.55 : 0.28),
-                ),
-              );
-            }),
-            // Пустое место (в т.ч. справа от узких карточек) — новая запись.
-            if (isGeneral && widget.onCreateAt != null)
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  // onTapUp (не onTapDown): скролл не должен открывать создание.
-                  onTapUp: (details) {
-                    final dy = details.localPosition.dy;
-                    var slot = (dy / _slotHeight).floor();
-                    if (slot < 0) slot = 0;
-                    if (slot >= _slotsCount) slot = _slotsCount - 1;
-                    final totalMin = _startHour * 60 + slot * _slotMinutes;
-                    final day = DateTime(
-                      dayForCreate.year,
-                      dayForCreate.month,
-                      dayForCreate.day,
-                    );
-                    widget.onCreateAt!(
-                      day,
-                      TimeOfDay(hour: totalMin ~/ 60, minute: totalMin % 60),
-                    );
-                  },
-                ),
-              ),
-            ..._buildCards(
-              title,
-              isGeneral,
-              gridHeight,
-              width,
-              viewDay: viewDay,
-              ordersOverride: ordersOverride,
-            ),
-            if (isGeneral && widget.onCreateAt != null)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: IgnorePointer(
-                  child: Icon(
-                    Icons.add,
-                    size: 14,
-                    color: AppColors.textDim.withOpacity(0.28),
+        child: LayoutBuilder(
+          builder: (context, box) {
+            final colW = (width != null && width > 0)
+                ? width
+                : (box.maxWidth.isFinite ? box.maxWidth : 200.0);
+            return Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                ...List.generate(_slotsCount, (i) {
+                  final isHour = i % 2 == 0;
+                  return Positioned(
+                    top: i * _slotHeight,
+                    left: 8,
+                    right: 8,
+                    child: Container(
+                      height: isHour ? 1 : 0.5,
+                      color: AppColors.borderSoft.withOpacity(isHour ? 0.55 : 0.28),
+                    ),
+                  );
+                }),
+                // Пустое место (в т.ч. справа от узких карточек) — новая запись.
+                if (isGeneral && widget.onCreateAt != null)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      // onTapUp (не onTapDown): скролл не должен открывать создание.
+                      onTapUp: (details) {
+                        final dy = details.localPosition.dy;
+                        var slot = (dy / _slotHeight).floor();
+                        if (slot < 0) slot = 0;
+                        if (slot >= _slotsCount) slot = _slotsCount - 1;
+                        final totalMin = _startHour * 60 + slot * _slotMinutes;
+                        final day = DateTime(
+                          dayForCreate.year,
+                          dayForCreate.month,
+                          dayForCreate.day,
+                        );
+                        widget.onCreateAt!(
+                          day,
+                          TimeOfDay(hour: totalMin ~/ 60, minute: totalMin % 60),
+                        );
+                      },
+                    ),
                   ),
+                ..._buildCards(
+                  title,
+                  isGeneral,
+                  gridHeight,
+                  colW,
+                  viewDay: viewDay,
+                  ordersOverride: ordersOverride,
                 ),
-              ),
-          ],
+                if (isGeneral && widget.onCreateAt != null)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: IgnorePointer(
+                      child: Icon(
+                        Icons.add,
+                        size: 14,
+                        color: AppColors.textDim.withOpacity(0.28),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -891,6 +978,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         }
         events.add({
           'orderId': w['order_id'],
+          'itemId': w['item_id'],
           'start': clipped.start,
           'end': clipped.end,
           'isTech': false,
@@ -898,6 +986,8 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           'status': w['status']?.toString() ?? '',
           'hasDebt': hasDebt(w),
           'title': "${w['client_name']}",
+          'carLine': car,
+          'workName': work,
           'subtitle': car.isEmpty ? work : (work.isEmpty ? car : "$car · $work"),
         });
       }
@@ -931,47 +1021,129 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       return (a['end'] as DateTime).compareTo(b['end'] as DateTime);
     });
 
-    // Дорожки: пересекающиеся заказы — в разные колонки (не друг на друге).
-    final laneEnds = <DateTime>[];
+    // Детальное время: непрерывный поток одного цеха в заказе → одна карточка
+    // (не стопка наложений). Чужой цех между работами — новый блок.
+    if (!isGeneral) {
+      final merged = <Map<String, dynamic>>[];
+      final byOrder = <int, List<Map<String, dynamic>>>{};
+      for (final e in events) {
+        final oid = (e['orderId'] as num?)?.toInt();
+        if (oid == null) {
+          merged.add(e);
+          continue;
+        }
+        byOrder.putIfAbsent(oid, () => []).add(e);
+      }
+      for (final list in byOrder.values) {
+        list.sort((a, b) {
+          final c = (a['start'] as DateTime).compareTo(b['start'] as DateTime);
+          if (c != 0) return c;
+          return (a['end'] as DateTime).compareTo(b['end'] as DateTime);
+        });
+        final segments = <List<Map<String, dynamic>>>[];
+        for (final e in list) {
+          if (segments.isEmpty) {
+            segments.add([e]);
+            continue;
+          }
+          final prev = segments.last.last;
+          if (_sameWorkshopStream(prev, e, workshop: colTitle, viewDay: day)) {
+            segments.last.add(e);
+          } else {
+            segments.add([e]);
+          }
+        }
+        for (final seg in segments) {
+          if (seg.length == 1) {
+            merged.add(seg.first);
+            continue;
+          }
+          var start = seg.first['start'] as DateTime;
+          var end = seg.first['end'] as DateTime;
+          final works = <String>[];
+          var allDone = true;
+          var anyDebt = false;
+          for (final e in seg) {
+            final s = e['start'] as DateTime;
+            final en = e['end'] as DateTime;
+            if (s.isBefore(start)) start = s;
+            if (en.isAfter(end)) end = en;
+            final wn = (e['workName'] ?? '').toString().trim();
+            if (wn.isNotEmpty && !works.contains(wn)) works.add(wn);
+            if (e['isDone'] != true) allDone = false;
+            if (e['hasDebt'] == true) anyDebt = true;
+          }
+          final car = (seg.first['carLine'] ?? '').toString();
+          final workLine = works.join(' · ');
+          merged.add({
+            ...seg.first,
+            'start': start,
+            'end': end,
+            'isDone': allDone,
+            'hasDebt': anyDebt,
+            'workName': workLine,
+            'subtitle': car.isEmpty
+                ? workLine
+                : (workLine.isEmpty ? car : '$car · $workLine'),
+            'mergedCount': seg.length,
+          });
+        }
+      }
+      events
+        ..clear()
+        ..addAll(merged);
+      events.sort((a, b) {
+        final c = (a['start'] as DateTime).compareTo(b['start'] as DateTime);
+        if (c != 0) return c;
+        return (a['end'] as DateTime).compareTo(b['end'] as DateTime);
+      });
+    }
+
+    // Дорожки: разные заказы в пересечении → параллельные окна.
+    bool laneConflict(Map<String, dynamic> a, Map<String, dynamic> b) {
+      if (!_overlaps(
+        a['start'] as DateTime,
+        a['end'] as DateTime,
+        b['start'] as DateTime,
+        b['end'] as DateTime,
+      )) {
+        return false;
+      }
+      if (isGeneral) return true;
+      final idA = (a['orderId'] as num?)?.toInt();
+      final idB = (b['orderId'] as num?)?.toInt();
+      // Уже слили поток цеха в одну карточку — разные заказы режем на окна.
+      return idA == null || idB == null || idA != idB;
+    }
+
+    final laneOccupants = <List<Map<String, dynamic>>>[];
     for (final e in events) {
-      final start = e['start'] as DateTime;
-      final end = e['end'] as DateTime;
       var lane = -1;
-      for (var i = 0; i < laneEnds.length; i++) {
-        if (!start.isBefore(laneEnds[i])) {
+      for (var i = 0; i < laneOccupants.length; i++) {
+        final hits = laneOccupants[i].any((o) => laneConflict(e, o));
+        if (!hits) {
           lane = i;
           break;
         }
       }
       if (lane == -1) {
-        lane = laneEnds.length;
-        laneEnds.add(end);
+        lane = laneOccupants.length;
+        laneOccupants.add([e]);
       } else {
-        laneEnds[lane] = end;
+        laneOccupants[lane].add(e);
       }
       e['lane'] = lane;
     }
 
-    // Число колонок в кластере = max(lane)+1 среди всех взаимно пересекающихся.
+    // Число колонок в кластере = max(lane)+1 среди всех взаимно конфликтующих.
     for (final e in events) {
-      final start = e['start'] as DateTime;
-      final end = e['end'] as DateTime;
       var maxLane = e['lane'] as int;
       for (final other in events) {
-        if (!_overlaps(start, end, other['start'] as DateTime, other['end'] as DateTime)) {
-          continue;
-        }
+        if (!laneConflict(e, other)) continue;
         final ol = other['lane'] as int;
         if (ol > maxLane) maxLane = ol;
-        // Расширяем кластер: кто пересекается с other — тоже учитываем их lane.
         for (final third in events) {
-          if (_overlaps(
-                other['start'] as DateTime,
-                other['end'] as DateTime,
-                third['start'] as DateTime,
-                third['end'] as DateTime,
-              ) &&
-              (third['lane'] as int) > maxLane) {
+          if (laneConflict(other, third) && (third['lane'] as int) > maxLane) {
             maxLane = third['lane'] as int;
           }
         }
@@ -979,20 +1151,13 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       e['groupLanes'] = maxLane + 1;
     }
 
-    // Выравниваем groupLanes внутри кластера (все пересекающиеся видят одно число колонок).
+    // Выравниваем groupLanes внутри кластера (все конфликтующие видят одно число колонок).
     var changed = true;
     while (changed) {
       changed = false;
       for (final e in events) {
         for (final other in events) {
-          if (!_overlaps(
-            e['start'] as DateTime,
-            e['end'] as DateTime,
-            other['start'] as DateTime,
-            other['end'] as DateTime,
-          )) {
-            continue;
-          }
+          if (!laneConflict(e, other)) continue;
           final a = e['groupLanes'] as int;
           final b = other['groupLanes'] as int;
           if (a != b) {

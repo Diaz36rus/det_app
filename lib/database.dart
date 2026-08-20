@@ -12,8 +12,10 @@ import 'sync/remote_database.dart';
 import 'sync/sync_config.dart';
 import 'cash_catalog.dart';
 import 'crm/cloud_db_bridge.dart';
+import 'input_masks.dart';
 import 'inventory_catalog.dart';
 import 'order_status.dart';
+import 'price_list_data.dart';
 import 'wrap_catalog.dart';
 
 export 'order_status.dart' show resolveInitialOrderStatus;
@@ -177,30 +179,7 @@ const Map<String, String> CATEGORY_RENAMES = {
 
 // --- НАЧАЛО БЛОКА: ПРАЙС-ЛИСТ ---
 List<Map<String, dynamic>> SERVICES_TREE = [
-  {"cat": "Мойка", "name": "Экспресс-мойка", "p1": 800, "p2": 1000, "p3": 1200, "p4": 1400, "fp": 0},
-  {"cat": "Мойка", "name": "Мойка кузова", "p1": 1400, "p2": 1800, "p3": 2200, "p4": 2600, "fp": 0},
-  {"cat": "Мойка", "name": "Комплексная мойка", "p1": 2500, "p2": 3000, "p3": 3500, "p4": 4000, "fp": 0},
-  {"cat": "Мойка", "name": "Уборка багажника", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 200},
-  {"cat": "Химчистка", "name": "Химчистка салона", "p1": 20000, "p2": 23000, "p3": 26000, "p4": 29000, "fp": 0},
-  {"cat": "Химчистка", "name": "Химчистка 1го сидения (Ткань)", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 2500},
-  {"cat": "Химчистка", "name": "Химчистка 1го сидения (Кожа)", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 2000},
-  {"cat": "Химчистка", "name": "Химчистка локально", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 1000},
-  {"cat": "Химчистка", "name": "Химчистка двигателя", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 6000},
-  {"cat": "Химчистка", "name": "Химчистка дисков", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 6000},
-  {"cat": "Химчистка", "name": "Детейлинг уборка салона", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 10000},
-  {"cat": "Полировка", "name": "Восстановительная полировка", "p1": 30000, "p2": 35000, "p3": 40000, "p4": 45000, "fp": 0},
-  {"cat": "Полировка", "name": "Легкая полировка", "p1": 10000, "p2": 12000, "p3": 14000, "p4": 16000, "fp": 0},
-  {"cat": "Керамика и Силант", "name": "Керамика на кузов (1 слой)", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 10000},
-  {"cat": "Керамика и Силант", "name": "Керамика на кузов (2 слоя)", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 15000},
-  {"cat": "Керамика и Силант", "name": "Быстрая сухая керамика", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 5000},
-  {"cat": "Керамика и Силант", "name": "Быстрая мокрая керамика", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 2000},
-  {"cat": "Керамика и Силант", "name": "Силант на кузов", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 3000},
-  {"cat": "Антидождь", "name": "Krytex лобовое стекло", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 3500},
-  {"cat": "Антидождь", "name": "Krytex передняя полусфера", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 6000},
-  {"cat": "Антидождь", "name": "Krytex все остекление 1 кл.", "p1": 0, "p2": 0, "p3": 0, "p4": 0, "fp": 8000},
-  {"cat": "Антидождь", "name": "Krytex все остекление 2 кл.", "p1": 0, "p2": 10000, "p3": 0, "p4": 0, "fp": 0},
-  {"cat": "Антидождь", "name": "Krytex все остекление 3 кл.", "p1": 0, "p2": 0, "p3": 12000, "p4": 0, "fp": 0},
-  {"cat": "Антидождь", "name": "Krytex все остекление 4 кл.", "p1": 0, "p2": 0, "p3": 0, "p4": 12000, "fp": 0},
+  ...PRICE_LIST_CORE,
   // Оклейка: популярные + Перед / Борт / Зад (см. wrap_catalog.dart)
   ...wrapServicesTreeEntries(),
   // Тонировка по зонам (цены — заполни в «Услуги»)
@@ -1544,6 +1523,35 @@ class DatabaseHelper {
     final db = await database;
     List<Map> res = await db.query('cars', where: 'client_id = ? AND plate = ?', whereArgs: [clientId, plate]);
     return res.isNotEmpty ? res.first['id'] as int? : null;
+  }
+
+  Future<Map<String, dynamic>?> getClientById(int clientId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getClientById(clientId);
+    final db = await database;
+    final res = await db.query('clients', where: 'id = ?', whereArgs: [clientId], limit: 1);
+    return res.isEmpty ? null : Map<String, dynamic>.from(res.first);
+  }
+
+  /// Глобальный поиск авто по каноническому госномеру (латиница/кириллица).
+  Future<Map<String, dynamic>?> findCarByPlateKey(String plateKey) async {
+    if (plateKey.isEmpty) return null;
+    if (CloudDbBridge.active) return CloudDbBridge.instance.findCarByPlateKey(plateKey);
+    final db = await database;
+    final all = await db.query('cars');
+    for (final row in all) {
+      final key = PlateMaskFormatter.canonicalKey(row['plate']?.toString() ?? '');
+      if (key == plateKey) return Map<String, dynamic>.from(row);
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> findCarByVin(String vin) async {
+    final key = vin.trim().toUpperCase();
+    if (key.isEmpty) return null;
+    if (CloudDbBridge.active) return CloudDbBridge.instance.findCarByVin(key);
+    final db = await database;
+    final res = await db.query('cars', where: 'upper(vin) = ?', whereArgs: [key], limit: 1);
+    return res.isEmpty ? null : Map<String, dynamic>.from(res.first);
   }
 
   /// Причины, почему нельзя поставить «Выдан». Пустой список = можно.

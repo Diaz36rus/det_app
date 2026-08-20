@@ -27,6 +27,9 @@ class AuthUser {
   final List<String> roles;
   final List<int> branchIds;
   final List<String> permissions;
+  final bool pendingAssignment;
+  final int? masterId;
+  final List<String> workshops;
 
   const AuthUser({
     required this.id,
@@ -38,6 +41,9 @@ class AuthUser {
     this.roles = const [],
     this.branchIds = const [],
     this.permissions = const [],
+    this.pendingAssignment = false,
+    this.masterId,
+    this.workshops = const [],
   });
 
   factory AuthUser.fromJson(Map<String, dynamic> j) => AuthUser(
@@ -54,6 +60,10 @@ class AuthUser {
             const [],
         permissions:
             (j['permissions'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+        pendingAssignment: j['pending_assignment'] == true,
+        masterId: (j['master_id'] as num?)?.toInt(),
+        workshops:
+            (j['workshops'] as List?)?.map((e) => e.toString()).toList() ?? const [],
       );
 
   String get displayLabel {

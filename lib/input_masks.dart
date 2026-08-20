@@ -38,6 +38,22 @@ class PlateMaskFormatter extends TextInputFormatter {
   static final _isLetter = RegExp(r'[A-Za-zА-Яа-яЁё]');
   static final _isDigit = RegExp(r'[0-9]');
 
+  /// Кириллица ↔ латиница для похожих букв госномера (А/A, Х/X …).
+  static const _lookalikeToLatin = {
+    'А': 'A',
+    'В': 'B',
+    'Е': 'E',
+    'К': 'K',
+    'М': 'M',
+    'Н': 'H',
+    'О': 'O',
+    'Р': 'P',
+    'С': 'C',
+    'Т': 'T',
+    'У': 'Y',
+    'Х': 'X',
+  };
+
   static String normalize(String raw) {
     final chars = <String>[];
     for (final rune in raw.toUpperCase().runes) {
@@ -52,6 +68,17 @@ class PlateMaskFormatter extends TextInputFormatter {
       }
     }
     return chars.join();
+  }
+
+  /// Ключ сравнения номеров: без пробелов, upper, кириллические «двойники» → латиница.
+  static String canonicalKey(String raw) {
+    final n = normalize(raw);
+    final buf = StringBuffer();
+    for (final rune in n.runes) {
+      final ch = String.fromCharCode(rune);
+      buf.write(_lookalikeToLatin[ch] ?? ch);
+    }
+    return buf.toString();
   }
 
   @override

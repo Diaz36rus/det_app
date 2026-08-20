@@ -88,6 +88,9 @@ class UserOut(BaseModel):
     roles: list[str] = []
     branch_ids: list[int] = []
     permissions: list[str] = []
+    pending_assignment: bool = False
+    master_id: int | None = None
+    workshops: list[str] = []
 
 
 class UserCreate(BaseModel):
@@ -97,6 +100,26 @@ class UserCreate(BaseModel):
     phone: str | None = Field(default=None, max_length=32)
     role_ids: list[int] = []
     branch_ids: list[int] = []
+
+
+class UserAssign(BaseModel):
+    """Назначение должности / филиалов / цехов после «подключения»."""
+
+    role_names: list[str] = Field(default_factory=list, max_length=8)
+    branch_ids: list[int] = Field(default_factory=list)
+    workshops: list[str] = Field(default_factory=list, max_length=16)
+    ## Если True — создать/обновить CrmMaster и связать user.master_id.
+    link_master: bool = True
+
+
+class AccessRequest(BaseModel):
+    """Самостоятельный запрос доступа к компании (ожидает назначение)."""
+
+    email: EmailStr
+    password: str = Field(min_length=6)
+    full_name: str = Field(min_length=1, max_length=200)
+    phone: str | None = Field(default=None, max_length=32)
+    company_slug: str = Field(default="demo", min_length=2, max_length=80)
 
 
 # --- CRM C1 ---

@@ -84,6 +84,20 @@ def main() -> None:
         )
         updated += 1
 
+    obsolete = {
+        "Krytex все остекление 1 кл.",
+        "Krytex все остекление 2 кл.",
+        "Krytex все остекление 3 кл.",
+        "Krytex все остекление 4 кл.",
+    }
+    deactivated = 0
+    for name in obsolete:
+        cur = by_name.get(name)
+        if cur is None or not cur.get("is_active", True):
+            continue
+        req("PATCH", f"/crm/services/{cur['id']}", token=token, body={"is_active": False})
+        deactivated += 1
+
     final = req("GET", "/crm/services", token=token) or []
     cats: dict[str, int] = {}
     for s in final:
@@ -97,6 +111,7 @@ def main() -> None:
         "created": created,
         "updated": updated,
         "unchanged": skipped,
+        "deactivated_obsolete": deactivated,
         "cloud_active": sum(1 for s in final if s.get("is_active", True)),
         "by_category": cats,
     }

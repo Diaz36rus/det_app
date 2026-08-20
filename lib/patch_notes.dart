@@ -29,6 +29,14 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 79,
+    version: '1.0.1',
+    items: [
+      'Назначения: список ожидающих в лампочке + диалог должность/цех/филиал',
+      'Владелец приложения: вход по твоим данным; wipe только с PIN 9294',
+    ],
+  ),
+  PatchRelease(
     build: 78,
     version: '1.0.1',
     items: [

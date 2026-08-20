@@ -818,6 +818,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       );
       _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
       await _reloadWorksFromDb();
+      if (!mounted) return;
+      _notifyIfWorkshopHasNoMasters(workshop);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -827,6 +829,14 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         ),
       );
     }
+  }
+
+  void _notifyIfWorkshopHasNoMasters(String? workshop) {
+    final ws = (workshop ?? '').trim();
+    if (ws.isEmpty || !WORKSHOPS.contains(ws)) return;
+    final missing = workshopsWithoutMasters([ws], _masters);
+    if (missing.isEmpty) return;
+    showAppToast(context, missingMastersMessage(missing));
   }
 
   bool get _isWorkshopMode => widget.workshop != null && widget.workshop!.isNotEmpty;
@@ -1774,6 +1784,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       if (currentIds.contains(mId)) return true;
       return masterRoleFitsWorkshop(m['role']?.toString(), workshop);
     }).toList();
+
+    if (filtered.isEmpty && mounted) {
+      showAppToast(context, missingMastersMessage([workshop]));
+    }
 
     await runWithPulseHighlight(
       'od_masters',
@@ -2851,6 +2865,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       if (currentIds.contains(mId)) return true;
       return masterRoleFitsWorkshop(m['role']?.toString(), workshop);
     }).toList();
+
+    if (filtered.isEmpty && mounted) {
+      showAppToast(context, missingMastersMessage([workshop]));
+    }
 
     final headerId = (header['id'] as num).toInt();
 

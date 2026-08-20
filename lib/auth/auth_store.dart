@@ -29,6 +29,9 @@ class AuthStore {
         'roles': user.roles,
         'branch_ids': user.branchIds,
         'permissions': user.permissions,
+        'pending_assignment': user.pendingAssignment,
+        'master_id': user.masterId,
+        'workshops': user.workshops,
       },
     };
     await f.writeAsString(const JsonEncoder.withIndent('  ').convert(map), flush: true);

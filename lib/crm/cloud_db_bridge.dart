@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../cash_cloud/cash_cloud_api.dart';
 import '../cash_cloud/cash_cloud_models.dart';
 import '../order_status.dart';
+import '../price_list_data.dart';
 import 'cloud_mode.dart';
 import 'crm_api.dart';
 import 'crm_models.dart';
@@ -472,22 +473,32 @@ class CloudDbBridge {
 
   Future<List<Map<String, dynamic>>> getAllServices() async {
     _services = await _crm.listServices();
+    final treeByName = {
+      for (final s in PRICE_LIST_CORE) s['name'] as String: s,
+    };
     return _services
         .where((s) => s.isActive)
-        .map(
-          (s) => {
+        .map((s) {
+          final t = treeByName[s.name];
+          final p1 = (t?['p1'] as num?)?.toDouble() ?? s.price;
+          final p2 = (t?['p2'] as num?)?.toDouble() ?? s.price;
+          final p3 = (t?['p3'] as num?)?.toDouble() ?? s.price;
+          final p4 = (t?['p4'] as num?)?.toDouble() ?? s.price;
+          final fp = (t?['fp'] as num?)?.toDouble() ?? 0;
+          return {
             'id': s.id,
             'name': s.name,
-            'category': s.category,
-            'price': s.price,
+            'category': t?['cat'] ?? s.category,
+            'price': fp > 0 ? fp : (p1 > 0 ? p1 : s.price),
             'workshop': s.workshop,
             'is_active': 1,
-            // локальный прайс ждёт колонки вроде price_1 — дублируем
-            'price_1': s.price,
-            'price_2': s.price,
-            'price_3': s.price,
-          },
-        )
+            'price1': p1,
+            'price2': p2,
+            'price3': p3,
+            'price4': p4,
+            'fixed_price': fp,
+          };
+        })
         .toList();
   }
 
@@ -1537,9 +1548,81 @@ class CloudDbBridge {
 
   Future<int?> getCarId(int clientId, String plate) async {
     await _ensureCars();
-    final p = plate.trim().toLowerCase();
+    final key = plate.trim().isEmpty ? '' : _plateKey(plate);
     for (final c in _cars.values) {
-      if (c.clientId == clientId && c.plate.trim().toLowerCase() == p) return c.id;
+      if (c.clientId == clientId && _plateKey(c.plate) == key && key.isNotEmpty) return c.id;
+      if (c.clientId == clientId && c.plate.trim().toLowerCase() == plate.trim().toLowerCase()) {
+        return c.id;
+      }
+    }
+    return null;
+  }
+
+  static String _plateKey(String plate) {
+    const map = {
+      'А': 'A',
+      'В': 'B',
+      'Е': 'E',
+      'К': 'K',
+      'М': 'M',
+      'Н': 'H',
+      'О': 'O',
+      'Р': 'P',
+      'С': 'C',
+      'Т': 'T',
+      'У': 'Y',
+      'Х': 'X',
+    };
+    final buf = StringBuffer();
+    for (final rune in plate.toUpperCase().replaceAll(' ', '').runes) {
+      final ch = String.fromCharCode(rune);
+      if (RegExp(r'[A-Z0-9]').hasMatch(ch) || map.containsKey(ch)) {
+        buf.write(map[ch] ?? ch);
+      }
+    }
+    return buf.toString();
+  }
+
+  Future<Map<String, dynamic>?> getClientById(int clientId) async {
+    await _ensureClients();
+    final c = _clients[clientId];
+    if (c == null) return null;
+    return {'id': c.id, 'name': c.name, 'phone': c.phone, 'is_vip': c.isVip ? 1 : 0};
+  }
+
+  Future<Map<String, dynamic>?> findCarByPlateKey(String plateKey) async {
+    if (plateKey.isEmpty) return null;
+    await _ensureCars();
+    for (final c in _cars.values) {
+      if (_plateKey(c.plate) == plateKey) {
+        return {
+          'id': c.id,
+          'client_id': c.clientId,
+          'make_model': c.makeModel,
+          'plate': c.plate,
+          'vin': c.vin,
+          'category': c.category,
+        };
+      }
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> findCarByVin(String vin) async {
+    final key = vin.trim().toUpperCase();
+    if (key.isEmpty) return null;
+    await _ensureCars();
+    for (final c in _cars.values) {
+      if (c.vin.trim().toUpperCase() == key) {
+        return {
+          'id': c.id,
+          'client_id': c.clientId,
+          'make_model': c.makeModel,
+          'plate': c.plate,
+          'vin': c.vin,
+          'category': c.category,
+        };
+      }
     }
     return null;
   }
