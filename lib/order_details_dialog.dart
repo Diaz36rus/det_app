@@ -1781,7 +1781,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   static const _adminRoles = {'Администратор', 'Приемщик'};
 
-  bool _isAdminRole(String? role) => _adminRoles.contains(role?.trim() ?? '');
+  bool _isAdminRole(String? role) => masterHasAnyRole(role, _adminRoles);
 
   /// Сотрудники для поля «Администратор» (+ текущий, если роль устарела).
   List<Map<String, dynamic>> get _adminsForDropdown {

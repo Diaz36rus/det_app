@@ -57,7 +57,7 @@ class _CloudStaffScreenState extends State<CloudStaffScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(controller: name, decoration: const InputDecoration(labelText: 'Имя')),
-            TextField(controller: role, decoration: const InputDecoration(labelText: 'Роль / цех')),
+            TextField(controller: role, decoration: const InputDecoration(labelText: 'Роли через запятую')),
           ],
         ),
         actions: [
@@ -92,7 +92,7 @@ class _CloudStaffScreenState extends State<CloudStaffScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(controller: name, decoration: const InputDecoration(labelText: 'Имя')),
-            TextField(controller: role, decoration: const InputDecoration(labelText: 'Роль / цех')),
+            TextField(controller: role, decoration: const InputDecoration(labelText: 'Роли через запятую')),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               title: const Text('Активен'),

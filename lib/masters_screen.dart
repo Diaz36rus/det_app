@@ -16,7 +16,7 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
   List<Map<String, dynamic>> _masters = [];
   List<String> _roles = [];
   final _nameController = TextEditingController();
-  String _selectedRole = "Универсал";
+  final Set<String> _selectedRoles = {'Универсал'};
   bool _isLoading = true;
 
   static const _pulseToolbar = 'masters_toolbar';
@@ -41,8 +41,10 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
     setState(() {
       _masters = masters;
       _roles = roles;
-      if (_roles.isNotEmpty && !_roles.contains(_selectedRole)) {
-        _selectedRole = _roles.first;
+      if (_roles.isNotEmpty && _selectedRoles.every((r) => !_roles.contains(r))) {
+        _selectedRoles
+          ..clear()
+          ..add(_roles.first);
       }
       _isLoading = false;
     });
@@ -50,15 +52,93 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
 
   Future<void> _addMaster() async {
     if (_nameController.text.trim().isEmpty) return;
-    await DatabaseHelper().addMaster(_nameController.text.trim(), _selectedRole);
+    if (_selectedRoles.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Выберите хотя бы одну роль')),
+      );
+      return;
+    }
+    await DatabaseHelper().addMaster(
+      _nameController.text.trim(),
+      joinMasterRoles(_selectedRoles),
+    );
     _nameController.clear();
     _loadData();
   }
 
-  Future<void> _changeRole(Map<String, dynamic> master, String? role) async {
-    if (role == null || role == master['role']) return;
-    await DatabaseHelper().updateMaster((master['id'] as num).toInt(), role: role);
+  Future<void> _setMasterRoles(Map<String, dynamic> master, List<String> roles) async {
+    final joined = joinMasterRoles(roles);
+    if (joined.isEmpty) return;
+    if (joined == (master['role']?.toString() ?? '')) return;
+    await DatabaseHelper().updateMaster((master['id'] as num).toInt(), role: joined);
     _loadData();
+  }
+
+  Future<void> _editRolesDialog(Map<String, dynamic> master) async {
+    final masterId = (master['id'] as num).toInt();
+    final selected = splitMasterRoles(master['role']?.toString()).toSet();
+    final options = <String>[
+      ...selected.where((r) => !_roles.contains(r)),
+      ..._roles,
+    ];
+    final ok = await runWithPulseHighlight(
+      masterId,
+      () => showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                backgroundColor: AppColors.surface,
+                title: Text(
+                  "Роли · ${master['name'] ?? ''}",
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                ),
+                content: SizedBox(
+                  width: 340,
+                  child: options.isEmpty
+                      ? Text(
+                          "Нет ролей. Добавьте через «Новая роль».",
+                          style: GoogleFonts.manrope(color: AppColors.textMuted),
+                        )
+                      : ListView(
+                          shrinkWrap: true,
+                          children: options.map((r) {
+                            final checked = selected.contains(r);
+                            return CheckboxListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(r, style: GoogleFonts.manrope(color: AppColors.text)),
+                              value: checked,
+                              onChanged: (val) {
+                                setDialogState(() {
+                                  if (val == true) {
+                                    selected.add(r);
+                                  } else {
+                                    selected.remove(r);
+                                  }
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                ),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Отмена")),
+                  ElevatedButton(
+                    onPressed: selected.isEmpty ? null : () => Navigator.pop(context, true),
+                    child: const Text("Сохранить"),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+    if (ok == true) {
+      await _setMasterRoles(master, selected.toList());
+    }
   }
 
   Future<void> _renameMaster(Map<String, dynamic> master) async {
@@ -165,212 +245,230 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
     }
   }
 
+  Widget _roleChipWrap({
+    required Iterable<String> options,
+    required Set<String> selected,
+    required void Function(String role, bool enable) onToggle,
+  }) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: options.map((r) {
+        final on = selected.contains(r);
+        return FilterChip(
+          label: Text(r, style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w600)),
+          selected: on,
+          onSelected: (val) => onToggle(r, val),
+          selectedColor: AppColors.primary.withOpacity(0.28),
+          checkmarkColor: AppColors.primary,
+          backgroundColor: AppColors.surface2,
+          side: BorderSide(color: on ? AppColors.primary.withOpacity(0.7) : AppColors.border),
+          labelStyle: GoogleFonts.manrope(color: AppColors.text),
+        );
+      }).toList(),
+    );
+  }
+
   Widget _buildToolbar() {
+    final mobile = AppResponsive.isMobile(context);
     return Padding(
-      padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 12),
+      padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 12),
       child: PulseAnchor(
         active: isPulseActive(_pulseToolbar),
         child: Container(
-      padding: const EdgeInsets.all(16),
-      decoration: AppTheme.panelDecoration,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+          padding: const EdgeInsets.all(16),
+          decoration: AppTheme.panelDecoration,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Row(
+                children: [
+                  Text("НОВЫЙ СОТРУДНИК", style: AppTheme.sectionLabel),
+                  const Spacer(),
+                  TextButton(
+                    onPressed: _showAddRoleDialog,
+                    child: Text(
+                      "Новая роль",
+                      style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _nameController,
+                decoration: const InputDecoration(labelText: "Имя", isDense: true),
+                onSubmitted: (_) => _addMaster(),
+              ),
+              const SizedBox(height: 12),
               Text(
-                "НОВЫЙ СОТРУДНИК",
-                style: AppTheme.sectionLabel,
+                "Роли (можно несколько)",
+                style: GoogleFonts.manrope(
+                  color: AppColors.textDim,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              const Spacer(),
-              TextButton(
-                onPressed: _showAddRoleDialog,
-                child: Text(
-                  "Новая роль",
-                  style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 13),
+              const SizedBox(height: 8),
+              _roleChipWrap(
+                options: _roles,
+                selected: _selectedRoles,
+                onToggle: (r, enable) {
+                  setState(() {
+                    if (enable) {
+                      _selectedRoles.add(r);
+                    } else {
+                      _selectedRoles.remove(r);
+                    }
+                  });
+                },
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: ElevatedButton(
+                  onPressed: _addMaster,
+                  child: Text("Добавить", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: TextField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(labelText: "Имя", isDense: true),
-                  onSubmitted: (_) => _addMaster(),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: DropdownButtonFormField<String>(
-                  value: _roles.contains(_selectedRole) ? _selectedRole : null,
-                  decoration: const InputDecoration(labelText: "Роль", isDense: true),
-                  dropdownColor: AppColors.surface2,
-                  items: _roles
-                      .map(
-                        (r) => DropdownMenuItem(
-                          value: r,
-                          child: Text(r, style: GoogleFonts.manrope(color: AppColors.text)),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (val) {
-                    if (val != null) setState(() => _selectedRole = val);
-                  },
-                ),
-              ),
-              const SizedBox(width: 10),
-              ElevatedButton(
-                onPressed: _addMaster,
-                child: Text("Добавить", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ),
-        ],
-      ),
         ),
       ),
     );
   }
 
   Widget _buildMasterCard(Map<String, dynamic> m) {
-    final role = m['role']?.toString() ?? "";
-    final roleOptions = [
-      if (role.isNotEmpty && !_roles.contains(role)) role,
-      ..._roles,
-    ];
-    final roleValue = roleOptions.contains(role) ? role : null;
+    final roles = splitMasterRoles(m['role']?.toString());
     final masterId = (m['id'] as num).toInt();
 
     return PulseAnchor(
       active: isPulseActive(masterId),
       child: Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface2.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border(
-          left: BorderSide(color: AppColors.primary.withOpacity(0.8), width: 3),
+        margin: const EdgeInsets.only(bottom: 10),
+        decoration: BoxDecoration(
+          color: AppColors.surface2.withOpacity(0.92),
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          border: Border(
+            left: BorderSide(color: AppColors.primary.withOpacity(0.8), width: 3),
+          ),
         ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      InkWell(
-                        onTap: () => _renameMaster(m),
-                        borderRadius: BorderRadius.circular(6),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: Row(
-                            children: [
-                              Flexible(
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    InkWell(
+                      onTap: () => _renameMaster(m),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                m['name']?.toString() ?? "",
+                                style: GoogleFonts.manrope(
+                                  color: AppColors.text,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Icon(Icons.edit_outlined, size: 16, color: AppColors.textDim),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (roles.isEmpty)
+                      Text(
+                        "Роль не задана",
+                        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                      )
+                    else
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: roles
+                            .map(
+                              (r) => Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: AppColors.surface,
+                                  borderRadius: BorderRadius.circular(AppTheme.radius),
+                                  border: Border.all(color: AppColors.border),
+                                ),
                                 child: Text(
-                                  m['name']?.toString() ?? "",
+                                  r,
                                   style: GoogleFonts.manrope(
-                                    color: AppColors.text,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w800,
+                                    color: AppColors.textMuted,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 6),
-                              const Icon(Icons.edit_outlined, size: 16, color: AppColors.textDim),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      DropdownButtonFormField<String>(
-                        value: roleValue,
-                        isDense: true,
-                        decoration: const InputDecoration(
-                          labelText: "Роль",
-                          isDense: true,
-                          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                        dropdownColor: AppColors.surface2,
-                        items: roleOptions
-                            .map(
-                              (r) => DropdownMenuItem(
-                                value: r,
-                                child: Text(r, style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13)),
-                              ),
                             )
                             .toList(),
-                        onChanged: (val) => _changeRole(m, val),
                       ),
-                    ],
-                  ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: () => _editRolesDialog(m),
+                      icon: const Icon(Icons.badge_outlined, size: 16),
+                      label: Text(
+                        "Роли",
+                        style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  tooltip: "Удалить",
-                  icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 22),
-                  onPressed: () => _confirmDelete(m),
-                ),
-              ],
-            ),
+              ),
+              IconButton(
+                tooltip: "Удалить",
+                icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 22),
+                onPressed: () => _confirmDelete(m),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, 16),
-            child: Row(
-              children: [
-                Text("Сотрудники", style: AppTheme.pageTitle),
-                const Spacer(),
-                Text(
-                  "${_masters.length}",
-                  style: GoogleFonts.manrope(
-                    color: AppColors.textDim,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          _buildToolbar(),
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                : _masters.isEmpty
-                    ? Center(
-                        child: Text(
-                          "Нет сотрудников",
-                          style: GoogleFonts.manrope(color: AppColors.textDim),
-                        ),
-                      )
-                    : ListView.builder(
-                        padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, 0, AppResponsive.isMobile(context) ? 12 : 24, 24),
-                        itemCount: _masters.length,
-                        itemBuilder: (context, index) => _buildMasterCard(_masters[index]),
+    final mobile = AppResponsive.isMobile(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, mobile ? 12 : 20, mobile ? 12 : 24, 8),
+          child: Text("Сотрудники", style: AppTheme.pageTitle),
+        ),
+        _buildToolbar(),
+        Expanded(
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _masters.isEmpty
+                  ? Center(
+                      child: Text(
+                        "Пока нет сотрудников",
+                        style: GoogleFonts.manrope(color: AppColors.textMuted),
                       ),
-          ),
-        ],
-      ),
+                    )
+                  : ListView.builder(
+                      padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 24),
+                      itemCount: _masters.length,
+                      itemBuilder: (context, index) => _buildMasterCard(_masters[index]),
+                    ),
+        ),
+      ],
     );
   }
 }

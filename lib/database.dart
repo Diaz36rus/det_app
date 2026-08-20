@@ -58,11 +58,46 @@ Map<String, List<String>> WORKSHOP_ROLES = {
 };
 
 bool masterRoleFitsWorkshop(String? role, String workshop) {
-  final r = (role ?? "").trim();
-  if (r.isEmpty) return false;
-  if (r == workshop) return true;
-  final allowed = WORKSHOP_ROLES[workshop];
-  if (allowed != null && allowed.contains(r)) return true;
+  for (final r in splitMasterRoles(role)) {
+    if (r == workshop) return true;
+    final allowed = WORKSHOP_ROLES[workshop];
+    if (allowed != null && allowed.contains(r)) return true;
+  }
+  return false;
+}
+
+/// Разбор поля `masters.role` / `crm_masters.role` (одна или несколько через запятую).
+List<String> splitMasterRoles(String? role) {
+  if (role == null) return const [];
+  final out = <String>[];
+  final seen = <String>{};
+  for (final part in role.split(',')) {
+    final t = part.trim();
+    if (t.isEmpty || seen.contains(t)) continue;
+    seen.add(t);
+    out.add(t);
+  }
+  return out;
+}
+
+String joinMasterRoles(Iterable<String> roles) {
+  final out = <String>[];
+  final seen = <String>{};
+  for (final r in roles) {
+    final t = r.trim();
+    if (t.isEmpty || seen.contains(t)) continue;
+    seen.add(t);
+    out.add(t);
+  }
+  return out.join(', ');
+}
+
+bool masterHasAnyRole(String? roleField, Iterable<String> roles) {
+  final have = splitMasterRoles(roleField).toSet();
+  for (final r in roles) {
+    final t = r.trim();
+    if (t.isNotEmpty && have.contains(t)) return true;
+  }
   return false;
 }
 
@@ -2975,13 +3010,12 @@ class DatabaseHelper {
 
   Future<List<String>> getMastersList({String? roleFilter}) async {
     final db = await database;
-    List<Map> res;
-    if (roleFilter != null) {
-      res = await db.query('masters', columns: ['name'], where: 'role = ?', whereArgs: [roleFilter], orderBy: 'id ASC');
-    } else {
-      res = await db.query('masters', columns: ['name'], orderBy: 'id ASC');
-    }
-    return ["Не назначен"] + res.map((m) => m['name'] as String).toList();
+    final res = await db.query('masters', columns: ['name', 'role'], orderBy: 'id ASC');
+    final names = res.where((m) {
+      if (roleFilter == null) return true;
+      return splitMasterRoles(m['role']?.toString()).contains(roleFilter);
+    }).map((m) => m['name'] as String);
+    return ["Не назначен", ...names];
   }
 
   Future<void> addMaster(String name, String role) async {

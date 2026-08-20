@@ -3,12 +3,12 @@ from pydantic import BaseModel, Field
 
 class CrmMasterCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
-    role: str = Field(default="Универсал", max_length=80)
+    role: str = Field(default="Универсал", max_length=255)
 
 
 class CrmMasterUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    role: str | None = Field(default=None, max_length=80)
+    role: str | None = Field(default=None, max_length=255)
     is_active: bool | None = None
 
 

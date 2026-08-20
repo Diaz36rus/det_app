@@ -75,6 +75,7 @@ def ensure_user_phone_column() -> None:
         conn.execute(
             text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)")
         )
+        conn.execute(text("ALTER TABLE crm_masters ALTER COLUMN role TYPE VARCHAR(255)"))
         conn.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_phone_unique "
