@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:intl/intl.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'app_version.dart';
@@ -2683,7 +2684,7 @@ class DatabaseHelper {
     if (CloudDbBridge.active) return CloudDbBridge.instance.getMasterDayStats(dayYyyyMmDd);
     final db = await database;
     return db.rawQuery('''
-      SELECT m.id, m.name, COUNT(DISTINCT o.id) AS orders_count
+      SELECT m.id, m.name, COUNT(DISTINCT o.id) AS orders_count, 0.0 AS revenue
       FROM masters m
       LEFT JOIN orders o ON (
         o.status IN ('Мойка', 'Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование', 'Кузовные работы', 'Выдан')
@@ -4836,6 +4837,96 @@ class DatabaseHelper {
       SELECT cars.id, cars.make_model, cars.plate, cars.vin, cars.category FROM cars 
       WHERE cars.client_id = ? ORDER BY cars.id DESC
     ''', [client['id']]);
+  }
+
+  /// Единый пакет статистики (локальный SQLite) — паритет с GET /crm/stats.
+  Future<Map<String, dynamic>> getCompanyStatsBundle({
+    String? masterDay,
+    int days = 30,
+  }) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.getCompanyStats(masterDay: masterDay, days: days);
+    }
+    final now = DateTime.now();
+    final todayKey = DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, now.day));
+    final day = (masterDay == null || masterDay.isEmpty) ? todayKey : masterDay.substring(0, 10);
+    final since = DateTime(now.year, now.month, now.day).subtract(Duration(days: days - 1));
+    final sinceKey = DateFormat('yyyy-MM-dd').format(since);
+
+    final revToday = await getRevenueToday();
+    final revMonth = await getRevenueMonth();
+    final byDay = await getRevenueByDay(days);
+    double revenuePeriod = 0;
+    for (final r in byDay) {
+      revenuePeriod += (r['total'] as num?)?.toDouble() ?? 0;
+    }
+
+    final db = await database;
+    final completedPeriod = await db.rawQuery('''
+      SELECT COUNT(*) as cnt, COALESCE(AVG(paid_amount), 0) as avg_check
+      FROM orders
+      WHERE is_completed = 1
+        AND date(created_at) >= date(?)
+    ''', [sinceKey]);
+    final ordersPeriod = (completedPeriod.first['cnt'] as num?)?.toDouble() ?? 0;
+    final avgCheck = (completedPeriod.first['avg_check'] as num?)?.toDouble() ?? 0;
+
+    final kpis = await getStatsKpis();
+    final openRows = await db.rawQuery('''
+      SELECT COUNT(*) as cnt FROM orders WHERE is_completed = 0
+    ''');
+    final openOrders = (openRows.first['cnt'] as num?)?.toDouble() ?? 0;
+
+    final statusRows = await db.rawQuery('''
+      SELECT status as name, COUNT(*) as count
+      FROM orders
+      WHERE is_completed = 0
+      GROUP BY status
+      ORDER BY count DESC, status COLLATE NOCASE
+    ''');
+
+    final topByCount = await db.rawQuery('''
+      SELECT oi.name as name, COUNT(*) as count
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE o.is_completed = 1 AND date(o.created_at) >= date(?)
+        AND oi.name IS NOT NULL AND TRIM(oi.name) != ''
+      GROUP BY oi.name
+      ORDER BY count DESC
+      LIMIT 8
+    ''', [sinceKey]);
+
+    final topByRevenue = await db.rawQuery('''
+      SELECT oi.name as name, COUNT(*) as count, COALESCE(SUM(oi.price), 0) as revenue
+      FROM order_items oi
+      INNER JOIN orders o ON o.id = oi.order_id
+      WHERE o.is_completed = 1 AND date(o.created_at) >= date(?)
+        AND oi.name IS NOT NULL AND TRIM(oi.name) != ''
+      GROUP BY oi.name
+      ORDER BY revenue DESC
+      LIMIT 8
+    ''', [sinceKey]);
+
+    final masterDayRows = await getMasterDayStats(day);
+
+    return {
+      'revenue_today': revToday,
+      'revenue_month': revMonth,
+      'revenue_period': revenuePeriod,
+      'orders_count': kpis['orders_count'] ?? 0,
+      'orders_period': ordersPeriod,
+      'avg_check': avgCheck,
+      'revenue_all': kpis['revenue_all'] ?? 0,
+      'open_debt': kpis['open_debt'] ?? 0,
+      'open_orders': openOrders,
+      'days': days,
+      'top_by_count': topByCount,
+      'top_by_revenue': topByRevenue,
+      'revenue_by_day': byDay,
+      'by_status': statusRows,
+      'master_day': masterDayRows,
+      'master_day_date': day,
+    };
   }
 
   Future<List<Map<String, dynamic>>> getServicesStats() async {

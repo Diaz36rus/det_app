@@ -7,6 +7,8 @@ import 'crm/cloud_db_bridge.dart';
 import 'database.dart';
 import 'responsive.dart';
 
+enum _StatsPeriod { today, week, month }
+
 class StatsScreen extends StatefulWidget {
   const StatsScreen({super.key});
 
@@ -15,20 +17,48 @@ class StatsScreen extends StatefulWidget {
 }
 
 class _StatsScreenState extends State<StatsScreen> {
-  double _revToday = 0;
-  double _revMonth = 0;
+  _StatsPeriod _period = _StatsPeriod.month;
+  int _topMode = 0; // 0 count, 1 revenue
+
+  double _revPeriod = 0;
   double _avgCheck = 0;
-  double _ordersCount = 0;
+  double _ordersPeriod = 0;
   double _openDebt = 0;
+  double _openOrders = 0;
   List<Map<String, dynamic>> _topByCount = [];
   List<Map<String, dynamic>> _topByRevenue = [];
-  List<double> _dayTotals = List.filled(30, 0);
-  List<String> _dayLabels = List.filled(30, "");
+  List<Map<String, dynamic>> _byStatus = [];
+  List<double> _dayTotals = const [];
+  List<String> _dayLabels = const [];
   List<Map<String, dynamic>> _masterDay = [];
   late DateTime _masterDayDate;
   bool _isLoading = true;
+  String? _error;
 
-  final _money = NumberFormat('#,##0.##', 'ru_RU');
+  final _money = NumberFormat('#,##0', 'ru_RU');
+
+  int get _days {
+    final now = DateTime.now();
+    switch (_period) {
+      case _StatsPeriod.today:
+        return 1;
+      case _StatsPeriod.week:
+        return 7;
+      case _StatsPeriod.month:
+        return now.day.clamp(1, 31);
+    }
+  }
+
+  String get _periodLabel {
+    switch (_period) {
+      case _StatsPeriod.today:
+        return 'Сегодня';
+      case _StatsPeriod.week:
+        return '7 дней';
+      case _StatsPeriod.month:
+        return 'Месяц';
+    }
+  }
 
   @override
   void initState() {
@@ -39,77 +69,76 @@ class _StatsScreenState extends State<StatsScreen> {
   }
 
   Future<void> _loadStats() async {
-    final masterDayKey = DateFormat('yyyy-MM-dd').format(_masterDayDate);
-
-    late final double revToday;
-    late final double revMonth;
-    late final Map<String, double> kpis;
-    late final List<Map<String, dynamic>> topByCount;
-    late final List<Map<String, dynamic>> topByRevenue;
-    late final List<Map<String, dynamic>> byDay;
-    late final List<Map<String, dynamic>> masterDay;
-
-    if (CloudDbBridge.active) {
-      final s = await CloudDbBridge.instance.getCompanyStats(masterDay: masterDayKey, days: 30);
-      revToday = (s['revenue_today'] as num?)?.toDouble() ?? 0;
-      revMonth = (s['revenue_month'] as num?)?.toDouble() ?? 0;
-      kpis = {
-        'orders_count': (s['orders_count'] as num?)?.toDouble() ?? 0,
-        'avg_check': (s['avg_check'] as num?)?.toDouble() ?? 0,
-        'revenue_all': (s['revenue_all'] as num?)?.toDouble() ?? 0,
-        'open_debt': (s['open_debt'] as num?)?.toDouble() ?? 0,
-      };
-      topByCount = ((s['top_by_count'] as List?) ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-      topByRevenue = ((s['top_by_revenue'] as List?) ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-      byDay = ((s['revenue_by_day'] as List?) ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-      masterDay = ((s['master_day'] as List?) ?? const [])
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-    } else {
-      revToday = await DatabaseHelper().getRevenueToday();
-      revMonth = await DatabaseHelper().getRevenueMonth();
-      kpis = await DatabaseHelper().getStatsKpis();
-      topByCount = await DatabaseHelper().getServicesStats();
-      topByRevenue = await DatabaseHelper().getTopServicesByRevenue();
-      byDay = await DatabaseHelper().getRevenueByDay(30);
-      masterDay = await DatabaseHelper().getMasterDayStats(masterDayKey);
-    }
-
-    final map = <String, double>{};
-    for (final r in byDay) {
-      map[r['day']?.toString() ?? ""] = (r['total'] as num?)?.toDouble() ?? 0;
-    }
-
-    final now = DateTime.now();
-    final labels = <String>[];
-    final totals = <double>[];
-    for (int i = 29; i >= 0; i--) {
-      final d = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
-      final key = DateFormat('yyyy-MM-dd').format(d);
-      labels.add(DateFormat('dd.MM').format(d));
-      totals.add(map[key] ?? 0);
-    }
-
-    if (!mounted) return;
     setState(() {
-      _revToday = revToday;
-      _revMonth = revMonth;
-      _avgCheck = kpis['avg_check'] ?? 0;
-      _ordersCount = kpis['orders_count'] ?? 0;
-      _openDebt = kpis['open_debt'] ?? 0;
-      _topByCount = topByCount;
-      _topByRevenue = topByRevenue;
-      _dayLabels = labels;
-      _dayTotals = totals;
-      _masterDay = masterDay;
-      _isLoading = false;
+      _isLoading = true;
+      _error = null;
     });
+    final masterDayKey = DateFormat('yyyy-MM-dd').format(_masterDayDate);
+    final days = _days;
+
+    try {
+      late final Map<String, dynamic> s;
+      if (CloudDbBridge.active) {
+        s = await CloudDbBridge.instance.getCompanyStats(masterDay: masterDayKey, days: days);
+      } else {
+        s = await DatabaseHelper().getCompanyStatsBundle(masterDay: masterDayKey, days: days);
+      }
+
+      final byDay = ((s['revenue_by_day'] as List?) ?? const [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      final map = <String, double>{};
+      for (final r in byDay) {
+        map[r['day']?.toString() ?? ''] = (r['total'] as num?)?.toDouble() ?? 0;
+      }
+
+      final now = DateTime.now();
+      final labels = <String>[];
+      final totals = <double>[];
+      for (int i = days - 1; i >= 0; i--) {
+        final d = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
+        final key = DateFormat('yyyy-MM-dd').format(d);
+        labels.add(DateFormat('dd.MM').format(d));
+        totals.add(map[key] ?? 0);
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _revPeriod = (s['revenue_period'] as num?)?.toDouble() ??
+            (s['revenue_month'] as num?)?.toDouble() ??
+            0;
+        if (_period == _StatsPeriod.today) {
+          _revPeriod = (s['revenue_today'] as num?)?.toDouble() ?? _revPeriod;
+        }
+        _avgCheck = (s['avg_check'] as num?)?.toDouble() ?? 0;
+        _ordersPeriod = (s['orders_period'] as num?)?.toDouble() ??
+            (s['orders_count'] as num?)?.toDouble() ??
+            0;
+        _openDebt = (s['open_debt'] as num?)?.toDouble() ?? 0;
+        _openOrders = (s['open_orders'] as num?)?.toDouble() ?? 0;
+        _topByCount = ((s['top_by_count'] as List?) ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        _topByRevenue = ((s['top_by_revenue'] as List?) ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        _byStatus = ((s['by_status'] as List?) ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        _masterDay = ((s['master_day'] as List?) ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        _dayLabels = labels;
+        _dayTotals = totals;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _isLoading = false;
+      });
+    }
   }
 
   Future<void> _pickMasterDay() async {
@@ -120,48 +149,253 @@ class _StatsScreenState extends State<StatsScreen> {
       lastDate: DateTime.now().add(const Duration(days: 365)),
     );
     if (picked == null) return;
-    setState(() {
-      _masterDayDate = DateTime(picked.year, picked.month, picked.day);
-      _isLoading = true;
-    });
+    setState(() => _masterDayDate = DateTime(picked.year, picked.month, picked.day));
     await _loadStats();
   }
 
-  Widget _masterDayReport() {
-    final dayLabel = DateFormat('dd.MM.yyyy').format(_masterDayDate);
+  Widget _periodChips() {
+    Widget chip(_StatsPeriod p, String label) {
+      final on = _period == p;
+      return Padding(
+        padding: const EdgeInsets.only(left: 8),
+        child: FilterChip(
+          label: Text(
+            label,
+            style: GoogleFonts.manrope(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: on ? AppColors.text : AppColors.textMuted,
+            ),
+          ),
+          selected: on,
+          onSelected: (_) {
+            if (_period == p) return;
+            setState(() => _period = p);
+            _loadStats();
+          },
+          selectedColor: AppColors.primary.withOpacity(0.28),
+          checkmarkColor: AppColors.primary,
+          backgroundColor: AppColors.surface2,
+          side: BorderSide(color: on ? AppColors.primary.withOpacity(0.7) : AppColors.border),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        chip(_StatsPeriod.today, 'Сегодня'),
+        chip(_StatsPeriod.week, '7 дней'),
+        chip(_StatsPeriod.month, 'Месяц'),
+      ],
+    );
+  }
+
+  Widget _kpi(String label, String value, Color accent) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        decoration: AppTheme.kpiDecoration(accent: accent),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: GoogleFonts.manrope(
+                color: AppColors.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.4,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.manrope(
+                color: AppColors.text,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionLabel(String text) {
+    return Text(text, style: AppTheme.sectionLabel);
+  }
+
+  Widget _panel({required Widget child, EdgeInsetsGeometry? padding}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: padding ?? const EdgeInsets.all(16),
       decoration: AppTheme.panelDecoration,
+      child: child,
+    );
+  }
+
+  Widget _buildChart() {
+    final maxY = _dayTotals.fold<double>(0, (a, b) => a > b ? a : b);
+    final chartMax = maxY <= 0 ? 1.0 : maxY * 1.15;
+    final n = _dayTotals.length;
+    final labelEvery = n <= 7 ? 1 : (n <= 14 ? 2 : 5);
+
+    return SizedBox(
+      height: 200,
+      child: n == 0
+          ? Center(
+              child: Text('Нет данных', style: GoogleFonts.manrope(color: AppColors.textDim)),
+            )
+          : BarChart(
+              BarChartData(
+                maxY: chartMax,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  getDrawingHorizontalLine: (_) =>
+                      const FlLine(color: AppColors.borderSoft, strokeWidth: 1),
+                ),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 26,
+                      interval: 1,
+                      getTitlesWidget: (value, meta) {
+                        final i = value.toInt();
+                        if (i < 0 || i >= _dayLabels.length) return const SizedBox.shrink();
+                        if (i % labelEvery != 0 && i != _dayLabels.length - 1) {
+                          return const SizedBox.shrink();
+                        }
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            _dayLabels[i],
+                            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 10),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                barGroups: [
+                  for (int i = 0; i < n; i++)
+                    BarChartGroupData(
+                      x: i,
+                      barRods: [
+                        BarChartRodData(
+                          toY: _dayTotals[i],
+                          color: i == n - 1 ? AppColors.primary : AppColors.primary.withOpacity(0.55),
+                          width: n <= 7 ? 14 : (n <= 14 ? 8 : 5),
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _statusBoard() {
+    if (_byStatus.isEmpty) {
+      return Text(
+        'Нет заказов в работе',
+        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+      );
+    }
+    final maxC = _byStatus
+        .map((e) => (e['count'] as num?)?.toDouble() ?? 0)
+        .fold<double>(1, (a, b) => a > b ? a : b);
+    return Column(
+      children: _byStatus.map((row) {
+        final name = row['name']?.toString() ?? '—';
+        final count = (row['count'] as num?)?.toInt() ?? 0;
+        final color = kOrderStatusColors[name] ?? AppColors.textMuted;
+        final frac = count / maxC;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      name,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.text,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text(
+                    '$count',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 5),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: frac.clamp(0.0, 1.0),
+                  minHeight: 5,
+                  backgroundColor: AppColors.surface,
+                  color: color.withOpacity(0.85),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _mastersPanel() {
+    final dayLabel = DateFormat('dd.MM.yyyy').format(_masterDayDate);
+    return _panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Мастера за день',
-                  style: AppTheme.sectionTitle,
-                ),
-              ),
+              Expanded(child: _sectionLabel('МАСТЕРА')),
               TextButton.icon(
                 onPressed: _pickMasterDay,
-                icon: const Icon(Icons.calendar_today, size: 16),
-                label: Text(dayLabel, style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                icon: const Icon(Icons.calendar_today, size: 15),
+                label: Text(dayLabel, style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13)),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 4),
           if (_masterDay.isEmpty)
-            Text(
-              'Нет мастеров в справочнике',
-              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
-            )
+            Text('Нет сотрудников', style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13))
           else
             ..._masterDay.map((m) {
               final n = (m['orders_count'] as num?)?.toInt() ?? 0;
+              final rev = (m['revenue'] as num?)?.toDouble() ?? 0;
               return Padding(
-                padding: const EdgeInsets.only(bottom: 6),
+                padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
                   children: [
                     Expanded(
@@ -179,7 +413,20 @@ class _StatsScreenState extends State<StatsScreen> {
                       style: GoogleFonts.manrope(
                         color: n > 0 ? AppColors.success : AppColors.textDim,
                         fontWeight: FontWeight.w800,
-                        fontSize: 13,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 88,
+                      child: Text(
+                        rev > 0 ? '${_money.format(rev)} ₽' : '—',
+                        textAlign: TextAlign.right,
+                        style: GoogleFonts.manrope(
+                          color: rev > 0 ? AppColors.text : AppColors.textDim,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ],
@@ -191,276 +438,252 @@ class _StatsScreenState extends State<StatsScreen> {
     );
   }
 
-  Widget _kpiCard(String title, String value, Color color) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-        decoration: AppTheme.kpiDecoration(accent: color),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              value,
-              style: GoogleFonts.manrope(color: color, fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildChart() {
-    final maxY = _dayTotals.fold<double>(0, (a, b) => a > b ? a : b);
-    final chartMax = maxY <= 0 ? 1.0 : maxY * 1.2;
-
-    return Container(
-      height: 180,
-      padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
-      decoration: AppTheme.panelDecoration,
-      child: BarChart(
-        BarChartData(
-          maxY: chartMax,
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            getDrawingHorizontalLine: (_) => const FlLine(color: AppColors.border, strokeWidth: 1),
-          ),
-          borderData: FlBorderData(show: false),
-          titlesData: FlTitlesData(
-            topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-            bottomTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 28,
-                interval: 1,
-                getTitlesWidget: (value, meta) {
-                  final i = value.toInt();
-                  if (i < 0 || i >= _dayLabels.length) return const SizedBox.shrink();
-                  if (i % 5 != 0 && i != _dayLabels.length - 1) return const SizedBox.shrink();
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      _dayLabels[i],
-                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 10),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-          barGroups: [
-            for (int i = 0; i < _dayTotals.length; i++)
-              BarChartGroupData(
-                x: i,
-                barRods: [
-                  BarChartRodData(
-                    toY: _dayTotals[i],
-                    color: AppColors.primary,
-                    width: 6,
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
-                  ),
-                ],
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _topList({
-    required String title,
-    required List<Map<String, dynamic>> items,
-    required String valueKey,
-    required String Function(Map<String, dynamic>) valueLabel,
-    required double Function(Map<String, dynamic>) valueNum,
-  }) {
+  Widget _topsPanel() {
+    final items = _topMode == 0 ? _topByCount : _topByRevenue;
     double maxVal = 1;
     for (final s in items) {
-      final v = valueNum(s);
+      final v = _topMode == 0
+          ? ((s['count'] as num?)?.toDouble() ?? 0)
+          : ((s['revenue'] as num?)?.toDouble() ?? 0);
       if (v > maxVal) maxVal = v;
     }
 
-    return Expanded(
+    return _panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: AppTheme.sectionTitle),
-          const SizedBox(height: 8),
-          Expanded(
-            child: items.isEmpty
-                ? Center(
-                    child: Text("Пока нет данных", style: GoogleFonts.manrope(color: AppColors.textDim)),
-                  )
-                : ListView.builder(
-                    itemCount: items.length,
-                    itemBuilder: (context, index) {
-                      final s = items[index];
-                      final val = valueNum(s);
-                      final fraction = val / maxVal;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: AppColors.bg.withOpacity(0.4),
-                          borderRadius: BorderRadius.circular(AppTheme.radius),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Text(
-                                  "${index + 1}.",
-                                  style: GoogleFonts.manrope(
-                                    color: AppColors.textDim,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    s['name']?.toString() ?? "",
-                                    style: GoogleFonts.manrope(
-                                      color: AppColors.text,
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Text(
-                                  valueLabel(s),
-                                  style: GoogleFonts.manrope(
-                                    color: AppColors.success,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: fraction,
-                                minHeight: 6,
-                                backgroundColor: AppColors.surface,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
+          Row(
+            children: [
+              Expanded(child: _sectionLabel('УСЛУГИ · $_periodLabel')),
+              _topTab(0, 'Шт'),
+              const SizedBox(width: 6),
+              _topTab(1, '₽'),
+            ],
           ),
+          const SizedBox(height: 10),
+          if (items.isEmpty)
+            Text(
+              'Пока нет выданных заказов за период',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+            )
+          else
+            ...List.generate(items.length, (index) {
+              final s = items[index];
+              final val = _topMode == 0
+                  ? ((s['count'] as num?)?.toDouble() ?? 0)
+                  : ((s['revenue'] as num?)?.toDouble() ?? 0);
+              final label = _topMode == 0
+                  ? '${val.toInt()} раз'
+                  : '${_money.format(val)} ₽';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '${index + 1}.',
+                          style: GoogleFonts.manrope(color: AppColors.textDim, fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            s['name']?.toString() ?? '',
+                            style: GoogleFonts.manrope(
+                              color: AppColors.text,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        Text(
+                          label,
+                          style: GoogleFonts.manrope(
+                            color: AppColors.success,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: (val / maxVal).clamp(0.0, 1.0),
+                        minHeight: 5,
+                        backgroundColor: AppColors.surface,
+                        color: AppColors.primary.withOpacity(0.85),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
         ],
+      ),
+    );
+  }
+
+  Widget _topTab(int mode, String label) {
+    final on = _topMode == mode;
+    return InkWell(
+      onTap: () => setState(() => _topMode = mode),
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: on ? AppColors.primary.withOpacity(0.22) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: on ? AppColors.primary.withOpacity(0.55) : AppColors.border),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.manrope(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: on ? AppColors.text : AppColors.textMuted,
+          ),
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
+    final mobile = AppResponsive.isMobile(context);
+
+    if (_isLoading && _dayTotals.isEmpty) {
       return const Scaffold(
         backgroundColor: Colors.transparent,
         body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
 
-    final mobile = AppResponsive.isMobile(context);
+    if (_error != null && _dayTotals.isEmpty) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!, style: GoogleFonts.manrope(color: AppColors.danger)),
+              const SizedBox(height: 12),
+              OutlinedButton(onPressed: _loadStats, child: const Text('Повторить')),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final kpiRow = Row(
+      children: [
+        _kpi('ВЫРУЧКА', '${_money.format(_revPeriod)} ₽', AppColors.success),
+        const SizedBox(width: 10),
+        _kpi('СРЕДНИЙ ЧЕК', '${_money.format(_avgCheck)} ₽', AppColors.primary),
+        const SizedBox(width: 10),
+        _kpi('ЗАКАЗОВ', '${_ordersPeriod.toInt()}', AppColors.textMuted),
+        const SizedBox(width: 10),
+        _kpi('В РАБОТЕ', '${_openOrders.toInt()}', const Color(0xFFF59E0B)),
+        const SizedBox(width: 10),
+        _kpi('ДОЛГ', '${_money.format(_openDebt)} ₽', AppColors.danger),
+      ],
+    );
 
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: Padding(
-        padding: mobile ? const EdgeInsets.fromLTRB(12, 12, 12, 16) : AppTheme.pagePadding,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: _loadStats,
+        child: ListView(
+          padding: mobile ? const EdgeInsets.fromLTRB(12, 12, 12, 24) : AppTheme.pagePadding,
           children: [
-            if (!mobile) ...[
-              Text("Статистика", style: AppTheme.pageTitle),
-              const SizedBox(height: 16),
+            if (!mobile)
+              Row(
+                children: [
+                  Expanded(child: Text('Статистика', style: AppTheme.pageTitle)),
+                  if (_isLoading)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                    ),
+                  _periodChips(),
+                ],
+              )
+            else ...[
+              Row(
+                children: [
+                  Expanded(child: Text('Статистика', style: AppTheme.pageTitle.copyWith(fontSize: 22))),
+                  _periodChips(),
+                ],
+              ),
             ],
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
+            const SizedBox(height: 16),
+            if (mobile)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 720),
+                  child: IntrinsicHeight(child: kpiRow),
+                ),
+              )
+            else
+              kpiRow,
+            const SizedBox(height: 18),
+            if (mobile) ...[
+              _sectionLabel('ВЫРУЧКА · $_periodLabel'),
+              const SizedBox(height: 8),
+              _panel(child: _buildChart()),
+              const SizedBox(height: 14),
+              _sectionLabel('В РАБОТЕ СЕЙЧАС'),
+              const SizedBox(height: 8),
+              _panel(child: _statusBoard()),
+              const SizedBox(height: 14),
+              _mastersPanel(),
+              const SizedBox(height: 14),
+              _topsPanel(),
+            ] else ...[
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _kpiCard("Сегодня", "${_money.format(_revToday)} ₽", AppColors.success),
-                  const SizedBox(width: 10),
-                  _kpiCard("Месяц", "${_money.format(_revMonth)} ₽", AppColors.primary),
-                  const SizedBox(width: 10),
-                  _kpiCard("Средний чек", "${_money.format(_avgCheck)} ₽", AppColors.text),
-                  const SizedBox(width: 10),
-                  _kpiCard("Заказов", "${_ordersCount.toInt()}", AppColors.textMuted),
-                  const SizedBox(width: 10),
-                  _kpiCard("Долг открытых", "${_money.format(_openDebt)} ₽", AppColors.danger),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text("Выручка за 30 дней", style: AppTheme.sectionTitle),
-            const SizedBox(height: 8),
-            _buildChart(),
-            const SizedBox(height: 16),
-            _masterDayReport(),
-            const SizedBox(height: 16),
-            Expanded(
-              child: mobile
-                  ? ListView(
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        SizedBox(
-                          height: 280,
-                          child: _topList(
-                            title: "Топ по количеству",
-                            items: _topByCount,
-                            valueKey: 'count',
-                            valueLabel: (s) => "${(s['count'] as num?)?.toInt() ?? 0} раз",
-                            valueNum: (s) => ((s['count'] as num?)?.toDouble() ?? 0),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          height: 280,
-                          child: _topList(
-                            title: "Топ по выручке",
-                            items: _topByRevenue,
-                            valueKey: 'revenue',
-                            valueLabel: (s) =>
-                                "${_money.format((s['revenue'] as num?)?.toDouble() ?? 0)} ₽",
-                            valueNum: (s) => ((s['revenue'] as num?)?.toDouble() ?? 0),
-                          ),
-                        ),
+                        _sectionLabel('ВЫРУЧКА · $_periodLabel'),
+                        const SizedBox(height: 8),
+                        _panel(child: _buildChart()),
                       ],
-                    )
-                  : Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _topList(
-                    title: "Топ по количеству",
-                    items: _topByCount,
-                    valueKey: 'count',
-                    valueLabel: (s) => "${(s['count'] as num?)?.toInt() ?? 0} раз",
-                    valueNum: (s) => ((s['count'] as num?)?.toDouble() ?? 0),
+                    ),
                   ),
-                  const SizedBox(width: 16),
-                  _topList(
-                    title: "Топ по выручке",
-                    items: _topByRevenue,
-                    valueKey: 'revenue',
-                    valueLabel: (s) =>
-                        "${_money.format((s['revenue'] as num?)?.toDouble() ?? 0)} ₽",
-                    valueNum: (s) => ((s['revenue'] as num?)?.toDouble() ?? 0),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _sectionLabel('В РАБОТЕ СЕЙЧАС'),
+                        const SizedBox(height: 8),
+                        _panel(child: _statusBoard()),
+                      ],
+                    ),
                   ),
                 ],
               ),
-            ),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: _mastersPanel()),
+                  const SizedBox(width: 14),
+                  Expanded(child: _topsPanel()),
+                ],
+              ),
+            ],
           ],
         ),
       ),

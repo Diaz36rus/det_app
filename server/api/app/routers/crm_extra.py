@@ -1022,6 +1022,7 @@ def company_stats(
     today = now.date().isoformat()
     month_prefix = now.strftime("%Y-%m")
     day = (master_day or today)[:10]
+    since = (now.date() - timedelta(days=days - 1)).isoformat()
 
     orders = list(
         db.scalars(
@@ -1045,16 +1046,22 @@ def company_stats(
         for o in completed
         if (_day_key(o.created_at) or "").startswith(month_prefix)
     )
+    completed_period = [
+        o for o in completed if (k := _day_key(o.created_at)) and k >= since
+    ]
+    revenue_period = sum(float(o.paid_amount or 0) for o in completed_period)
+    orders_period = float(len(completed_period))
     revenue_all = sum(float(o.paid_amount or 0) for o in completed)
     orders_count = float(len(completed))
-    avg_check = (revenue_all / orders_count) if orders_count else 0.0
+    avg_check = (revenue_period / orders_period) if orders_period else 0.0
     open_debt = sum(
         max(0.0, float(o.price or 0) - float(o.paid_amount or 0)) for o in open_orders
     )
 
     by_name_count: dict[str, int] = {}
     by_name_rev: dict[str, float] = {}
-    for o in orders:
+    top_src = completed_period if completed_period else completed
+    for o in top_src:
         for it in o.items or []:
             name = (it.name or "").strip()
             if not name:
@@ -1064,7 +1071,7 @@ def company_stats(
 
     top_by_count = [
         {"name": k, "count": by_name_count[k]}
-        for k in sorted(by_name_count, key=lambda n: by_name_count[n], reverse=True)[:5]
+        for k in sorted(by_name_count, key=lambda n: by_name_count[n], reverse=True)[:8]
     ]
     top_by_revenue = [
         {
@@ -1072,10 +1079,9 @@ def company_stats(
             "count": by_name_count.get(k, 0),
             "revenue": by_name_rev[k],
         }
-        for k in sorted(by_name_rev, key=lambda n: by_name_rev[n], reverse=True)[:5]
+        for k in sorted(by_name_rev, key=lambda n: by_name_rev[n], reverse=True)[:8]
     ]
 
-    since = (now.date() - timedelta(days=days - 1)).isoformat()
     day_totals: dict[str, float] = {}
     for o in completed:
         key = _day_key(o.created_at)
@@ -1086,40 +1092,79 @@ def company_stats(
         {"day": k, "total": day_totals[k]} for k in sorted(day_totals.keys())
     ]
 
+    status_counts: dict[str, int] = {}
+    for o in open_orders:
+        st = (o.status or "—").strip() or "—"
+        status_counts[st] = status_counts.get(st, 0) + 1
+    by_status = [
+        {"name": k, "count": status_counts[k]}
+        for k in sorted(status_counts, key=lambda n: (-status_counts[n], n))
+    ]
+
+    def _master_ids_for_order(o: CrmOrder) -> set[int]:
+        ids = {link.master_id for link in (o.master_links or [])}
+        if not ids:
+            for it in o.items or []:
+                raw = (it.master_ids or "").replace(" ", "")
+                for part in raw.split(","):
+                    if part.isdigit():
+                        ids.add(int(part))
+        return ids
+
+    def _master_ids_for_item(it) -> set[int]:
+        ids: set[int] = set()
+        raw = (it.master_ids or "").replace(" ", "")
+        for part in raw.split(","):
+            if part.isdigit():
+                ids.add(int(part))
+        return ids
+
     masters = list(
         db.scalars(select(CrmMaster).where(CrmMaster.company_id == cid).order_by(CrmMaster.name)).all()
     )
     master_day_rows: list[dict] = []
     for m in masters:
+        if not m.is_active:
+            continue
         count = 0
+        revenue = 0.0
         for o in orders:
             if o.status not in _MASTER_DAY_STATUSES:
                 continue
             stamp = (o.end_time or o.start_time or "").replace("T", " ").strip()
             if len(stamp) < 10 or stamp[:10] != day:
                 continue
-            ids = {link.master_id for link in (o.master_links or [])}
-            if not ids:
-                for it in o.items or []:
-                    raw = (it.master_ids or "").replace(" ", "")
-                    for part in raw.split(","):
-                        if part.isdigit():
-                            ids.add(int(part))
-            if m.id in ids:
+            order_ids = _master_ids_for_order(o)
+            item_hit = False
+            for it in o.items or []:
+                mids = _master_ids_for_item(it)
+                if m.id in mids or (not mids and m.id in order_ids):
+                    revenue += float(it.price or 0)
+                    item_hit = True
+            if m.id in order_ids or item_hit:
                 count += 1
-        master_day_rows.append({"id": m.id, "name": m.name, "orders_count": count})
-    master_day_rows.sort(key=lambda r: (-int(r["orders_count"]), str(r["name"])))
+        master_day_rows.append(
+            {"id": m.id, "name": m.name, "orders_count": count, "revenue": revenue}
+        )
+    master_day_rows.sort(
+        key=lambda r: (-int(r["orders_count"]), -float(r["revenue"]), str(r["name"]))
+    )
 
     return CrmStatsOut(
         revenue_today=revenue_today,
         revenue_month=revenue_month,
+        revenue_period=revenue_period,
         orders_count=orders_count,
+        orders_period=orders_period,
         avg_check=avg_check,
         revenue_all=revenue_all,
         open_debt=open_debt,
+        open_orders=float(len(open_orders)),
+        days=days,
         top_by_count=top_by_count,
         top_by_revenue=top_by_revenue,
         revenue_by_day=revenue_by_day,
+        by_status=by_status,
         master_day=master_day_rows,
         master_day_date=day,
     )
