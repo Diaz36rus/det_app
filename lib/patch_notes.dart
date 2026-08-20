@@ -29,6 +29,14 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 84,
+    version: '1.0.1',
+    items: [
+      'QR приглашения: ссылка с кодом студии (/join?slug=) → «Меня пригласили» на телефоне',
+      'Deep link detapp://invite?slug=…; APK QR без ложного HEAD 405',
+    ],
+  ),
+  PatchRelease(
     build: 83,
     version: '1.0.1',
     items: [

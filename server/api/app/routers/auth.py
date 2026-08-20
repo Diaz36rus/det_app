@@ -33,6 +33,8 @@ def _user_out(user: User) -> UserOut:
     perms = sorted(user_permission_codes(user))
     if user.is_platform_admin:
         perms = sorted({code for code, _, _ in PERMISSIONS})
+    company = getattr(user, "company", None)
+    company_slug = company.slug if company is not None else None
     return UserOut(
         id=user.id,
         email=user.email,
@@ -41,6 +43,7 @@ def _user_out(user: User) -> UserOut:
         is_active=user.is_active,
         is_platform_admin=user.is_platform_admin,
         company_id=user.company_id,
+        company_slug=company_slug,
         roles=[r.name for r in user.roles],
         branch_ids=[b.id for b in user.branches],
         permissions=perms,

@@ -31,6 +31,7 @@ def get_current_user(
         .options(
             selectinload(User.roles).selectinload(Role.permissions),
             selectinload(User.branches),
+            selectinload(User.company),
         )
     )
     if user is None or not user.is_active:

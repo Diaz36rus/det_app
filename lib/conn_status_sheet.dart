@@ -32,7 +32,13 @@ bool get _canScanSyncQr => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
 /// Публичная точка облака (приглашение / health).
 const _kCloudBase = AuthApi.defaultBaseUrl;
-const _kInviteUrl = AuthApi.defaultBaseUrl;
+
+String? _inviteUrlForUser(AuthUser? user) {
+  final slug = user?.companySlug?.trim().toLowerCase();
+  if (slug == null || slug.length < 2) return null;
+  return encodeInviteQrPayload(slug: slug, apiBase: _kCloudBase);
+}
+
 
 Future<void> showConnStatusSheet(BuildContext context) async {
   await showModalBottomSheet<void>(
@@ -136,15 +142,19 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
     try {
       String qrUrl = UpdateChannel.cloudApkUrl;
       String? label;
+      // HEAD на /updates/android даёт 405 — достаточно GET манифеста.
       try {
-        final head = await http
-            .head(Uri.parse(UpdateChannel.cloudApkUrl))
+        final probe = await http
+            .get(Uri.parse(UpdateChannel.cloudApkUrl), headers: {'Range': 'bytes=0-0'})
             .timeout(const Duration(seconds: 6));
-        if (head.statusCode < 200 || head.statusCode >= 400) {
+        // 200 / 206 OK; 405/416 тоже значит endpoint жив
+        if (probe.statusCode >= 400 &&
+            probe.statusCode != 405 &&
+            probe.statusCode != 416) {
           qrUrl = '';
         }
       } catch (_) {
-        qrUrl = '';
+        // не блокируем — ниже fallback на android_url из манифеста
       }
 
       final resp = await http
@@ -405,7 +415,8 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
                             ],
                             const SizedBox(height: 12),
                             _InviteBlock(
-                              inviteUrl: _kInviteUrl,
+                              inviteUrl: _inviteUrlForUser(user),
+                              studioSlug: user.companySlug,
                               canManage: canManageAssignments(accessRankOf(user)),
                               onStaffCreated: () => _studioKey.currentState?.reloadPending(),
                             ),
@@ -1158,6 +1169,20 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                               ),
                               IconButton(
                                 visualDensity: VisualDensity.compact,
+                                tooltip: 'Ссылка-приглашение',
+                                onPressed: () async {
+                                  final link = encodeInviteQrPayload(
+                                    slug: c.slug,
+                                    apiBase: _kCloudBase,
+                                  );
+                                  await Clipboard.setData(ClipboardData(text: link));
+                                  if (!context.mounted) return;
+                                  showAppToast(context, 'Приглашение: ${c.slug}');
+                                },
+                                icon: const Icon(Icons.qr_code_2_rounded, size: 18, color: AppColors.primary),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
                                 tooltip: 'Филиал',
                                 onPressed: () => _addBranch(c),
                                 icon: const Icon(Icons.storefront_outlined, size: 18, color: AppColors.primary),
@@ -1481,10 +1506,12 @@ class _InviteBlock extends StatelessWidget {
   const _InviteBlock({
     required this.inviteUrl,
     required this.canManage,
+    this.studioSlug,
     this.onStaffCreated,
   });
 
-  final String inviteUrl;
+  final String? inviteUrl;
+  final String? studioSlug;
   final bool canManage;
   final VoidCallback? onStaffCreated;
 
@@ -1503,6 +1530,9 @@ class _InviteBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final url = inviteUrl;
+    final slug = studioSlug?.trim().toLowerCase();
+    final hasInvite = url != null && url.isNotEmpty;
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
@@ -1547,40 +1577,51 @@ class _InviteBlock extends StatelessWidget {
               ),
             ),
           ],
-          const SizedBox(height: 10),
-          Center(
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: QrImageView(
-                data: inviteUrl,
-                version: QrVersions.auto,
-                size: canManage ? 132 : 148,
-                backgroundColor: Colors.white,
+          if (hasInvite) ...[
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: QrImageView(
+                  data: url,
+                  version: QrVersions.auto,
+                  size: canManage ? 132 : 148,
+                  backgroundColor: Colors.white,
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            canManage
-                ? 'Сотрудник ставит приложение и запрашивает доступ — появится в «Назначениях».'
-                : 'Облако Det App · api.det-app.ru',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
-          ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: inviteUrl));
-              if (!context.mounted) return;
-              showAppToast(context, 'Ссылка скопирована');
-            },
-            icon: const Icon(Icons.link_rounded, size: 18),
-            label: const Text('Скопировать ссылку'),
-          ),
+            const SizedBox(height: 10),
+            Text(
+              slug != null && slug.isNotEmpty
+                  ? 'Код студии: $slug\nСотрудник сканирует QR → «Меня пригласили» → заявка в «Назначениях».'
+                  : 'Сотрудник ставит приложение и запрашивает доступ — появится в «Назначениях».',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: url));
+                if (!context.mounted) return;
+                showAppToast(context, 'Ссылка приглашения скопирована');
+              },
+              icon: const Icon(Icons.link_rounded, size: 18),
+              label: const Text('Скопировать ссылку'),
+            ),
+          ] else ...[
+            const SizedBox(height: 10),
+            Text(
+              canManage
+                  ? 'QR появится, когда у аккаунта будет код студии (войдите как пользователь студии). '
+                      'Владелец платформы приглашает через блок «Студии» или создаёт сотрудника здесь.'
+                  : 'Нет кода студии для QR — попросите администратора прислать ссылку.',
+              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
+            ),
+          ],
         ],
       ),
     );

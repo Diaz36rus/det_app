@@ -24,6 +24,7 @@ class AuthUser {
   final String fullName;
   final bool isPlatformAdmin;
   final int? companyId;
+  final String? companySlug;
   final List<String> roles;
   final List<int> branchIds;
   final List<String> permissions;
@@ -38,6 +39,7 @@ class AuthUser {
     required this.fullName,
     required this.isPlatformAdmin,
     this.companyId,
+    this.companySlug,
     this.roles = const [],
     this.branchIds = const [],
     this.permissions = const [],
@@ -53,6 +55,7 @@ class AuthUser {
         fullName: j['full_name']?.toString() ?? '',
         isPlatformAdmin: j['is_platform_admin'] == true,
         companyId: (j['company_id'] as num?)?.toInt(),
+        companySlug: j['company_slug']?.toString(),
         roles: (j['roles'] as List?)?.map((e) => e.toString()).toList() ?? const [],
         branchIds: (j['branch_ids'] as List?)
                 ?.map((e) => (e as num).toInt())

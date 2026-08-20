@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../app_theme.dart';
+import '../sync/sync_deep_link.dart';
 import 'auth_api.dart';
 import 'auth_controller.dart';
 
@@ -34,9 +35,18 @@ class _LoginScreenState extends State<LoginScreen> {
   final _inviteSlugCtrl = TextEditingController();
   StudioLookup? _lookup;
   String? _lookupError;
+  String? _appliedInviteSlug;
+
+  @override
+  void initState() {
+    super.initState();
+    AuthController.instance.addListener(_onAuthNotify);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _applyInviteFromLink());
+  }
 
   @override
   void dispose() {
+    AuthController.instance.removeListener(_onAuthNotify);
     _loginCtrl.dispose();
     _passCtrl.dispose();
     _studioNameCtrl.dispose();
@@ -47,6 +57,21 @@ class _LoginScreenState extends State<LoginScreen> {
     _phoneCtrl.dispose();
     _inviteSlugCtrl.dispose();
     super.dispose();
+  }
+
+  void _onAuthNotify() => _applyInviteFromLink();
+
+  void _applyInviteFromLink() {
+    final slug = SyncDeepLink.instance.takePendingInviteSlug();
+    if (slug == null || slug.length < 2) return;
+    if (_appliedInviteSlug == slug && _mode == _WelcomeMode.invited) return;
+    _appliedInviteSlug = slug;
+    if (!mounted) return;
+    setState(() {
+      _mode = _WelcomeMode.invited;
+      _inviteSlugCtrl.text = slug;
+    });
+    _lookupStudio();
   }
 
   String _slugify(String raw) {

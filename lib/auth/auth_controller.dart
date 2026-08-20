@@ -163,4 +163,7 @@ class AuthController extends ChangeNotifier {
 
   /// На будущее: заголовок Authorization для облачных запросов.
   String? get accessToken => _tokens?.accessToken;
+
+  /// Deep link invite: дернуть слушателей (LoginScreen подхватит slug).
+  void notifyInvitePending() => notifyListeners();
 }

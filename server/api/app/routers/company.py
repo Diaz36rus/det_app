@@ -72,6 +72,8 @@ def _user_out(user: User) -> UserOut:
     workshops: list[str] = []
     # workshops из связанного CrmMaster.role (CSV)
     # подгружается отдельно при необходимости — см. list/assign
+    company = getattr(user, "company", None)
+    company_slug = company.slug if company is not None else None
     return UserOut(
         id=user.id,
         email=user.email,
@@ -80,6 +82,7 @@ def _user_out(user: User) -> UserOut:
         is_active=user.is_active,
         is_platform_admin=user.is_platform_admin,
         company_id=user.company_id,
+        company_slug=company_slug,
         roles=[r.name for r in user.roles],
         branch_ids=[b.id for b in user.branches],
         permissions=perms,
@@ -247,6 +250,7 @@ def list_users(
         .options(
             selectinload(User.roles).selectinload(Role.permissions),
             selectinload(User.branches),
+            selectinload(User.company),
         )
         .order_by(User.id)
     )
