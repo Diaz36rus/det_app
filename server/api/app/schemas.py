@@ -75,6 +75,18 @@ class CompanyCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     slug: str = Field(min_length=2, max_length=80)
     branch_name: str = Field(default="Основной филиал", min_length=2, max_length=200)
+    ## Опционально сразу создать владельца студии (не platform admin).
+    owner_email: EmailStr | None = None
+    owner_password: str | None = Field(default=None, min_length=6)
+    owner_full_name: str | None = Field(default=None, max_length=200)
+    owner_phone: str | None = Field(default=None, max_length=32)
+
+
+class CompanyCreatedOut(BaseModel):
+    company: CompanyOut
+    branch: BranchOut
+    owner_user_id: int | None = None
+    owner_email: str | None = None
 
 
 class UserOut(BaseModel):

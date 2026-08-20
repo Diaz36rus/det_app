@@ -16,6 +16,7 @@ import 'auth/auth_api.dart';
 import 'auth/auth_controller.dart';
 import 'auth/auth_models.dart';
 import 'auth/company_api.dart';
+import 'auth/platform_api.dart';
 import 'bug_report_dialog.dart';
 import 'crm/cloud_mode.dart';
 import 'database.dart';
@@ -398,6 +399,10 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
                             ),
                             const SizedBox(height: 12),
                             _StudioAccessBlock(key: _studioKey),
+                            if (user.isPlatformAdmin) ...[
+                              const SizedBox(height: 12),
+                              const _PlatformStudiosBlock(),
+                            ],
                             const SizedBox(height: 12),
                             _InviteBlock(
                               inviteUrl: _kInviteUrl,
@@ -953,6 +958,525 @@ class _GuestCloudPrompt extends StatelessWidget {
   }
 }
 
+/// Владелец приложения: список студий + регистрация + филиалы.
+class _PlatformStudiosBlock extends StatefulWidget {
+  const _PlatformStudiosBlock();
+
+  @override
+  State<_PlatformStudiosBlock> createState() => _PlatformStudiosBlockState();
+}
+
+class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
+  final _api = PlatformApi();
+  List<PlatformCompany> _companies = const [];
+  Map<int, List<CompanyBranch>> _branches = const {};
+  bool _loading = false;
+  String? _error;
+  int? _expandedId;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final rows = await _api.listCompanies(accessToken: token);
+      if (!mounted) return;
+      setState(() {
+        _companies = rows;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _toggleBranches(PlatformCompany c) async {
+    if (_expandedId == c.id) {
+      setState(() => _expandedId = null);
+      return;
+    }
+    setState(() => _expandedId = c.id);
+    if (_branches.containsKey(c.id)) return;
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    try {
+      final list = await _api.listCompanyBranches(accessToken: token, companyId: c.id);
+      if (!mounted) return;
+      setState(() {
+        _branches = {..._branches, c.id: list};
+      });
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
+  Future<void> _createStudio() async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final created = await showDialog<CompanyCreated>(
+      context: context,
+      builder: (ctx) => _CreateStudioDialog(accessToken: token),
+    );
+    if (created == null || !mounted) return;
+    final msg = created.ownerEmail != null
+        ? 'Студия «${created.company.name}» · владелец ${created.ownerEmail}'
+        : 'Студия «${created.company.name}» создана';
+    showAppToast(context, msg);
+    await _load();
+  }
+
+  Future<void> _addBranch(PlatformCompany c) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => const _CreateBranchDialog(),
+    );
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    try {
+      final b = await _api.createPlatformBranch(
+        accessToken: token,
+        companyId: c.id,
+        name: name.trim(),
+      );
+      if (!mounted) return;
+      showAppToast(context, 'Филиал: ${b.name}');
+      setState(() {
+        final cur = [...(_branches[c.id] ?? const <CompanyBranch>[])];
+        cur.add(b);
+        _branches = {..._branches, c.id: cur};
+        _expandedId = c.id;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: AppColors.surface2,
+        border: Border.all(color: AppColors.borderSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Студии',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textDim,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ),
+              if (_loading)
+                const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+              else
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Обновить',
+                  onPressed: _load,
+                  icon: const Icon(Icons.refresh, size: 18, color: AppColors.textDim),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            onPressed: _createStudio,
+            icon: const Icon(Icons.add_business_outlined, size: 18),
+            label: Text('Зарегистрировать студию', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+          ),
+          const SizedBox(height: 8),
+          if (_error != null)
+            Text(_error!, style: GoogleFonts.manrope(color: Colors.redAccent, fontSize: 12))
+          else if (_companies.isEmpty)
+            Text(
+              'Пока нет студий. Создайте первую — с основным филиалом и владельцем.',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+            )
+          else
+            ..._companies.map((c) {
+              final open = _expandedId == c.id;
+              final branches = _branches[c.id];
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Material(
+                  color: AppColors.bg.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Column(
+                    children: [
+                      InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () => _toggleBranches(c),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.apartment_outlined, size: 18, color: AppColors.primary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      c.name,
+                                      style: GoogleFonts.manrope(
+                                        color: AppColors.text,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    Text(
+                                      c.slug,
+                                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                visualDensity: VisualDensity.compact,
+                                tooltip: 'Филиал',
+                                onPressed: () => _addBranch(c),
+                                icon: const Icon(Icons.storefront_outlined, size: 18, color: AppColors.primary),
+                              ),
+                              Icon(
+                                open ? Icons.expand_less : Icons.expand_more,
+                                color: AppColors.textDim,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      if (open) ...[
+                        const Divider(height: 1, color: AppColors.borderSoft),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (branches == null)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 8),
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    ),
+                                  ),
+                                )
+                              else if (branches.isEmpty)
+                                Text('Нет филиалов', style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12))
+                              else
+                                ...branches.map(
+                                  (b) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Text(
+                                      '· ${b.name}',
+                                      style: GoogleFonts.manrope(color: AppColors.text, fontSize: 12),
+                                    ),
+                                  ),
+                                ),
+                              TextButton.icon(
+                                onPressed: () => _addBranch(c),
+                                icon: const Icon(Icons.add, size: 16),
+                                label: const Text('Добавить филиал'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+}
+
+class _CreateStudioDialog extends StatefulWidget {
+  const _CreateStudioDialog({required this.accessToken});
+
+  final String accessToken;
+
+  @override
+  State<_CreateStudioDialog> createState() => _CreateStudioDialogState();
+}
+
+class _CreateStudioDialogState extends State<_CreateStudioDialog> {
+  final _api = PlatformApi();
+  final _nameCtrl = TextEditingController();
+  final _slugCtrl = TextEditingController();
+  final _branchCtrl = TextEditingController(text: 'Основной филиал');
+  final _ownerNameCtrl = TextEditingController();
+  final _ownerEmailCtrl = TextEditingController();
+  final _ownerPhoneCtrl = TextEditingController();
+  final _ownerPassCtrl = TextEditingController();
+  bool _withOwner = true;
+  bool _busy = false;
+  bool _obscure = true;
+  bool _slugTouched = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _slugCtrl.dispose();
+    _branchCtrl.dispose();
+    _ownerNameCtrl.dispose();
+    _ownerEmailCtrl.dispose();
+    _ownerPhoneCtrl.dispose();
+    _ownerPassCtrl.dispose();
+    super.dispose();
+  }
+
+  String _slugify(String raw) {
+    const map = {
+      'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'e', 'ж': 'zh',
+      'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n', 'о': 'o',
+      'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u', 'ф': 'f', 'х': 'h', 'ц': 'c',
+      'ч': 'ch', 'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu',
+      'я': 'ya',
+    };
+    final buf = StringBuffer();
+    for (final ch in raw.toLowerCase().runes) {
+      final s = String.fromCharCode(ch);
+      if (map.containsKey(s)) {
+        buf.write(map[s]);
+      } else if (RegExp(r'[a-z0-9]').hasMatch(s)) {
+        buf.write(s);
+      } else if (s == ' ' || s == '-' || s == '_') {
+        buf.write('-');
+      }
+    }
+    return buf.toString().replaceAll(RegExp(r'-+'), '-').replaceAll(RegExp(r'^-|-$'), '');
+  }
+
+  Future<void> _save() async {
+    final name = _nameCtrl.text.trim();
+    final slug = _slugCtrl.text.trim().toLowerCase();
+    final branch = _branchCtrl.text.trim();
+    if (name.length < 2) {
+      setState(() => _error = 'Укажите название студии');
+      return;
+    }
+    if (slug.length < 2) {
+      setState(() => _error = 'Укажите slug (латиница)');
+      return;
+    }
+    if (branch.length < 2) {
+      setState(() => _error = 'Укажите название филиала');
+      return;
+    }
+    String? ownerEmail;
+    String? ownerPass;
+    String? ownerName;
+    String? ownerPhone;
+    if (_withOwner) {
+      ownerEmail = _ownerEmailCtrl.text.trim();
+      ownerPass = _ownerPassCtrl.text;
+      ownerName = _ownerNameCtrl.text.trim();
+      ownerPhone = _ownerPhoneCtrl.text.trim();
+      if (ownerEmail!.isEmpty || !ownerEmail.contains('@')) {
+        setState(() => _error = 'Email владельца студии');
+        return;
+      }
+      if (ownerPass!.length < 6) {
+        setState(() => _error = 'Пароль владельца не короче 6 символов');
+        return;
+      }
+      if (ownerName!.isEmpty) ownerName = name;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final created = await _api.createCompany(
+        accessToken: widget.accessToken,
+        name: name,
+        slug: slug,
+        branchName: branch,
+        ownerEmail: ownerEmail,
+        ownerPassword: ownerPass,
+        ownerFullName: ownerName,
+        ownerPhone: (ownerPhone == null || ownerPhone.isEmpty) ? null : ownerPhone,
+      );
+      if (!mounted) return;
+      Navigator.pop(context, created);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      title: Text('Новая студия', style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16)),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: _nameCtrl,
+                decoration: const InputDecoration(labelText: 'Название студии', isDense: true),
+                onChanged: (v) {
+                  if (_slugTouched) return;
+                  setState(() => _slugCtrl.text = _slugify(v));
+                },
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _slugCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Slug (латиница)',
+                  helperText: 'Для URL / invite, например demo, kdfx-spb',
+                  isDense: true,
+                ),
+                onChanged: (_) => _slugTouched = true,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _branchCtrl,
+                decoration: const InputDecoration(labelText: 'Первый филиал', isDense: true),
+              ),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text('Создать владельца студии', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13)),
+                subtitle: Text('Логин в CRM этой студии', style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11)),
+                value: _withOwner,
+                onChanged: (v) => setState(() => _withOwner = v),
+              ),
+              if (_withOwner) ...[
+                TextField(
+                  controller: _ownerNameCtrl,
+                  decoration: const InputDecoration(labelText: 'ФИО владельца', isDense: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _ownerEmailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(labelText: 'Email владельца', isDense: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _ownerPhoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'Телефон (необязательно)', isDense: true),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _ownerPassCtrl,
+                  obscureText: _obscure,
+                  decoration: InputDecoration(
+                    labelText: 'Пароль владельца',
+                    isDense: true,
+                    suffixIcon: IconButton(
+                      icon: Icon(_obscure ? Icons.visibility_outlined : Icons.visibility_off_outlined),
+                      onPressed: () => setState(() => _obscure = !_obscure),
+                    ),
+                  ),
+                ),
+              ],
+              if (_error != null) ...[
+                const SizedBox(height: 10),
+                Text(_error!, style: GoogleFonts.manrope(color: Colors.redAccent, fontSize: 12)),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Отмена')),
+        FilledButton(
+          onPressed: _busy ? null : _save,
+          child: _busy
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Создать'),
+        ),
+      ],
+    );
+  }
+}
+
+class _CreateBranchDialog extends StatefulWidget {
+  const _CreateBranchDialog();
+
+  @override
+  State<_CreateBranchDialog> createState() => _CreateBranchDialogState();
+}
+
+class _CreateBranchDialogState extends State<_CreateBranchDialog> {
+  final _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.surface,
+      title: Text('Новый филиал', style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16)),
+      content: TextField(
+        controller: _ctrl,
+        autofocus: true,
+        decoration: const InputDecoration(labelText: 'Название филиала', isDense: true),
+        onSubmitted: (v) {
+          if (v.trim().length >= 2) Navigator.pop(context, v.trim());
+        },
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+        FilledButton(
+          onPressed: () {
+            final t = _ctrl.text.trim();
+            if (t.length < 2) return;
+            Navigator.pop(context, t);
+          },
+          child: const Text('Создать'),
+        ),
+      ],
+    );
+  }
+}
+
 class _InviteBlock extends StatelessWidget {
   const _InviteBlock({
     required this.inviteUrl,
@@ -1242,6 +1766,29 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
     }
   }
 
+  Future<void> _openCreateBranch() async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => const _CreateBranchDialog(),
+    );
+    if (name == null || name.trim().isEmpty || !mounted) return;
+    try {
+      final user = AuthController.instance.user;
+      if (user?.isPlatformAdmin == true && user?.companyId == null) {
+        showAppToast(context, 'Выберите студию в блоке «Студии» и добавьте филиал там');
+        return;
+      }
+      final b = await _api.createBranch(accessToken: token, name: name.trim());
+      if (!mounted) return;
+      showAppToast(context, 'Филиал создан: ${b.name}');
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = AuthController.instance.user;
@@ -1278,6 +1825,13 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
                   tooltip: 'Добавить сотрудника',
                   onPressed: _openCreate,
                   icon: const Icon(Icons.person_add_alt_1, size: 18, color: AppColors.primary),
+                ),
+              if (rank == AccessRank.studioFull || rank == AccessRank.platformOwner)
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  tooltip: 'Новый филиал',
+                  onPressed: _openCreateBranch,
+                  icon: const Icon(Icons.storefront_outlined, size: 18, color: AppColors.primary),
                 ),
             ],
           ),

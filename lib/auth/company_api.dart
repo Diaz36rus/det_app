@@ -68,6 +68,23 @@ class CompanyApi {
     return (map['items'] as List?)?.map((e) => e.toString()).toList() ?? const [];
   }
 
+  Future<CompanyBranch> createBranch({
+    required String accessToken,
+    required String name,
+  }) async {
+    final r = await http
+        .post(
+          _u('/company/branches'),
+          headers: _auth(accessToken),
+          body: jsonEncode({'name': name.trim()}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (r.statusCode != 200 && r.statusCode != 201) {
+      throw AuthApiException(_err(r), statusCode: r.statusCode);
+    }
+    return CompanyBranch.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
   Future<AuthUser> createUser({
     required String accessToken,
     required String email,

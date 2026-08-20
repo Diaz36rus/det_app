@@ -8,6 +8,7 @@ from app.models import Branch, Company, CrmMaster, Permission, Role, User, UserB
 from app.permissions_catalog import PERMISSIONS
 from app.phone_util import phone_digits10
 from app.schemas import (
+    BranchCreate,
     BranchOut,
     PermissionOut,
     RoleCreate,
@@ -126,6 +127,27 @@ def list_branches(
         select(Branch).where(Branch.company_id == cid).order_by(Branch.id)
     ).all()
     return list(rows)
+
+
+@router.post("/branches", response_model=BranchOut)
+def create_branch(
+    body: BranchCreate,
+    company_id: int | None = Query(default=None),
+    user: User = Depends(require_permissions("branches.manage")),
+    db: Session = Depends(get_db),
+):
+    cid = _resolve_company_id(user, db, company_id)
+    name = body.name.strip()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Слишком короткое имя филиала")
+    exists = db.scalar(select(Branch).where(Branch.company_id == cid, Branch.name == name))
+    if exists:
+        raise HTTPException(status_code=400, detail="Филиал с таким именем уже есть")
+    branch = Branch(company_id=cid, name=name, is_active=True)
+    db.add(branch)
+    db.commit()
+    db.refresh(branch)
+    return branch
 
 
 @router.get("/roles", response_model=list[RoleOut])
