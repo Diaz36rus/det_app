@@ -351,6 +351,15 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   }
 
   Future<void> _confirmWipeDatabase() async {
+    final user = AuthController.instance.user;
+    if (user == null || !user.isPlatformAdmin) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Очистка доступна только владельцу приложения')),
+      );
+      return;
+    }
+
     final pinCtrl = TextEditingController();
     var pinOk = false;
     final cloud = CloudMode.enabled;
@@ -716,7 +725,6 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
 
   List<Widget> _buildMenuList({
     VoidCallback? afterSelect,
-    bool includeQuickCalendar = true,
   }) {
     final items = _visibleMenuItems(context);
     return [
@@ -775,26 +783,38 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
           },
         );
       }),
-      if (includeQuickCalendar) ...[
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text("БЫСТРАЯ ДАТА", style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
-        ),
-        const SizedBox(height: 6),
-        Container(
-          key: TourKeys.quickCalendar,
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
-          decoration: BoxDecoration(
-            color: AppColors.surface2,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.border),
-          ),
-          child: _buildQuickDatePicker(afterSelect: afterSelect),
-        ),
-      ],
     ];
+  }
+
+  Widget _buildQuickDateBlock({VoidCallback? afterSelect}) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            "БЫСТРАЯ ДАТА",
+            style: GoogleFonts.manrope(
+              color: AppColors.textDim,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            key: TourKeys.quickCalendar,
+            padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
+            decoration: BoxDecoration(
+              color: AppColors.surface2,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: _buildQuickDatePicker(afterSelect: afterSelect),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildQuickDatePicker({VoidCallback? afterSelect}) {
@@ -1384,14 +1404,18 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         children: [
           _buildBrandHeader(),
           _buildSearchTile(showShortcut: true),
-          const SizedBox(height: 16),
+          _buildQuickDateBlock(),
+          const SizedBox(height: 12),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               children: _buildMenuList(),
             ),
           ),
-          _buildFooterActions(showTraining: true, showWipe: true),
+          _buildFooterActions(
+            showTraining: true,
+            showWipe: AuthController.instance.user?.isPlatformAdmin == true,
+          ),
         ],
       ),
     );
@@ -1409,13 +1433,15 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
               showShortcut: false,
               afterTap: () => Navigator.of(context).pop(),
             ),
+            _buildQuickDateBlock(
+              afterSelect: () => Navigator.of(context).pop(),
+            ),
             const SizedBox(height: 12),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 children: _buildMenuList(
                   afterSelect: () => Navigator.of(context).pop(),
-                  includeQuickCalendar: false,
                 ),
               ),
             ),

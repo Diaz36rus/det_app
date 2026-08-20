@@ -89,6 +89,12 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_platform_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"), nullable=True, index=True)
+    ## Связка с карточкой сотрудника цеха (опционально).
+    master_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crm_masters.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    ## Ожидает назначения должности админом (поток «подключился → назначили»).
+    pending_assignment: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     company: Mapped[Company | None] = relationship(back_populates="users")

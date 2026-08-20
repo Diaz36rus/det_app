@@ -7,13 +7,15 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
+import 'access_model.dart';
+import 'auth/auth_controller.dart';
 import 'app_diagnostics.dart';
 import 'app_theme.dart';
+import 'app_toast.dart';
 import 'bug_report_dialog.dart';
 import 'crm/cloud_mode.dart';
 import 'database.dart';
 import 'responsive.dart';
-import 'app_toast.dart';
 import 'sync/lan_discover.dart';
 import 'sync/qr_scan_sheet.dart';
 import 'sync/sync_config.dart';
@@ -356,6 +358,8 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> {
                     isHosting: sync.isHosting,
                   ),
                   const SizedBox(height: 10),
+                  _StudioAccessBlock(),
+                  const SizedBox(height: 12),
                   if (CloudMode.enabled) ...[
                     Text(
                       'Облачный режим: заказы, касса, склад и статистика — через api.det-app.ru.\n'
@@ -976,6 +980,107 @@ class _SyncStatusBanner extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Филиал + должность + алерты назначения (по уровню доступа).
+class _StudioAccessBlock extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final user = AuthController.instance.user;
+    final rank = accessRankOf(user);
+    final branchLabel = _branchLabel(user);
+    final jobLabel = _jobLabel(user, rank);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Студия',
+            style: GoogleFonts.manrope(
+              color: AppColors.textDim,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 8),
+          _kv('Филиал', branchLabel),
+          const SizedBox(height: 4),
+          _kv('Должность', jobLabel),
+          if (canManageAssignments(rank)) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Назначения',
+              style: GoogleFonts.manrope(
+                color: AppColors.textMuted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Пока никто не ждёт роль. Когда сотрудник подключится к филиалу, '
+              'он появится здесь — назначьте должность и цех.',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+            ),
+          ] else if (rank == AccessRank.master) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Доступ мастера: связь и QR. Назначение ролей — у администратора.',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _branchLabel(dynamic user) {
+    if (user == null) return 'Не вошли';
+    final ids = (user.branchIds as List?) ?? const [];
+    if (ids.isEmpty) {
+      if (user.isPlatformAdmin == true) return 'Все филиалы (владелец приложения)';
+      return 'Основной филиал';
+    }
+    if (ids.length == 1) return 'Филиал #${ids.first}';
+    return '${ids.length} филиала(ов)';
+  }
+
+  static String _jobLabel(dynamic user, AccessRank rank) {
+    if (user == null) return '—';
+    if (rank == AccessRank.platformOwner) return 'Владелец приложения';
+    final roles = (user.roles as List?)?.map((e) => e.toString()).toList() ?? const [];
+    if (roles.isEmpty) return 'Мастер (без должности в облаке)';
+    return roles.join(', ');
+  }
+
+  static Widget _kv(String k, String v) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 88,
+          child: Text(
+            k,
+            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            v,
+            style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -82,6 +82,10 @@ def ensure_user_phone_column() -> None:
                 "ON users (phone) WHERE phone IS NOT NULL"
             )
         )
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS master_id INTEGER"))
+        conn.execute(
+            text("ALTER TABLE users ADD COLUMN IF NOT EXISTS pending_assignment BOOLEAN DEFAULT FALSE")
+        )
         conn.execute(
             text("ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS start_time VARCHAR(32) DEFAULT ''")
         )
@@ -180,19 +184,35 @@ def seed_database(db: Session) -> None:
 
     admin = db.scalar(select(User).where(User.email == settings.platform_admin_email.lower()))
     if admin is None:
+        phone = None
+        if settings.platform_admin_phone:
+            from app.phone_util import phone_digits10
+
+            phone = phone_digits10(settings.platform_admin_phone)
         admin = User(
             email=settings.platform_admin_email.lower().strip(),
-            phone="9000000001",
+            phone=phone or "9000000001",
             password_hash=hash_password(settings.platform_admin_password),
             full_name=settings.platform_admin_name,
             is_platform_admin=True,
             is_active=True,
+            company_id=None,
         )
         db.add(admin)
     else:
         admin.is_platform_admin = True
         admin.is_active = True
-        if not admin.phone:
+        admin.full_name = settings.platform_admin_name
+        admin.company_id = None
+        # Пароль/телефон подтягиваем из env при каждом старте сида (владелец приложения).
+        admin.password_hash = hash_password(settings.platform_admin_password)
+        if settings.platform_admin_phone:
+            from app.phone_util import phone_digits10
+
+            p = phone_digits10(settings.platform_admin_phone)
+            if p:
+                admin.phone = p
+        elif not admin.phone:
             admin.phone = "9000000001"
 
     company = db.scalar(select(Company).where(Company.slug == "demo"))

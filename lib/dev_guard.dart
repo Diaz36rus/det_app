@@ -1,2 +1,4 @@
-/// Dev-only константы (очистка БД и т.п.).
-const String kDbWipePin = '9294';
+import 'access_model.dart';
+
+/// Dev-only: PIN очистки БД = PIN владельца приложения.
+const String kDbWipePin = kOwnerDestructivePin;
