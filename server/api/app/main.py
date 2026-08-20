@@ -19,7 +19,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Det App API", version="0.16.2", lifespan=lifespan)
+app = FastAPI(title="Det App API", version="0.16.3", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(platform.router)
 app.include_router(company.router)
@@ -31,7 +31,7 @@ app.include_router(updates.router)
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "det-app-api", "version": "0.16.2"}
+    return {"ok": True, "service": "det-app-api", "version": "0.16.3"}
 
 
 @app.get("/")

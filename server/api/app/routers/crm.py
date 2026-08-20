@@ -10,11 +10,13 @@ from app.models import (
     CashPayment,
     CrmCar,
     CrmClient,
+    CrmDefect,
     CrmInventoryMove,
     CrmOrder,
     CrmOrderEvent,
     CrmOrderItem,
     CrmOrderMaster,
+    CrmOrderWrapFilm,
     User,
 )
 from app.schemas import (
@@ -76,18 +78,34 @@ def _fill_item_from_in(row: CrmOrderItem, body: CrmOrderItemIn) -> None:
 
 
 def _purge_orders_by_ids(db: Session, ids: list[int]) -> int:
-    """FK cleanup before deleting orders (same as delete_order / clear-board)."""
+    """FK cleanup before deleting orders (same as delete_order / clear-board).
+
+    Uses explicit SQL deletes (not ORM cascade) so child rows and orders are
+    removed before cars/clients in the same transaction — ORM flush order
+    otherwise can DELETE cars while crm_orders.car_id still references them.
+    """
     if not ids:
         return 0
-    db.execute(delete(CashPayment).where(CashPayment.crm_order_id.in_(ids)))
-    db.execute(update(CashFlow).where(CashFlow.order_id.in_(ids)).values(order_id=None))
+    uniq = list(dict.fromkeys(ids))
+    db.execute(delete(CashPayment).where(CashPayment.crm_order_id.in_(uniq)))
+    db.execute(update(CashFlow).where(CashFlow.order_id.in_(uniq)).values(order_id=None))
     db.execute(
-        update(CrmInventoryMove).where(CrmInventoryMove.order_id.in_(ids)).values(order_id=None)
+        update(CrmInventoryMove).where(CrmInventoryMove.order_id.in_(uniq)).values(order_id=None)
     )
-    orders = list(db.scalars(select(CrmOrder).where(CrmOrder.id.in_(ids))).all())
-    for o in orders:
-        db.delete(o)
-    return len(orders)
+    db.execute(delete(CrmDefect).where(CrmDefect.order_id.in_(uniq)))
+    db.execute(delete(CrmOrderWrapFilm).where(CrmOrderWrapFilm.order_id.in_(uniq)))
+    db.execute(delete(CrmOrderEvent).where(CrmOrderEvent.order_id.in_(uniq)))
+    db.execute(delete(CrmOrderMaster).where(CrmOrderMaster.order_id.in_(uniq)))
+    # Self-FK parent_id: wipe children first, then remaining items.
+    db.execute(
+        delete(CrmOrderItem).where(
+            CrmOrderItem.order_id.in_(uniq), CrmOrderItem.parent_id.is_not(None)
+        )
+    )
+    db.execute(delete(CrmOrderItem).where(CrmOrderItem.order_id.in_(uniq)))
+    result = db.execute(delete(CrmOrder).where(CrmOrder.id.in_(uniq)))
+    db.flush()
+    return int(result.rowcount or 0)
 
 
 def _recalc_order_price(order: CrmOrder) -> None:
@@ -236,6 +254,12 @@ def delete_client(
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Клиент не найден")
+    cars = list(
+        db.scalars(
+            select(CrmCar).where(CrmCar.company_id == company_id, CrmCar.client_id == client_id)
+        ).all()
+    )
+    car_ids = [c.id for c in cars]
     order_ids = list(
         db.scalars(
             select(CrmOrder.id).where(
@@ -243,17 +267,25 @@ def delete_client(
             )
         ).all()
     )
+    if car_ids:
+        order_ids.extend(
+            db.scalars(
+                select(CrmOrder.id).where(
+                    CrmOrder.company_id == company_id, CrmOrder.car_id.in_(car_ids)
+                )
+            ).all()
+        )
     deleted_orders = _purge_orders_by_ids(db, order_ids)
-    cars = list(
-        db.scalars(
-            select(CrmCar).where(CrmCar.company_id == company_id, CrmCar.client_id == client_id)
-        ).all()
-    )
     for car in cars:
         db.delete(car)
     db.delete(row)
     db.commit()
-    return {"ok": True, "deleted": client_id, "deleted_orders": deleted_orders, "deleted_cars": len(cars)}
+    return {
+        "ok": True,
+        "deleted": client_id,
+        "deleted_orders": deleted_orders,
+        "deleted_cars": len(cars),
+    }
 
 
 @router.get("/cars", response_model=list[CrmCarOut])
