@@ -152,8 +152,16 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
       ),
     );
     if (ok == true) {
-      await DatabaseHelper().deleteMasterById(masterId);
-      _loadData();
+      try {
+        await DatabaseHelper().deleteMasterById(masterId);
+        if (!mounted) return;
+        _loadData();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось удалить: $e'), backgroundColor: AppColors.danger),
+        );
+      }
     }
   }
 

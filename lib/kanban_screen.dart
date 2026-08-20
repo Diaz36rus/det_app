@@ -356,8 +356,15 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                                 ),
                               );
                               if (confirm == true) {
-                                await DatabaseHelper().deleteOrder(id);
-                                _loadOrders();
+                                try {
+                                  await DatabaseHelper().deleteOrder(id);
+                                  _loadOrders();
+                                } catch (e) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Не удалось удалить: $e')),
+                                  );
+                                }
                               }
                             },
                           ),

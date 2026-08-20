@@ -586,8 +586,15 @@ class _WarehouseScreenState extends State<WarehouseScreen>
       ),
     );
     if (ok != true) return;
-    await DatabaseHelper().deleteInventoryItem(invId);
-    await _load(showSpinner: false);
+    try {
+      await DatabaseHelper().deleteInventoryItem(invId);
+      await _load(showSpinner: false);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось удалить: $e'), backgroundColor: AppColors.danger),
+      );
+    }
   }
 
   Future<void> _openRollsDialog(Map<String, dynamic> item) async {

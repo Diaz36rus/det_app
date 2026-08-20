@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
+import 'crm/crm_api.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'input_masks.dart';
@@ -68,8 +69,8 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
     }
 
     list.sort((a, b) {
-      final idA = a['id'] as int;
-      final idB = b['id'] as int;
+      final idA = (a['id'] as num).toInt();
+      final idB = (b['id'] as num).toInt();
       switch (_sort) {
         case _ClientSort.name:
           return cmpStr(a['name'], b['name']);
@@ -95,7 +96,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
 
     final carsMap = <int, List<Map<String, dynamic>>>{};
     for (final c in clients) {
-      final id = c['id'] as int;
+      final id = (c['id'] as num).toInt();
       carsMap[id] = await DatabaseHelper().getClientCars(id);
     }
 
@@ -357,7 +358,8 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
   }
 
   Future<void> _confirmDelete(Map<String, dynamic> client) async {
-    final clientId = client['id'] as int;
+    final clientId = (client['id'] as num).toInt();
+    final name = client['name']?.toString() ?? 'Клиент';
     final ok = await runWithPulseHighlight(
       clientId,
       () => showDialog<bool>(
@@ -366,7 +368,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
           backgroundColor: AppColors.surface,
           title: Text("Удалить клиента?", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
           content: Text(
-            "${client['name']} будет удалён из базы.",
+            "$name будет удалён из базы (вместе с авто и заказами).",
             style: GoogleFonts.manrope(color: AppColors.textMuted),
           ),
           actions: [
@@ -380,9 +382,23 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
         ),
       ),
     );
-    if (ok == true) {
-      await DatabaseHelper().deleteClient(client['id']);
-      _loadClients(_searchController.text);
+    if (ok != true || !mounted) return;
+    showAppToast(context, 'Удаляю…');
+    try {
+      await DatabaseHelper().deleteClient(clientId);
+      if (!mounted) return;
+      showAppToast(context, 'Клиент удалён');
+      await _loadClients(_searchController.text);
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e is CrmApiException ? e.message : e.toString();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Не удалось удалить: $msg'),
+          backgroundColor: AppColors.danger,
+          duration: const Duration(seconds: 6),
+        ),
+      );
     }
   }
 
@@ -641,7 +657,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
   }
 
   Widget _buildClientCard(Map<String, dynamic> c) {
-    final id = c['id'] as int;
+    final id = (c['id'] as num).toInt();
     final isVip = c['is_vip'] == 1;
     final cars = _carsByClient[id] ?? [];
     final accent = isVip ? _vipAccent : AppColors.primary;
