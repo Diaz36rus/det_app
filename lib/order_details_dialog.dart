@@ -288,8 +288,18 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         if (car.isNotEmpty) _currentCarCategory = car['category'] ?? "1";
       }
 
-      _services = await DatabaseHelper().getAllServices();
-      _cashRegisters = await DatabaseHelper().getCashRegisters();
+      try {
+        _services = await DatabaseHelper().getAllServices();
+      } catch (e, st) {
+        debugPrint('OrderDetails.getAllServices: $e\n$st');
+        _services = [];
+      }
+      try {
+        _cashRegisters = await DatabaseHelper().getCashRegisters();
+      } catch (e, st) {
+        debugPrint('OrderDetails.getCashRegisters: $e\n$st');
+        _cashRegisters = [];
+      }
       _handover = await DatabaseHelper().getOrderHandover(widget.order['id'] as int);
       _payments = await DatabaseHelper().getOrderPayments(widget.order['id'] as int);
       _syncRegisterForMethod(_paymentMethod, preferKeep: false);
@@ -350,6 +360,15 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       _syncRegisterForMethod(_paymentMethod, preferKeep: false);
     } catch (e, st) {
       debugPrint('OrderDetails._loadData: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Не удалось загрузить заказ: $e'),
+            backgroundColor: AppColors.danger,
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
     } finally {
       if (mounted) {
         _enterCtrl.value = 0;
