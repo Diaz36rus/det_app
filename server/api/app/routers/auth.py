@@ -8,7 +8,15 @@ from app.deps import get_current_user, user_permission_codes
 from app.models import Branch, Company, Role, User, UserBranch
 from app.permissions_catalog import PERMISSIONS
 from app.phone_util import looks_like_email, phone_digits10
-from app.schemas import AccessRequest, LoginRequest, RefreshRequest, TokenResponse, UserOut
+from app.schemas import (
+    AccessRequest,
+    LoginRequest,
+    RefreshRequest,
+    RegisterStudioRequest,
+    StudioLookupOut,
+    TokenResponse,
+    UserOut,
+)
 from app.security import (
     create_access_token,
     create_refresh_token,
@@ -16,6 +24,7 @@ from app.security import (
     hash_password,
     verify_password,
 )
+from app.studio_provision import provision_studio
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -92,6 +101,37 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserOut)
 def me(user: User = Depends(get_current_user)):
     return _user_out(user)
+
+
+@router.get("/studio-lookup", response_model=StudioLookupOut)
+def studio_lookup(slug: str, db: Session = Depends(get_db)):
+    s = (slug or "").strip().lower()
+    if len(s) < 2:
+        raise HTTPException(status_code=422, detail="Укажите код студии")
+    company = db.scalar(select(Company).where(Company.slug == s, Company.is_active.is_(True)))
+    if company is None:
+        raise HTTPException(status_code=404, detail="Студия не найдена")
+    return StudioLookupOut(id=company.id, name=company.name, slug=company.slug, is_active=company.is_active)
+
+
+@router.post("/register-studio", response_model=TokenResponse)
+def register_studio(body: RegisterStudioRequest, db: Session = Depends(get_db)):
+    """Клиент создаёт свою студию и сразу входит как её владелец."""
+    _, _, owner = provision_studio(
+        db,
+        name=body.studio_name,
+        slug=body.slug,
+        branch_name=body.branch_name,
+        owner_email=str(body.email),
+        owner_password=body.password,
+        owner_full_name=body.full_name,
+        owner_phone=body.phone,
+    )
+    db.commit()
+    return TokenResponse(
+        access_token=create_access_token(owner.id),
+        refresh_token=create_refresh_token(owner.id),
+    )
 
 
 @router.post("/request-access", response_model=TokenResponse)

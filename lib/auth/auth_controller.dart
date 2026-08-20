@@ -64,22 +64,88 @@ class AuthController extends ChangeNotifier {
     notifyListeners();
     try {
       final tokens = await _api.login(login: login, password: password);
-      final me = await _api.me(tokens.accessToken);
-      _tokens = tokens;
-      user = me;
-      await _store.save(tokens, me);
-      status = AuthStatus.signedIn;
-      notifyListeners();
-      return true;
+      return await _acceptSession(tokens);
     } on AuthApiException catch (e) {
       lastError = e.message;
       notifyListeners();
       return false;
-    } catch (e) {
+    } catch (_) {
       lastError = 'Нет связи с сервером';
       notifyListeners();
       return false;
     }
+  }
+
+  Future<bool> registerStudio({
+    required String studioName,
+    required String slug,
+    required String branchName,
+    required String fullName,
+    required String email,
+    required String password,
+    String? phone,
+  }) async {
+    lastError = null;
+    notifyListeners();
+    try {
+      final tokens = await _api.registerStudio(
+        studioName: studioName,
+        slug: slug,
+        branchName: branchName,
+        fullName: fullName,
+        email: email,
+        password: password,
+        phone: phone,
+      );
+      return await _acceptSession(tokens);
+    } on AuthApiException catch (e) {
+      lastError = e.message;
+      notifyListeners();
+      return false;
+    } catch (_) {
+      lastError = 'Нет связи с сервером';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> requestAccess({
+    required String companySlug,
+    required String fullName,
+    required String email,
+    required String password,
+    String? phone,
+  }) async {
+    lastError = null;
+    notifyListeners();
+    try {
+      final tokens = await _api.requestAccess(
+        companySlug: companySlug,
+        fullName: fullName,
+        email: email,
+        password: password,
+        phone: phone,
+      );
+      return await _acceptSession(tokens);
+    } on AuthApiException catch (e) {
+      lastError = e.message;
+      notifyListeners();
+      return false;
+    } catch (_) {
+      lastError = 'Нет связи с сервером';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> _acceptSession(AuthTokens tokens) async {
+    final me = await _api.me(tokens.accessToken);
+    _tokens = tokens;
+    user = me;
+    await _store.save(tokens, me);
+    status = AuthStatus.signedIn;
+    notifyListeners();
+    return true;
   }
 
   Future<void> logout() async {

@@ -138,6 +138,25 @@ class AccessRequest(BaseModel):
     company_slug: str = Field(default="demo", min_length=2, max_length=80)
 
 
+class RegisterStudioRequest(BaseModel):
+    """Self-serve: новая студия + владелец студии (не platform admin)."""
+
+    studio_name: str = Field(min_length=2, max_length=200)
+    slug: str = Field(min_length=2, max_length=80)
+    branch_name: str = Field(default="Основной филиал", min_length=2, max_length=200)
+    full_name: str = Field(min_length=1, max_length=200)
+    email: EmailStr
+    password: str = Field(min_length=6)
+    phone: str | None = Field(default=None, max_length=32)
+
+
+class StudioLookupOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    is_active: bool
+
+
 # --- CRM C1 ---
 
 
