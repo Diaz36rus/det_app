@@ -323,7 +323,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         }
         _selectedWorks[i] = {...w, 'workshop': auto};
       }
-      if (_selectedWorks.isEmpty) {
+      if (_selectedWorks.isEmpty && !CloudDbBridge.active) {
         String notes = widget.order['notes'] ?? "";
         double oldPrice = (widget.order['price'] as num?)?.toDouble() ?? 0;
         if (notes.isNotEmpty) {

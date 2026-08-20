@@ -4,7 +4,7 @@ class AuthTokens {
 
   const AuthTokens({required this.accessToken, required this.refreshToken});
 
-  Map<String, dynamic> toJson() => {
+  Map<String, Object?> toJson() => {
         'access_token': accessToken,
         'refresh_token': refreshToken,
       };

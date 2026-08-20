@@ -92,7 +92,7 @@ class CrmOrderItem {
         parentId: (j['parent_id'] as num?)?.toInt(),
       );
 
-  Map<String, dynamic> toJson() => {
+  Map<String, Object?> toJson() => {
         if (id != null) 'id': id,
         'name': name,
         'price': price,

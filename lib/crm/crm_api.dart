@@ -34,6 +34,13 @@ class CrmApi {
     };
   }
 
+  /// jsonEncode падает на Map<String, dynamic> toJson tear-off в новых SDK —
+  /// всегда гоняем через Map<String, Object?>.
+  String _jsonBody(Map<String, Object?> body) => jsonEncode(body);
+
+  Map<String, Object?> _asJsonMap(Map<String, dynamic> src) =>
+      Map<String, Object?>.from(src);
+
   Future<List<CrmClient>> listClients() async {
     final r = await http.get(_u('/crm/clients'), headers: _headers()).timeout(const Duration(seconds: 15));
     _ensure(r);
@@ -55,7 +62,7 @@ class CrmApi {
 
   Future<CrmClient> patchClient(int id, Map<String, dynamic> body) async {
     final r = await http
-        .patch(_u('/crm/clients/$id'), headers: _headers(), body: jsonEncode(body))
+        .patch(_u('/crm/clients/$id'), headers: _headers(), body: _jsonBody(_asJsonMap(body)))
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmClient.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
@@ -82,7 +89,7 @@ class CrmApi {
 
   Future<CrmMaster> patchMaster(int id, Map<String, dynamic> body) async {
     final r = await http
-        .patch(_u('/crm/masters/$id'), headers: _headers(), body: jsonEncode(body))
+        .patch(_u('/crm/masters/$id'), headers: _headers(), body: _jsonBody(_asJsonMap(body)))
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmMaster.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
@@ -119,7 +126,7 @@ class CrmApi {
 
   Future<CrmService> patchService(int id, Map<String, dynamic> body) async {
     final r = await http
-        .patch(_u('/crm/services/$id'), headers: _headers(), body: jsonEncode(body))
+        .patch(_u('/crm/services/$id'), headers: _headers(), body: _jsonBody(_asJsonMap(body)))
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmService.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
@@ -188,14 +195,14 @@ class CrmApi {
         .post(
           _u('/crm/orders'),
           headers: _headers(),
-          body: jsonEncode({
+          body: _jsonBody({
             'client_id': clientId,
             'car_id': carId,
             'status': status,
             'notes': notes,
             'due_date': dueDate,
             'master_ids': masterIds,
-            'items': items.map((e) => e.toJson()).toList(),
+            'items': [for (final e in items) Map<String, Object?>.from(e.toJson())],
           }),
         )
         .timeout(const Duration(seconds: 15));
@@ -205,7 +212,7 @@ class CrmApi {
 
   Future<CrmOrder> patchOrder(int id, Map<String, dynamic> body) async {
     final r = await http
-        .patch(_u('/crm/orders/$id'), headers: _headers(), body: jsonEncode(body))
+        .patch(_u('/crm/orders/$id'), headers: _headers(), body: _jsonBody(_asJsonMap(body)))
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmOrder.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
@@ -243,7 +250,7 @@ class CrmApi {
         .post(
           _u('/crm/orders/$orderId/items'),
           headers: _headers(),
-          body: jsonEncode(item.toJson()..remove('id')),
+          body: _jsonBody(Map<String, Object?>.from(item.toJson())..remove('id')),
         )
         .timeout(const Duration(seconds: 15));
     _ensure(r);
@@ -255,7 +262,7 @@ class CrmApi {
         .patch(
           _u('/crm/orders/$orderId/items/$itemId'),
           headers: _headers(),
-          body: jsonEncode(body),
+          body: _jsonBody(_asJsonMap(body)),
         )
         .timeout(const Duration(seconds: 15));
     _ensure(r);
@@ -271,7 +278,7 @@ class CrmApi {
 
   Future<CrmCar> patchCar(int id, Map<String, dynamic> body) async {
     final r = await http
-        .patch(_u('/crm/cars/$id'), headers: _headers(), body: jsonEncode(body))
+        .patch(_u('/crm/cars/$id'), headers: _headers(), body: _jsonBody(_asJsonMap(body)))
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmCar.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
@@ -374,7 +381,7 @@ class CrmApi {
 
   Future<CrmInventoryItem> patchInventory(int id, Map<String, dynamic> body) async {
     final r = await http
-        .patch(_u('/crm/inventory/$id'), headers: _headers(), body: jsonEncode(body))
+        .patch(_u('/crm/inventory/$id'), headers: _headers(), body: _jsonBody(_asJsonMap(body)))
         .timeout(const Duration(seconds: 15));
     _ensure(r);
     return CrmInventoryItem.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
