@@ -109,6 +109,7 @@ def ensure_user_phone_column() -> None:
             ("tech_wash_start", "VARCHAR(32) DEFAULT ''"),
             ("tech_wash_end", "VARCHAR(32) DEFAULT ''"),
             ("is_workshop_completed", "BOOLEAN DEFAULT FALSE"),
+            ("receptionist_id", "INTEGER"),
         ]:
             conn.execute(text(f"ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS {col} {typ}"))
         conn.execute(

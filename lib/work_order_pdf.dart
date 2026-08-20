@@ -252,6 +252,7 @@ class WorkOrderPdf {
 
   static pw.Widget _headerTable(Map<String, dynamic> order) {
     final admin = order['master_name']?.toString() ?? '';
+    final receptionist = order['receptionist_name']?.toString() ?? '';
     final receptionDate = _datePart(order['start_time'] ?? order['created_at']);
     final planDate = _datePart(order['end_date'] ?? order['due_date'] ?? order['end_time']);
     final receptionTime = _timePart(order['start_time']);
@@ -282,7 +283,7 @@ class WorkOrderPdf {
         ]),
         pw.TableRow(children: [
           _cell('Мастер-приёмщик', label: true),
-          _cell(admin),
+          _cell(receptionist),
           _cell('Время приёма', label: true),
           _cell(receptionTime),
           _cell('Время план', label: true),
@@ -403,7 +404,7 @@ class WorkOrderPdf {
                 _cell(_executor(w, masters), height: rowH),
                 _cell('', height: rowH),
                 _cell('${_money(w['price'])} ₽', align: pw.Alignment.centerRight, height: rowH),
-                _cell(w['comment']?.toString() ?? '', height: rowH),
+                _cell('', height: rowH), // Комментарии — от руки; цеховой чат в PDF не идёт
                 _cell('', height: rowH),
               ]),
             );

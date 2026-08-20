@@ -339,7 +339,8 @@ class DatabaseHelper {
       handover_payment INTEGER DEFAULT 0,
       handover_keys INTEGER DEFAULT 0,
       handover_inspect INTEGER DEFAULT 0,
-      handover_notified INTEGER DEFAULT 0
+      handover_notified INTEGER DEFAULT 0,
+      receptionist_id INTEGER DEFAULT NULL
     )''');
     await db.execute('''CREATE TABLE masters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT DEFAULT 'Универсал')''');
     await db.execute('''CREATE TABLE order_events (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, event_text TEXT, created_at TEXT)''');
@@ -855,6 +856,10 @@ class DatabaseHelper {
         );
       }
     }
+    // --- Версия 27: мастер-приёмщик отдельно от администратора ---
+    if (oldVersion < 27) {
+      await _ensureColumn(db, 'orders', 'receptionist_id', 'INTEGER DEFAULT NULL');
+    }
   }
 
   static Future<void> _seedCashRegisters(Database db) async {
@@ -1159,12 +1164,14 @@ class DatabaseHelper {
       SELECT orders.*, clients.name as client_name, clients.phone as client_phone, clients.is_vip,
              cars.make_model, cars.plate, cars.vin, cars.category,
              m.name as master_name,
+             r.name as receptionist_name,
              (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
              (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_done
       FROM orders
       JOIN clients ON orders.client_id = clients.id
       JOIN cars ON orders.car_id = cars.id
       LEFT JOIN masters m ON orders.master_id = m.id
+      LEFT JOIN masters r ON orders.receptionist_id = r.id
       WHERE orders.id = ?
     ''', [orderId]);
     return res.isNotEmpty ? Map<String, dynamic>.from(res.first) : null;
@@ -4813,6 +4820,16 @@ class DatabaseHelper {
     }
     final db = await database;
     await db.update('orders', {'master_id': masterId}, where: 'id = ?', whereArgs: [orderId]);
+  }
+
+  Future<void> updateOrderReceptionist(int orderId, int? receptionistId) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderReceptionist(orderId, receptionistId);
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    await db.update('orders', {'receptionist_id': receptionistId}, where: 'id = ?', whereArgs: [orderId]);
   }
 
   Future<List<Map<String, dynamic>>> getClientCarsForDropdown(String phone) async {

@@ -209,6 +209,7 @@ class CrmOrderCreate(BaseModel):
     discount_fixed: float = 0
     promo_code: str = Field(default="", max_length=80)
     master_ids: list[int] = []
+    receptionist_id: int | None = None
     items: list[CrmOrderItemIn] = []
 
 
@@ -238,6 +239,7 @@ class CrmOrderUpdate(BaseModel):
     paid_amount: float | None = None
     car_id: int | None = None
     master_ids: list[int] | None = None
+    receptionist_id: int | None = None
     items: list[CrmOrderItemIn] | None = None
 
 
@@ -272,6 +274,7 @@ class CrmOrderOut(BaseModel):
     tech_wash_end: str = ""
     is_workshop_completed: bool = False
     master_ids: list[int] = []
+    receptionist_id: int | None = None
     items: list[CrmOrderItemOut] = []
     client_name: str | None = None
     car_label: str | None = None

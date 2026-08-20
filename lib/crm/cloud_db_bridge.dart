@@ -126,6 +126,13 @@ class CloudDbBridge {
       'category': car?.category ?? '1',
       'master_name': masterName,
       'master_id': o.masterIds.isEmpty ? null : o.masterIds.first,
+      'receptionist_id': o.receptionistId,
+      'receptionist_name': () {
+        final rid = o.receptionistId;
+        if (rid == null || _masters.isEmpty) return '';
+        final m = _masters.where((e) => e.id == rid).toList();
+        return m.isEmpty ? '' : m.first.name;
+      }(),
       'works_total': worksTotal,
       'works_done': worksDone,
       'is_completed': o.status == 'Выдан' ? 1 : 0,
@@ -1176,12 +1183,12 @@ class CloudDbBridge {
         if (endTime.isNotEmpty) 'end_time': endTime,
         if (endDate.isNotEmpty) 'end_date': endDate,
       });
-      // После patch обязательно перечитываем заказ с items (не доверяем кэшу ответа).
       try {
         _orders[patched.id] = await _crm.getOrder(patched.id);
       } catch (_) {
         _orders[patched.id] = patched;
       }
+      await _repairOrphanZonePackages(patched.id);
       return patched.id;
     }
     try {
@@ -1189,7 +1196,41 @@ class CloudDbBridge {
     } catch (_) {
       _orders[order.id] = order;
     }
+    await _repairOrphanZonePackages(order.id);
     return order.id;
+  }
+
+  /// createOrder кладёт зоны плоско; собираем их в пакеты Оклейка/Тонировка.
+  Future<void> _repairOrphanZonePackages(int orderId) async {
+    await _refreshOrder(orderId);
+    final order = _orders[orderId];
+    if (order == null) return;
+    final orphans = order.items.where((it) {
+      if (it.parentId != null) return false;
+      if (_isZoneHeader(it.name)) return false;
+      return _isWrapLine(name: it.name) || _isTintLine(name: it.name);
+    }).toList();
+    if (orphans.isEmpty) return;
+
+    for (final it in orphans) {
+      final id = it.id;
+      if (id == null) continue;
+      final name = it.name;
+      final price = it.price;
+      final ws = it.workshop.trim().isNotEmpty ? it.workshop : 'Оклейка';
+      final cat = _isTintLine(name: name) ? 'Тонировка' : 'Оклейка (Пленка)';
+      await _crm.deleteOrderItem(orderId, id);
+      await addOrderItem(
+        orderId,
+        name,
+        price,
+        workshop: ws,
+        category: cat,
+        startTime: it.startTime.isEmpty ? null : it.startTime,
+        endTime: it.endTime.isEmpty ? null : it.endTime,
+      );
+    }
+    await _refreshOrder(orderId);
   }
 
   Future<CrmOrder?> _orderByItemId(int itemId) async {
@@ -1427,6 +1468,13 @@ class CloudDbBridge {
     await _crm.patchOrder(orderId, {
       'master_ids': masterId == null ? <int>[] : [masterId],
     }).then((o) => _orders[o.id] = o);
+  }
+
+  Future<void> updateOrderReceptionist(int orderId, int? receptionistId) async {
+    final o = await _crm.patchOrder(orderId, {
+      'receptionist_id': receptionistId,
+    });
+    _orders[o.id] = o;
   }
 
   Future<void> updateOrderSchedule(
@@ -1826,11 +1874,7 @@ class CloudDbBridge {
       await _crm.patchOrderItem(orderId, it.id!, {'master_ids': csv});
       updated++;
     }
-    if (masterIds.isNotEmpty) {
-      await updateOrderMaster(orderId, masterIds.first);
-    } else {
-      await updateOrderMaster(orderId, null);
-    }
+    // Не трогаем orders.master_id — это администратор/приёмщик заказа, не мастер цеха.
     await _refreshOrder(orderId);
     return updated;
   }
@@ -2076,7 +2120,7 @@ class CloudDbBridge {
             'name': zones.length == 1 ? zones.first : '$name · ${zones.length} поз.',
             'price': price > 0 ? price : kidSum,
             'category': isWrap ? 'Оклейка (Пленка)' : 'Тонировка',
-            'workshop': ws.isNotEmpty ? ws : (isWrap ? 'Оклейка' : 'Тонировка'),
+            'workshop': ws.isNotEmpty ? ws : 'Оклейка',
             'wrapZones': zones,
           });
           continue;

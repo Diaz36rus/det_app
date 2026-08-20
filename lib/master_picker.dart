@@ -100,3 +100,75 @@ List<int> parseMasterIds(dynamic raw) {
       .whereType<int>()
       .toList();
 }
+
+/// Одиночный выбор сотрудника (админ / приёмщик). `null` в результате — отмена;
+/// пустой список `[]` — снять назначение.
+Future<List<int>?> pickOrderStaff(
+  BuildContext context, {
+  required String title,
+  required List<Map<String, dynamic>> candidates,
+  int? currentId,
+  String emptyHint = 'Нет подходящих сотрудников',
+}) async {
+  return showDialog<List<int>>(
+    context: context,
+    builder: (context) {
+      int? selected = currentId;
+      return StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: AppColors.surface,
+            title: Text(title, style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+            content: SizedBox(
+              width: 320,
+              child: candidates.isEmpty
+                  ? Text(
+                      emptyHint,
+                      style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
+                    )
+                  : ListView(
+                      shrinkWrap: true,
+                      children: [
+                        RadioListTile<int?>(
+                          value: null,
+                          groupValue: selected,
+                          title: Text(
+                            'Не назначен',
+                            style: GoogleFonts.manrope(color: AppColors.textDim),
+                          ),
+                          onChanged: (v) => setDialogState(() => selected = v),
+                        ),
+                        ...candidates.map((m) {
+                          final id = (m['id'] as num).toInt();
+                          final name = m['name']?.toString() ?? '';
+                          final role = m['role']?.toString() ?? '';
+                          return RadioListTile<int?>(
+                            value: id,
+                            groupValue: selected,
+                            title: Text(name, style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+                            subtitle: Text(
+                              role,
+                              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                            ),
+                            onChanged: (v) => setDialogState(() => selected = v),
+                          );
+                        }),
+                      ],
+                    ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(
+                  context,
+                  selected == null ? <int>[] : <int>[selected!],
+                ),
+                child: const Text('Готово'),
+              ),
+            ],
+          );
+        },
+      );
+    },
+  );
+}

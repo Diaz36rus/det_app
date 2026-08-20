@@ -91,8 +91,17 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   // 1. Контроллер для текста комментария
   final TextEditingController _commentController = TextEditingController();
-  final ExpansionTileController _priceListController = ExpansionTileController();
+  bool _priceListOpen = false;
+  final Set<int> _expandedWorkComments = {};
+  /// Общая зона «кнопка цеху + поле»: клик снаружи сворачивает сообщение.
+  static const Object _workCommentTapGroup = Object();
   bool _timelineSubmitBusy = false;
+
+  void _collapseWorkComments() {
+    if (_expandedWorkComments.isEmpty) return;
+    setState(() => _expandedWorkComments.clear());
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
 
   // 2. Функция мгновенного добавления комментария
   Future<void> _addCommentToTimeline() async {
@@ -161,6 +170,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   List<Map<String, dynamic>> _events = [];
   List<Map<String, dynamic>> _payments = [];
   int? _selectedMasterId;
+  int? _selectedReceptionistId;
   List<Map<String, dynamic>> _clientCars = []; // Список авто клиента
   int? _selectedCarId; // Выбранное авто
   List<Map<String, dynamic>> _services = []; // Весь прайс-лист
@@ -280,12 +290,42 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       _masters = await DatabaseHelper().getAllMastersFull();
       _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
       _selectedMasterId = widget.order['master_id'];
+      _selectedReceptionistId = (widget.order['receptionist_id'] as num?)?.toInt();
+      // Мастер цеха, ошибочно записанный в master_id — не админ заказа.
+      if (_selectedMasterId != null) {
+        final cur = _masters.where((m) => m['id'] == _selectedMasterId).toList();
+        if (cur.isEmpty || !_isAdminOnlyRole(cur.first['role']?.toString())) {
+          _selectedMasterId = null;
+          try {
+            await DatabaseHelper().updateOrderMaster(widget.order['id'], null);
+          } catch (e) {
+            debugPrint('clear non-admin master_id: $e');
+          }
+        }
+      }
+      if (_selectedReceptionistId != null) {
+        final cur = _masters.where((m) => m['id'] == _selectedReceptionistId).toList();
+        if (cur.isEmpty || !_isReceptionistEligible(cur.first['role']?.toString())) {
+          _selectedReceptionistId = null;
+          try {
+            await DatabaseHelper().updateOrderReceptionist(widget.order['id'], null);
+          } catch (e) {
+            debugPrint('clear bad receptionist_id: $e');
+          }
+        }
+      }
       _clientCars = await DatabaseHelper().getClientCars(widget.order['client_id']);
       _selectedCarId = widget.order['car_id'];
 
       if (_selectedCarId != null) {
-        var car = _clientCars.firstWhere((c) => c['id'] == _selectedCarId, orElse: () => {});
-        if (car.isNotEmpty) _currentCarCategory = car['category'] ?? "1";
+        Map<String, dynamic>? car;
+        for (final c in _clientCars) {
+          if (c['id'] == _selectedCarId) {
+            car = c;
+            break;
+          }
+        }
+        if (car != null) _currentCarCategory = car['category'] ?? "1";
       }
 
       try {
@@ -418,6 +458,137 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               color: hasValue ? AppColors.text : AppColors.textMuted,
               fontSize: 13,
               fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Компактное время на карточке работы: только иконка + цвет.
+  Widget _timeIconChip({
+    required String? value,
+    required IconData icon,
+    required String tooltip,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    final hasValue = value != null && value.isNotEmpty;
+    return Tooltip(
+      message: hasValue ? _formatDT(value, tooltip) : tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: hasValue ? color.withOpacity(0.15) : AppColors.bg.withOpacity(0.55),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: hasValue ? color.withOpacity(0.8) : AppColors.border,
+              ),
+            ),
+            child: Icon(icon, size: 18, color: hasValue ? color : AppColors.textMuted),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _masterActionChip({
+    required String masters,
+    required bool hasMasters,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          decoration: BoxDecoration(
+            color: hasMasters ? AppColors.primary.withOpacity(0.16) : AppColors.bg.withOpacity(0.55),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: hasMasters ? AppColors.primary.withOpacity(0.75) : AppColors.primary.withOpacity(0.5),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                hasMasters ? Icons.groups : Icons.person_add_alt_1,
+                size: 16,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 6),
+              Flexible(
+                child: Text(
+                  hasMasters ? masters : '+ Мастер',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.manrope(
+                    color: AppColors.primary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _workCommentToggle(Map<String, dynamic> w) {
+    final id = (w['id'] as num?)?.toInt();
+    if (id == null) return const SizedBox.shrink();
+    final open = _expandedWorkComments.contains(id);
+    final hasDraft = (w['comment']?.toString() ?? '').trim().isNotEmpty;
+    return TapRegion(
+      groupId: _workCommentTapGroup,
+      child: Tooltip(
+        message: open ? 'Скрыть сообщение цеху' : 'Сообщение цеху',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () {
+              setState(() {
+                if (open) {
+                  _expandedWorkComments.remove(id);
+                } else {
+                  _expandedWorkComments.add(id);
+                }
+              });
+            },
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: 36,
+              height: 36,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: open || hasDraft
+                    ? AppColors.primary.withOpacity(0.15)
+                    : AppColors.bg.withOpacity(0.55),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: open || hasDraft
+                      ? AppColors.primary.withOpacity(0.75)
+                      : AppColors.border,
+                ),
+              ),
+              child: Icon(
+                open ? Icons.chat_bubble : Icons.chat_bubble_outline,
+                size: 17,
+                color: open || hasDraft ? AppColors.primary : AppColors.textMuted,
+              ),
             ),
           ),
         ),
@@ -1148,6 +1319,72 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     );
   }
 
+  Future<void> _editWorkPrice(Map<String, dynamic> w) async {
+    if (_isWorkshopMode) return;
+    final id = (w['id'] as num?)?.toInt();
+    if (id == null) return;
+    final current = (w['price'] as num?)?.toDouble() ?? 0;
+    final ctrl = TextEditingController(
+      text: current % 1 == 0 ? current.toInt().toString() : current.toStringAsFixed(2),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text("Цена работы", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              w['name']?.toString() ?? '',
+              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: "Цена",
+                isDense: true,
+                suffixText: "₽",
+              ),
+              onSubmitted: (_) => Navigator.pop(ctx, true),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Отмена")),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Сохранить")),
+        ],
+      ),
+    );
+    final raw = ctrl.text.trim().replaceAll(',', '.');
+    ctrl.dispose();
+    if (ok != true || !mounted) return;
+    final parsed = double.tryParse(raw);
+    if (parsed == null || parsed < 0) {
+      showAppToast(context, "Некорректная цена");
+      return;
+    }
+    if ((parsed - current).abs() < 0.001) return;
+    try {
+      await DatabaseHelper().updateOrderItemPrice(id, parsed);
+      await DatabaseHelper().addOrderEvent(
+        widget.order['id'],
+        "Цена «${w['name']}»: ${_formatMoney(current)} → ${_formatMoney(parsed)} ₽",
+      );
+      _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+      await _reloadWorksFromDb();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Не удалось сохранить цену: $e")),
+      );
+    }
+  }
+
   Future<void> _addPayment() async {
     // Справа — ручная сумма; если пусто — берём авто-долг слева
     final manual = _payAmountController.text.trim().replaceAll(',', '.');
@@ -1414,17 +1651,15 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   Future<void> _printWorkOrder() async {
-    String? masterName = widget.order['master_name']?.toString();
-    if (_selectedMasterId != null) {
-      final found = _masters.where((m) => m['id'] == _selectedMasterId).toList();
-      if (found.isNotEmpty) masterName = found.first['name']?.toString();
-    }
+    final adminName = _staffName(_selectedMasterId);
+    final receptionistName = _staffName(_selectedReceptionistId);
     final orderForPdf = {
       ...widget.order,
       'status': _status,
       'price': _initialPrice,
       'paid_amount': _paidAmount,
-      'master_name': masterName ?? '',
+      'master_name': adminName,
+      'receptionist_name': receptionistName,
       'start_time': _orderStartTime ?? widget.order['start_time'],
       'end_time': _orderEndTime ?? widget.order['end_time'],
     };
@@ -1652,6 +1887,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     final masters = _masterNamesFor(w);
     final hasMasters = masters.isNotEmpty;
     final isDone = (w['is_done'] as num?)?.toInt() == 1;
+    final itemId = (w['id'] as num?)?.toInt();
+    final commentOpen = itemId != null && _expandedWorkComments.contains(itemId);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -1703,34 +1940,43 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (hasMasters)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          masters,
-                          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
                   ],
                 ),
               ),
-              IconButton(
-                icon: Icon(
-                  hasMasters ? Icons.groups : Icons.person_add_alt_1,
-                  color: hasMasters ? AppColors.primary : AppColors.textDim,
-                  size: 20,
-                ),
-                tooltip: "Назначить мастеров",
-                onPressed: () => _pickMastersForWork(index, w),
-              ),
               if (!hidePrice)
-                Text(
-                  "${w['price']} ₽",
-                  style: GoogleFonts.manrope(color: AppColors.success, fontSize: 13, fontWeight: FontWeight.w700),
+                Padding(
+                  padding: const EdgeInsets.only(right: 4),
+                  child: Tooltip(
+                    message: _isWorkshopMode ? "Цена" : "Изменить цену",
+                    child: InkWell(
+                      onTap: _isWorkshopMode ? null : () => _editWorkPrice(w),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              "${_formatMoney((w['price'] as num?)?.toDouble() ?? 0)} ₽",
+                              style: GoogleFonts.manrope(
+                                color: AppColors.success,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            if (!_isWorkshopMode) ...[
+                              const SizedBox(width: 4),
+                              Icon(Icons.edit_outlined, size: 14, color: AppColors.success.withOpacity(0.75)),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               if (!_isWorkshopMode)
                 IconButton(
+                  visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
                   onPressed: () => _removeWork(w),
                 ),
@@ -1739,68 +1985,76 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           const SizedBox(height: 8),
           Row(
             children: [
-              Expanded(
-                child: _timeBadge(
-                  value: w['start_time']?.toString(),
-                  emptyLabel: "Начало",
-                  color: AppColors.success,
-                  onTap: () async {
-                    String? ws = (_selectedWorks[index]['workshop'] as String?) ?? currentWorkshop;
-                    if (ws == null || ws.isEmpty) {
-                      ws = workshopForService(name: w['name']?.toString());
-                      if (ws != null) {
-                        await _saveWorkSchedule(index, workshop: ws);
-                      }
-                    }
-                    ws = (_selectedWorks[index]['workshop'] as String?) ?? ws;
-                    if (ws == null || ws.isEmpty) {
-                      _showNeedWorkshopHint();
-                      return;
-                    }
-                    String? dt = await _pickDateTime(current: w['start_time']?.toString());
-                    if (dt == null) return;
-                    await _saveWorkSchedule(
-                      index,
-                      start: dt,
-                      workshop: ws,
-                      logText: "Услуга '${w['name']}': начало ${_formatDT(dt, dt)}",
-                    );
-                  },
+              Flexible(
+                child: _masterActionChip(
+                  masters: masters,
+                  hasMasters: hasMasters,
+                  onTap: () => _pickMastersForWork(index, w),
                 ),
               ),
               const SizedBox(width: 8),
-              Expanded(
-                child: _timeBadge(
-                  value: w['end_time']?.toString(),
-                  emptyLabel: "Конец",
-                  color: AppColors.danger,
-                  onTap: () async {
-                    String? ws = (_selectedWorks[index]['workshop'] as String?) ?? currentWorkshop;
-                    if (ws == null || ws.isEmpty) {
-                      ws = workshopForService(name: w['name']?.toString());
-                      if (ws != null) {
-                        await _saveWorkSchedule(index, workshop: ws);
-                      }
+              _timeIconChip(
+                value: w['start_time']?.toString(),
+                icon: Icons.play_arrow_rounded,
+                tooltip: "Начало",
+                color: AppColors.success,
+                onTap: () async {
+                  String? ws = (_selectedWorks[index]['workshop'] as String?) ?? currentWorkshop;
+                  if (ws == null || ws.isEmpty) {
+                    ws = workshopForService(name: w['name']?.toString());
+                    if (ws != null) {
+                      await _saveWorkSchedule(index, workshop: ws);
                     }
-                    ws = (_selectedWorks[index]['workshop'] as String?) ?? ws;
-                    if (ws == null || ws.isEmpty) {
-                      _showNeedWorkshopHint();
-                      return;
-                    }
-                    String? dt = await _pickDateTime(current: w['end_time']?.toString() ?? w['start_time']?.toString());
-                    if (dt == null) return;
-                    await _saveWorkSchedule(
-                      index,
-                      end: dt,
-                      workshop: ws,
-                      logText: "Услуга '${w['name']}': конец ${_formatDT(dt, dt)}",
-                    );
-                  },
-                ),
+                  }
+                  ws = (_selectedWorks[index]['workshop'] as String?) ?? ws;
+                  if (ws == null || ws.isEmpty) {
+                    _showNeedWorkshopHint();
+                    return;
+                  }
+                  String? dt = await _pickDateTime(current: w['start_time']?.toString());
+                  if (dt == null) return;
+                  await _saveWorkSchedule(
+                    index,
+                    start: dt,
+                    workshop: ws,
+                    logText: "Услуга '${w['name']}': начало ${_formatDT(dt, dt)}",
+                  );
+                },
               ),
+              const SizedBox(width: 6),
+              _timeIconChip(
+                value: w['end_time']?.toString(),
+                icon: Icons.stop_rounded,
+                tooltip: "Конец",
+                color: AppColors.danger,
+                onTap: () async {
+                  String? ws = (_selectedWorks[index]['workshop'] as String?) ?? currentWorkshop;
+                  if (ws == null || ws.isEmpty) {
+                    ws = workshopForService(name: w['name']?.toString());
+                    if (ws != null) {
+                      await _saveWorkSchedule(index, workshop: ws);
+                    }
+                  }
+                  ws = (_selectedWorks[index]['workshop'] as String?) ?? ws;
+                  if (ws == null || ws.isEmpty) {
+                    _showNeedWorkshopHint();
+                    return;
+                  }
+                  String? dt = await _pickDateTime(current: w['end_time']?.toString() ?? w['start_time']?.toString());
+                  if (dt == null) return;
+                  await _saveWorkSchedule(
+                    index,
+                    end: dt,
+                    workshop: ws,
+                    logText: "Услуга '${w['name']}': конец ${_formatDT(dt, dt)}",
+                  );
+                },
+              ),
+              const SizedBox(width: 6),
+              _workCommentToggle(w),
             ],
           ),
-          _workCommentField(w),
+          if (commentOpen) _workCommentField(w),
         ],
       ),
     );
@@ -1808,25 +2062,144 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   bool get _isMobileLayout => widget.fullscreen || AppResponsive.isMobile(context);
 
-  static const _adminRoles = {'Администратор', 'Приемщик'};
+  static const _adminOnlyRoles = {'Администратор'};
+  static const _receptionistRoles = {'Администратор', 'Приемщик'};
 
-  bool _isAdminRole(String? role) => masterHasAnyRole(role, _adminRoles);
+  bool _isAdminOnlyRole(String? role) => masterHasAnyRole(role, _adminOnlyRoles);
+  bool _isReceptionistEligible(String? role) => masterHasAnyRole(role, _receptionistRoles);
 
-  /// Сотрудники для поля «Администратор» (+ текущий, если роль устарела).
-  List<Map<String, dynamic>> get _adminsForDropdown {
-    final list = _masters.where((m) => _isAdminRole(m['role']?.toString())).toList();
-    if (_selectedMasterId != null &&
-        !list.any((m) => m['id'] == _selectedMasterId)) {
-      final cur = _masters.where((m) => m['id'] == _selectedMasterId).toList();
-      if (cur.isNotEmpty) list.insert(0, cur.first);
-    }
-    return list;
+  String _staffName(int? id) {
+    if (id == null) return '';
+    final found = _masters.where((m) => m['id'] == id).toList();
+    return found.isEmpty ? '' : (found.first['name']?.toString() ?? '');
   }
 
-  int? get _safeMasterDropdownValue {
-    if (_selectedMasterId == null) return null;
-    final ok = _adminsForDropdown.any((m) => m['id'] == _selectedMasterId);
-    return ok ? _selectedMasterId : null;
+  List<Map<String, dynamic>> get _adminsOnlyForPicker =>
+      _masters.where((m) => _isAdminOnlyRole(m['role']?.toString())).toList();
+
+  List<Map<String, dynamic>> get _receptionistsForPicker =>
+      _masters.where((m) => _isReceptionistEligible(m['role']?.toString())).toList();
+
+  Future<void> _pickAdministrator() async {
+    final picked = await pickOrderStaff(
+      context,
+      title: 'Администратор',
+      candidates: _adminsOnlyForPicker,
+      currentId: _selectedMasterId,
+      emptyHint: 'Нет сотрудников с ролью «Администратор».',
+    );
+    if (picked == null || !mounted) return;
+    final id = picked.isEmpty ? null : picked.first;
+    if (id == _selectedMasterId) return;
+    setState(() => _selectedMasterId = id);
+    await DatabaseHelper().updateOrderMaster(widget.order['id'], id);
+    final name = id == null ? 'Не назначен' : _staffName(id);
+    await DatabaseHelper().addOrderEvent(widget.order['id'], 'Назначен администратор: $name');
+    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickReceptionist() async {
+    final picked = await pickOrderStaff(
+      context,
+      title: 'Мастер-приёмщик',
+      candidates: _receptionistsForPicker,
+      currentId: _selectedReceptionistId,
+      emptyHint: 'Нет сотрудников с ролью «Администратор» или «Приемщик».',
+    );
+    if (picked == null || !mounted) return;
+    final id = picked.isEmpty ? null : picked.first;
+    if (id == _selectedReceptionistId) return;
+    setState(() => _selectedReceptionistId = id);
+    await DatabaseHelper().updateOrderReceptionist(widget.order['id'], id);
+    final name = id == null ? 'Не назначен' : _staffName(id);
+    await DatabaseHelper().addOrderEvent(widget.order['id'], 'Назначен мастер-приёмщик: $name');
+    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+    if (mounted) setState(() {});
+  }
+
+  Widget _staffRoleChip({
+    required String label,
+    required String name,
+    required bool assigned,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: assigned ? AppColors.primary.withOpacity(0.16) : AppColors.bg.withOpacity(0.55),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: assigned ? AppColors.primary.withOpacity(0.75) : AppColors.primary.withOpacity(0.45),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                assigned ? Icons.badge_outlined : Icons.person_add_alt_1,
+                size: 18,
+                color: AppColors.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      assigned ? name : '+ Назначить',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.primary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _staffAssignRow() {
+    return Row(
+      children: [
+        Expanded(
+          child: _staffRoleChip(
+            label: 'Администратор',
+            name: _staffName(_selectedMasterId),
+            assigned: _selectedMasterId != null,
+            onTap: _pickAdministrator,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _staffRoleChip(
+            label: 'Мастер-приёмщик',
+            name: _staffName(_selectedReceptionistId),
+            assigned: _selectedReceptionistId != null,
+            onTap: _pickReceptionist,
+          ),
+        ),
+      ],
+    );
   }
 
   int? get _safeCarDropdownValue {
@@ -2059,44 +2432,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     );
   }
 
-  Widget _adminDropdown() {
-    final admins = _adminsForDropdown;
-    return DropdownButtonFormField<int>(
-      value: _safeMasterDropdownValue,
-      isExpanded: true,
-      decoration: const InputDecoration(labelText: "Администратор", isDense: true),
-      dropdownColor: AppColors.surface,
-      items: [
-        const DropdownMenuItem<int>(
-          value: null,
-          child: Text("Не назначен", overflow: TextOverflow.ellipsis),
-        ),
-        ...admins.map((m) {
-          final role = m['role']?.toString() ?? '';
-          final name = m['name']?.toString() ?? '';
-          final label = _isAdminRole(role) ? name : '$name ($role)';
-          return DropdownMenuItem<int>(
-            value: m['id'] as int?,
-            child: Text(label, overflow: TextOverflow.ellipsis),
-          );
-        }),
-      ],
-      onChanged: (val) async {
-        if (val == _selectedMasterId) return;
-        setState(() => _selectedMasterId = val);
-        await DatabaseHelper().updateOrderMaster(widget.order['id'], val);
-        String masterName = "Не назначен";
-        if (val != null) {
-          final foundMaster = _masters.where((m) => m['id'] == val).toList();
-          if (foundMaster.isNotEmpty) masterName = foundMaster.first['name'];
-        }
-        await DatabaseHelper().addOrderEvent(widget.order['id'], "Назначен администратор: $masterName");
-        _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-        if (mounted) setState(() {});
-      },
-    );
-  }
-
   /// Коммент под работой → БД + сразу в ленту («для цеха»).
   /// Возвращает true, если событие попало в ленту.
   Future<bool> _saveWorkComment(int itemId, String text) async {
@@ -2112,24 +2447,17 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     final workName = w?['name']?.toString() ?? '';
     final body = workName.isEmpty ? trimmed : '$trimmed · $workName';
 
-    try {
-      await DatabaseHelper().updateOrderItemComment(itemId, trimmed);
-    } catch (e) {
-      debugPrint('updateOrderItemComment: $e');
-      // Колонка/синк могли сбоить — ленту всё равно пишем.
-    }
-
+    // Только лента: в order_items.comment / заказ-наряд цеховой чат не пишем.
     try {
       await DatabaseHelper().addOrderEvent(
         widget.order['id'],
         "Для цеха «$ws»: $body",
       );
       _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-      if (idx >= 0) {
-        _selectedWorks[idx]['comment'] = trimmed;
-      }
       if (mounted) {
-        setState(() {});
+        setState(() {
+          _expandedWorkComments.remove(itemId);
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Отправлено в ленту'), duration: Duration(seconds: 1)),
         );
@@ -2151,11 +2479,15 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     if (id == null) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: _WorkItemCommentField(
-        key: ValueKey('work_for_shop_$id'),
-        itemId: id,
-        initial: w['comment']?.toString() ?? '',
-        onSend: _saveWorkComment,
+      child: TapRegion(
+        groupId: _workCommentTapGroup,
+        onTapOutside: (_) => _collapseWorkComments(),
+        child: _WorkItemCommentField(
+          key: ValueKey('work_for_shop_$id'),
+          itemId: id,
+          initial: w['comment']?.toString() ?? '',
+          onSend: _saveWorkComment,
+        ),
       ),
     );
   }
@@ -2248,7 +2580,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           if (mobile) ...[
             _statusDropdown(),
             const SizedBox(height: 10),
-            _adminDropdown(),
+            _staffAssignRow(),
             const SizedBox(height: 10),
             _carDropdown(),
             const SizedBox(height: 10),
@@ -2259,7 +2591,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               children: [
                 Expanded(child: _statusDropdown()),
                 const SizedBox(width: 12),
-                Expanded(child: _adminDropdown()),
+                Expanded(flex: 2, child: _staffAssignRow()),
                 const SizedBox(width: 12),
                 Expanded(child: _carDropdown()),
               ],
@@ -2308,42 +2640,66 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           WorksProgressBar.fromItems(_selectedWorks),
           const SizedBox(height: 12),
           if (!_isWorkshopMode) ...[
-            ExpansionTile(
-              controller: _priceListController,
-              title: Text(
-                "Добавить из прайса",
-                style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
-              ),
-              iconColor: AppColors.primary,
-              collapsedIconColor: AppColors.textMuted,
-              tilePadding: EdgeInsets.zero,
-              childrenPadding: EdgeInsets.zero,
+            Row(
               children: [
-                Container(
-                  height: 280,
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.bg.withOpacity(0.55),
-                    borderRadius: BorderRadius.circular(AppTheme.radius),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => setState(() => _priceListOpen = !_priceListOpen),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.text,
+                      side: BorderSide(
+                        color: _priceListOpen ? AppColors.primary : AppColors.border,
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                    ),
+                    icon: Icon(
+                      _priceListOpen ? Icons.expand_less : Icons.menu_book_outlined,
+                      size: 18,
+                      color: _priceListOpen ? AppColors.primary : AppColors.textMuted,
+                    ),
+                    label: Text(
+                      "Из прайса",
+                      style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
                   ),
-                  child: ServiceCategoryBrowser(
-                    services: _services,
-                    carCategory: _currentCarCategory,
-                    onAdd: _addWork,
-                    onConfigurePackage: _openZonePackageFromCategory,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _addCustomWork,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.text,
+                      side: const BorderSide(color: AppColors.border),
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                    ),
+                    icon: const Icon(Icons.add, size: 18, color: AppColors.textMuted),
+                    label: Text(
+                      "Своя работа",
+                      style: GoogleFonts.manrope(fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
                   ),
                 ),
               ],
             ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: _addCustomWork,
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text("Своя работа"),
+            if (_priceListOpen) ...[
+              const SizedBox(height: 8),
+              Container(
+                height: 280,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.bg.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(AppTheme.radius),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: ServiceCategoryBrowser(
+                  services: _services,
+                  carCategory: _currentCarCategory,
+                  onAdd: _addWork,
+                  onConfigurePackage: _openZonePackageFromCategory,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
+            ],
+            const SizedBox(height: 8),
           ],
           if (fill) Expanded(child: list) else list,
         ],
@@ -2353,9 +2709,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   Map<String, dynamic>? _zonePackageHeader(String headerName) {
     for (final w in _selectedWorks) {
-      if ((w['name']?.toString() ?? '') == headerName && w['parent_id'] == null) {
-        return w;
-      }
+      if ((w['name']?.toString() ?? '').trim() != headerName) continue;
+      final parent = w['parent_id'];
+      final isRoot = parent == null || parent == '' || ((parent is num) && parent == 0);
+      if (isRoot) return w;
     }
     return null;
   }
@@ -2426,7 +2783,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       if (!mounted) return;
       _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
       await _reloadWorksFromDb();
-      if (mounted) _priceListController.collapse();
+      if (mounted) setState(() => _priceListOpen = false);
     } catch (e, st) {
       debugPrint('_openZonePackageEditor: $e\n$st');
       if (!mounted) return;
@@ -2585,6 +2942,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     final isDone = (child['is_done'] as num?)?.toInt() == 1;
     final label = (child['name']?.toString() ?? '')
         .replaceFirst(RegExp(r'^(Оклейка|Тонировка)\s*·\s*'), '');
+    final itemId = (child['id'] as num?)?.toInt();
+    final commentOpen = itemId != null && _expandedWorkComments.contains(itemId);
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.fromLTRB(4, 0, 2, 6),
@@ -2624,6 +2983,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              _workCommentToggle(child),
               if (!workshopView)
                 IconButton(
                   tooltip: "Убрать из пакета",
@@ -2632,10 +2992,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 ),
             ],
           ),
-          Padding(
-            padding: const EdgeInsets.only(left: 8, right: 8),
-            child: _workCommentField(child),
-          ),
+          if (commentOpen)
+            Padding(
+              padding: const EdgeInsets.only(left: 8, right: 8),
+              child: _workCommentField(child),
+            ),
         ],
       ),
     );
@@ -2655,6 +3016,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     final packageName = header['name']?.toString() ?? 'Пакет';
     final kind = isTintPackageHeader(packageName) ? 'tint' : 'wrap';
     final canToggle = !workshopView || widget.workshop == 'Оклейка';
+    final headerId = (header['id'] as num?)?.toInt();
+    final commentOpen = headerId != null && _expandedWorkComments.contains(headerId);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -2704,15 +3067,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    if (hasMasters)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          masters,
-                          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -2739,16 +3093,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 ),
                 IconButton(
                   visualDensity: VisualDensity.compact,
-                  icon: Icon(
-                    hasMasters ? Icons.groups : Icons.person_add_alt_1,
-                    color: hasMasters ? AppColors.primary : AppColors.textDim,
-                    size: 20,
-                  ),
-                  tooltip: "Мастера пакета",
-                  onPressed: () => _pickMastersForWrapPackage(header),
-                ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
                   tooltip: "Удалить пакет",
                   icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
                   onPressed: () => _removeWork(header),
@@ -2760,52 +3104,66 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             const SizedBox(height: 8),
             Row(
               children: [
-                Expanded(
-                  child: _timeBadge(
-                    value: header['start_time']?.toString(),
-                    emptyLabel: "Начало",
-                    color: AppColors.success,
-                    onTap: () async {
-                      final dt = await _pickDateTime(current: header['start_time']?.toString());
-                      if (dt == null) return;
-                      await _saveWrapPackageSchedule(
-                        header: header,
-                        start: dt,
-                        logText: "Пакет оклейки: начало ${_formatDT(dt, dt)}",
-                      );
-                    },
+                Flexible(
+                  child: _masterActionChip(
+                    masters: masters,
+                    hasMasters: hasMasters,
+                    onTap: () => _pickMastersForWrapPackage(header),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: _timeBadge(
-                    value: header['end_time']?.toString(),
-                    emptyLabel: "Конец",
-                    color: AppColors.danger,
-                    onTap: () async {
-                      final dt = await _pickDateTime(
-                        current: header['end_time']?.toString() ?? header['start_time']?.toString(),
-                      );
-                      if (dt == null) return;
-                      await _saveWrapPackageSchedule(
-                        header: header,
-                        end: dt,
-                        logText: "Пакет оклейки: конец ${_formatDT(dt, dt)}",
-                      );
-                    },
-                  ),
+                _timeIconChip(
+                  value: header['start_time']?.toString(),
+                  icon: Icons.play_arrow_rounded,
+                  tooltip: "Начало",
+                  color: AppColors.success,
+                  onTap: () async {
+                    final dt = await _pickDateTime(current: header['start_time']?.toString());
+                    if (dt == null) return;
+                    await _saveWrapPackageSchedule(
+                      header: header,
+                      start: dt,
+                      logText: "Пакет оклейки: начало ${_formatDT(dt, dt)}",
+                    );
+                  },
                 ),
+                const SizedBox(width: 6),
+                _timeIconChip(
+                  value: header['end_time']?.toString(),
+                  icon: Icons.stop_rounded,
+                  tooltip: "Конец",
+                  color: AppColors.danger,
+                  onTap: () async {
+                    final dt = await _pickDateTime(
+                      current: header['end_time']?.toString() ?? header['start_time']?.toString(),
+                    );
+                    if (dt == null) return;
+                    await _saveWrapPackageSchedule(
+                      header: header,
+                      end: dt,
+                      logText: "Пакет оклейки: конец ${_formatDT(dt, dt)}",
+                    );
+                  },
+                ),
+                const SizedBox(width: 6),
+                _workCommentToggle(header),
               ],
             ),
+          ] else ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _workCommentToggle(header),
+            ),
           ],
-          _workCommentField(header),
+          if (commentOpen) _workCommentField(header),
           const SizedBox(height: 4),
           Theme(
             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
             child: ExpansionTile(
-              // Всегда свёрнут: на мобилке/в цехе иначе зоны оклейки забивают экран.
-              // Не true при rebuild — live-refresh снова раскрывал бы список.
-              initiallyExpanded: false,
+              // В цехе сразу раскрыт — мастер видит зоны (тонировка/оклейка).
+              // В админке свёрнут, иначе список забивает экран.
+              initiallyExpanded: workshopView,
               tilePadding: EdgeInsets.zero,
               childrenPadding: const EdgeInsets.only(top: 4),
               iconColor: AppColors.primary,
@@ -3923,12 +4281,15 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   /// Список работ цеха: пакеты оклейки/тонировки — блоками, без дубля шапка+зоны.
+  /// Чужие цеха тоже видны (мастер видит весь заказ), но галочка только у своего цеха.
   Widget _buildWorkshopWorksList({bool shrinkWrap = false}) {
-    final wrapHeader = _wrapPackageHeader();
+    final isWrapShop = widget.workshop == 'Оклейка';
+
+    final wrapHeader = isWrapShop ? _wrapPackageHeader() : null;
     final wrapChildren = wrapHeader != null
         ? _wrapPackageChildren((wrapHeader['id'] as num).toInt())
         : <Map<String, dynamic>>[];
-    final tintHeader = _tintPackageHeader();
+    final tintHeader = isWrapShop ? _tintPackageHeader() : null;
     final tintChildren = tintHeader != null
         ? _wrapPackageChildren((tintHeader['id'] as num).toInt())
         : <Map<String, dynamic>>[];
@@ -3944,8 +4305,23 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       final id = (w['id'] as num?)?.toInt();
       if (id != null && packageIds.contains(id)) continue;
       final name = w['name']?.toString();
-      // Зоны/шапки пакета не дублируем отдельными строками (в т.ч. сироты).
-      if (isZonePackageHeader(name) || isZonePackageLine(name: name)) continue;
+      final cat = w['category']?.toString();
+
+      // Шапка пакета уже в блоке (если цех Оклейка).
+      if (isZonePackageHeader(name)) {
+        // В другом цехе шапку/зоны пакета показываем строками (read-only).
+        if (!isWrapShop) otherIndexes.add(i);
+        continue;
+      }
+
+      // Зона: в Оклейке — в блоке пакета или сиротой-строкой; в других цехах — строкой.
+      if (isZonePackageLine(category: cat, name: name)) {
+        final underPackage = id != null && packageIds.contains(id);
+        if (underPackage) continue;
+        otherIndexes.add(i);
+        continue;
+      }
+
       otherIndexes.add(i);
     }
 
@@ -3965,6 +4341,104 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           _buildWrapPackageBlock(tintHeader, tintChildren, workshopView: true),
         for (final i in otherIndexes) _buildWorkshopWorkRow(i),
       ],
+    );
+  }
+
+  /// Входящие «Для цеха …» для текущего цеха (лента не трогаем).
+  List<Map<String, dynamic>> _workshopInboxEvents() {
+    final ws = widget.workshop;
+    if (ws == null || ws.isEmpty) return const [];
+    final out = <Map<String, dynamic>>[];
+    for (final ev in _events) {
+      final raw = ev['event_text']?.toString() ?? '';
+      final parsed = _parseTimelineEvent(raw);
+      if (parsed.direction != 'forShop') continue;
+      if (parsed.workshop != ws) continue;
+      out.add(ev);
+    }
+    return out;
+  }
+
+  Widget _buildWorkshopInbox() {
+    final items = _workshopInboxEvents();
+    if (items.isEmpty) return const SizedBox.shrink();
+    final accent = _workshopColors[widget.workshop] ?? AppColors.primary;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        decoration: BoxDecoration(
+          color: accent.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(AppTheme.radius),
+          border: Border.all(color: accent.withOpacity(0.45)),
+        ),
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.mark_chat_unread_outlined, size: 18, color: accent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    "Вам написали · ${items.length}",
+                    style: GoogleFonts.manrope(
+                      color: accent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 140),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: items.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, i) {
+                  final ev = items[i];
+                  final parsed = _parseTimelineEvent(ev['event_text']?.toString() ?? '');
+                  final time = _formatEventTime(ev['created_at']);
+                  return Container(
+                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface.withOpacity(0.72),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: accent.withOpacity(0.25)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          parsed.body,
+                          style: GoogleFonts.manrope(
+                            color: AppColors.text,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            height: 1.3,
+                          ),
+                        ),
+                        if (time.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            time,
+                            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -3990,10 +4464,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                   ),
                   const SizedBox(height: 10),
                 ],
+                _buildWorkshopInbox(),
                 Text("Работы", style: AppTheme.sectionTitle),
                 const SizedBox(height: 4),
                 Text(
-                  "Галочка доступна только для цеха «${widget.workshop}»",
+                  "Все работы заказа видны · галочка только у цеха «${widget.workshop}»",
                   style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
                 ),
                 const SizedBox(height: 10),
@@ -4189,7 +4664,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                   children: [
                     _statusDropdown(),
                     const SizedBox(height: 8),
-                    _adminDropdown(),
+                    _staffAssignRow(),
                     const SizedBox(height: 8),
                     _carDropdown(),
                     const SizedBox(height: 10),
@@ -4258,7 +4733,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   Widget _buildAdminBody() {
     final content = GestureDetector(
       onTap: () {
-        _priceListController.collapse();
+        setState(() {
+          _priceListOpen = false;
+          _expandedWorkComments.clear();
+        });
         FocusManager.instance.primaryFocus?.unfocus();
       },
       child: _adminInner(),
@@ -4358,6 +4836,9 @@ class _WorkItemCommentFieldState extends State<_WorkItemCommentField> {
     super.initState();
     _ctrl = TextEditingController(text: widget.initial);
     _focus = FocusNode();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focus.requestFocus();
+    });
   }
 
   @override

@@ -181,6 +181,7 @@ def _order_out(order: CrmOrder, client: CrmClient | None = None, car: CrmCar | N
         tech_wash_end=getattr(order, "tech_wash_end", None) or "",
         is_workshop_completed=bool(getattr(order, "is_workshop_completed", False)),
         master_ids=master_ids,
+        receptionist_id=getattr(order, "receptionist_id", None),
         items=[_item_out(it) for it in (order.items or [])],
         client_name=client.name if client else None,
         car_label=(f"{car.make_model} {car.plate}".strip() if car else None),
@@ -601,6 +602,8 @@ def update_order(
         db.flush()
         for mid in body.master_ids:
             db.add(CrmOrderMaster(order_id=order.id, master_id=int(mid)))
+    if "receptionist_id" in body.model_fields_set:
+        order.receptionist_id = body.receptionist_id
     if body.items is not None:
         existing = {it.id: it for it in list(order.items)}
         keep: set[int] = set()

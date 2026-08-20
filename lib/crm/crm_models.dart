@@ -162,6 +162,7 @@ class CrmOrder {
   final String techWashEnd;
   final bool isWorkshopCompleted;
   final List<int> masterIds;
+  final int? receptionistId;
   final List<CrmOrderItem> items;
   final String? clientName;
   final String? carLabel;
@@ -197,6 +198,7 @@ class CrmOrder {
     this.techWashEnd = '',
     this.isWorkshopCompleted = false,
     this.masterIds = const [],
+    this.receptionistId,
     this.items = const [],
     this.clientName,
     this.carLabel,
@@ -235,6 +237,7 @@ class CrmOrder {
         techWashEnd: j['tech_wash_end']?.toString() ?? '',
         isWorkshopCompleted: j['is_workshop_completed'] == true,
         masterIds: (j['master_ids'] as List?)?.map((e) => (e as num).toInt()).toList() ?? const [],
+        receptionistId: (j['receptionist_id'] as num?)?.toInt(),
         items: (j['items'] as List?)
                 ?.map((e) => CrmOrderItem.fromJson(e as Map<String, dynamic>))
                 .toList() ??

@@ -177,6 +177,9 @@ class CrmOrder(Base):
     tech_wash_start: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     tech_wash_end: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     is_workshop_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    receptionist_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crm_masters.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
