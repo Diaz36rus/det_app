@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
+import 'auth/auth_api.dart';
+import 'crm/cloud_mode.dart';
 import 'database.dart';
 import 'sync/sync_config.dart';
 import 'sync/sync_controller.dart';
@@ -108,6 +110,18 @@ class AppDiagnostics extends ChangeNotifier {
   Future<void> refreshConnection({bool force = false}) async {
     final sync = SyncController.instance;
     final cfg = sync.config;
+
+    // Облачная сессия важнее LAN-роли для индикатора.
+    if (CloudMode.sessionActive && !cfg.isClient) {
+      final ok = await _ping(AuthApi.defaultBaseUrl);
+      _syncBaseUrl = AuthApi.defaultBaseUrl;
+      if (ok) {
+        _setStatus(ConnStatus.ok, 'Облако · api.det-app.ru');
+      } else {
+        _setStatus(ConnStatus.down, 'Облако недоступно');
+      }
+      return;
+    }
 
     if (cfg.isHost) {
       if (sync.isHosting) {
@@ -332,11 +346,13 @@ class ConnStatusDot extends StatelessWidget {
         final ok = AppDiagnostics.instance.isOk;
         final role = SyncController.instance.config.role;
         final color = ok ? AppColors.success : AppColors.danger;
-        final roleLabel = switch (role) {
-          SyncRole.host => 'Хост',
-          SyncRole.client => 'Клиент',
-          SyncRole.local => 'Локально',
-        };
+        final roleLabel = CloudMode.sessionActive && !SyncController.instance.config.isClient
+            ? 'Облако'
+            : switch (role) {
+                SyncRole.host => 'Хост',
+                SyncRole.client => 'Клиент',
+                SyncRole.local => 'Локально',
+              };
         final tip = ok
             ? '$roleLabel · OK · ${AppDiagnostics.instance.statusDetail}'
             : '$roleLabel · нет связи · ${AppDiagnostics.instance.statusDetail}';
