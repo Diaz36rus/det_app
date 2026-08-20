@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../cash_cloud/cash_cloud_api.dart';
 import '../cash_cloud/cash_cloud_models.dart';
+import '../order_status.dart';
 import 'cloud_mode.dart';
 import 'crm_api.dart';
 import 'crm_models.dart';
@@ -189,31 +190,49 @@ class CloudDbBridge {
   }
 
   Future<List<Map<String, dynamic>>> getOrderItems(int orderId) async {
-    if (!_orders.containsKey(orderId)) {
-      final list = await _crm.listOrders();
-      _orders
-        ..clear()
-        ..addEntries(list.map((o) => MapEntry(o.id, o)));
+    // Всегда тянем свежий заказ: кэш после create/patch мог остаться без items.
+    try {
+      final fresh = await _crm.getOrder(orderId);
+      _orders[fresh.id] = fresh;
+      return fresh.items
+          .map(
+            (it) => {
+              'id': it.id ?? 0,
+              'order_id': orderId,
+              'name': it.name,
+              'price': it.price,
+              'workshop': it.workshop,
+              'is_done': it.isDone ? 1 : 0,
+              'parent_id': it.parentId,
+              'comment': it.comment,
+              'master_ids': it.masterIds,
+              'start_time': it.startTime.isEmpty ? null : it.startTime,
+              'end_time': it.endTime.isEmpty ? null : it.endTime,
+            },
+          )
+          .toList();
+    } catch (_) {
+      await _refreshOrder(orderId);
+      final o = _orders[orderId];
+      if (o == null) return [];
+      return o.items
+          .map(
+            (it) => {
+              'id': it.id ?? 0,
+              'order_id': orderId,
+              'name': it.name,
+              'price': it.price,
+              'workshop': it.workshop,
+              'is_done': it.isDone ? 1 : 0,
+              'parent_id': it.parentId,
+              'comment': it.comment,
+              'master_ids': it.masterIds,
+              'start_time': it.startTime.isEmpty ? null : it.startTime,
+              'end_time': it.endTime.isEmpty ? null : it.endTime,
+            },
+          )
+          .toList();
     }
-    final o = _orders[orderId];
-    if (o == null) return [];
-    return o.items
-        .map(
-          (it) => {
-            'id': it.id ?? 0,
-            'order_id': orderId,
-            'name': it.name,
-            'price': it.price,
-            'workshop': it.workshop,
-            'is_done': it.isDone ? 1 : 0,
-            'parent_id': it.parentId,
-            'comment': it.comment,
-            'master_ids': it.masterIds,
-            'start_time': it.startTime.isEmpty ? null : it.startTime,
-            'end_time': it.endTime.isEmpty ? null : it.endTime,
-          },
-        )
-        .toList();
   }
 
   Future<List<String>> validateIssueOrder(int orderId) async {
@@ -1135,26 +1154,41 @@ class CloudDbBridge {
     if (crmItems.isEmpty) {
       crmItems.add(const CrmOrderItem(name: 'Работа', price: 0));
     }
-    final resolved = status ?? 'Принят в работу';
+    final resolved = status ?? resolveInitialOrderStatus(startTime, dueDate: dueDate);
+    final notes = items
+        .map((i) => i['name']?.toString() ?? '')
+        .where((n) => n.trim().isNotEmpty)
+        .join(', ');
     final order = await _crm.createOrder(
       clientId: clientId,
       carId: carId,
       items: crmItems,
       status: resolved,
+      notes: notes,
       dueDate: dueDate.isNotEmpty ? dueDate : DateTime.now().toIso8601String().substring(0, 10),
       masterIds: const [],
     );
     // start/end через patch
-    if (startTime.isNotEmpty || endTime.isNotEmpty || dueDate.isNotEmpty) {
+    if (startTime.isNotEmpty || endTime.isNotEmpty || dueDate.isNotEmpty || endDate.isNotEmpty) {
       final patched = await _crm.patchOrder(order.id, {
         if (dueDate.isNotEmpty) 'due_date': dueDate,
         if (startTime.isNotEmpty) 'start_time': startTime,
         if (endTime.isNotEmpty) 'end_time': endTime,
+        if (endDate.isNotEmpty) 'end_date': endDate,
       });
-      _orders[patched.id] = patched;
+      // После patch обязательно перечитываем заказ с items (не доверяем кэшу ответа).
+      try {
+        _orders[patched.id] = await _crm.getOrder(patched.id);
+      } catch (_) {
+        _orders[patched.id] = patched;
+      }
       return patched.id;
     }
-    _orders[order.id] = order;
+    try {
+      _orders[order.id] = await _crm.getOrder(order.id);
+    } catch (_) {
+      _orders[order.id] = order;
+    }
     return order.id;
   }
 

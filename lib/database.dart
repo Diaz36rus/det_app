@@ -13,29 +13,16 @@ import 'sync/sync_config.dart';
 import 'cash_catalog.dart';
 import 'crm/cloud_db_bridge.dart';
 import 'inventory_catalog.dart';
+import 'order_status.dart';
 import 'wrap_catalog.dart';
+
+export 'order_status.dart' show resolveInitialOrderStatus;
 
 // --- НАЧАЛО БЛОКА: КОНСТАНТЫ ---
 List<String> STATUSES = [
   "Предварительная запись", "Принят в работу", "Мойка", "Химчистка", "Полировка",
   "Оклейка", "Интерьер", "Оборудование", "Подготовка к выдаче", "Выдан"
 ];
-
-/// Статус при создании заказа: если начало в будущем — предварительная запись.
-String resolveInitialOrderStatus(String? startTime) {
-  if (startTime == null || startTime.trim().isEmpty) {
-    return "Предварительная запись";
-  }
-  try {
-    final n = startTime.replaceFirst('T', ' ').split('.').first.trim();
-    final iso = n.contains(' ') ? n.replaceFirst(' ', 'T') : n;
-    final dt = DateTime.parse(iso);
-    if (dt.isAfter(DateTime.now())) return "Предварительная запись";
-  } catch (_) {
-    return "Предварительная запись";
-  }
-  return "Принят в работу";
-}
 
 List<String> WORKSHOPS = ["Мойка", "Химчистка", "Полировка", "Оклейка", "Интерьер", "Оборудование"];
 
@@ -1375,7 +1362,7 @@ class DatabaseHelper {
     final now = DateTime.now().toIso8601String().substring(0, 16);
     String notes = items.map((i) => i['name'] as String).join(", ");
     double price = items.fold(0.0, (sum, i) => sum + ((i['price'] as num?)?.toDouble() ?? 0));
-    final resolvedStatus = status ?? resolveInitialOrderStatus(startTime);
+    final resolvedStatus = status ?? resolveInitialOrderStatus(startTime, dueDate: dueDate);
     int orderId = await db.insert('orders', {
       'client_id': clientId,
       'car_id': carId,

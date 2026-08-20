@@ -610,23 +610,33 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   void _addWork(String name, double price, [String category = ""]) async {
     final workshop = workshopForService(category: category, name: name);
-    await DatabaseHelper().addOrderItem(
-      widget.order['id'],
-      name,
-      price,
-      category: category,
-      workshop: workshop,
-    );
-    final wsNote = workshop != null ? " → цех $workshop" : "";
-    final priceNote = isZonePackageLine(category: category, name: name)
-        ? (isTintPackageLine(category: category, name: name) ? "в пакет тонировки" : "в пакет оклейки")
-        : "$price руб";
-    await DatabaseHelper().addOrderEvent(
-      widget.order['id'],
-      "Добавлена работа: $name ($priceNote)$wsNote",
-    );
-    _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-    await _reloadWorksFromDb();
+    try {
+      await DatabaseHelper().addOrderItem(
+        widget.order['id'],
+        name,
+        price,
+        category: category,
+        workshop: workshop,
+      );
+      final wsNote = workshop != null ? " → цех $workshop" : "";
+      final priceNote = isZonePackageLine(category: category, name: name)
+          ? (isTintPackageLine(category: category, name: name) ? "в пакет тонировки" : "в пакет оклейки")
+          : "$price руб";
+      await DatabaseHelper().addOrderEvent(
+        widget.order['id'],
+        "Добавлена работа: $name ($priceNote)$wsNote",
+      );
+      _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+      await _reloadWorksFromDb();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Не удалось добавить работу: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
   }
 
   bool get _isWorkshopMode => widget.workshop != null && widget.workshop!.isNotEmpty;

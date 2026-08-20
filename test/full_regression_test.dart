@@ -36,9 +36,11 @@ void main() {
     test('resolveInitialOrderStatus', () {
       final future = DateTime.now().add(const Duration(days: 2)).toIso8601String().substring(0, 16);
       final past = DateTime.now().subtract(const Duration(hours: 1)).toIso8601String().substring(0, 16);
+      final futureDay = DateTime.now().add(const Duration(days: 3)).toIso8601String().substring(0, 10);
       expect(resolveInitialOrderStatus(future), 'Предварительная запись');
       expect(resolveInitialOrderStatus(past), 'Принят в работу');
       expect(resolveInitialOrderStatus(null), 'Предварительная запись');
+      expect(resolveInitialOrderStatus(past, dueDate: futureDay), 'Предварительная запись');
     });
 
     test('InventoryUnits normalize / defaultFor', () {

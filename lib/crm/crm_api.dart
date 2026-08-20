@@ -169,6 +169,12 @@ class CrmApi {
     return list.map((e) => CrmOrder.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  Future<CrmOrder> getOrder(int id) async {
+    final r = await http.get(_u('/crm/orders/$id'), headers: _headers()).timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return CrmOrder.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
   Future<CrmOrder> createOrder({
     required int clientId,
     required int carId,
