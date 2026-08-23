@@ -788,7 +788,7 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
                 onPressed: () async {
-                  final ok = await showDialog<bool>(
+                  final result = await showDialog<String>(
                     context: context,
                     builder: (_) => BugReportDialog(
                       initialDetails: diag.formatLogForBugReport(limit: 30),
@@ -796,9 +796,15 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
                       initialSituation: _cloudDetail.isNotEmpty ? _cloudDetail : diag.statusDetail,
                     ),
                   );
-                  if (ok == true) {
+                  if (result == 'sent' || result == 'local') {
                     await diag.acknowledgeLocalErrors();
-                    if (context.mounted) Navigator.pop(context);
+                    if (context.mounted) {
+                      showAppToast(
+                        context,
+                        result == 'sent' ? 'Баг ушёл на сервер' : 'Баг сохранён локально',
+                      );
+                      Navigator.pop(context);
+                    }
                   }
                 },
                 icon: const Icon(Icons.bug_report, size: 18),

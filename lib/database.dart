@@ -472,6 +472,14 @@ class DatabaseHelper {
       work_started_at TEXT,
       work_ended_at TEXT
     )''');
+    await db.execute('''CREATE TABLE order_workshop_payroll (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      workshop TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      master_id INTEGER,
+      UNIQUE(order_id, workshop)
+    )''');
     await db.execute('''CREATE TABLE bug_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       place TEXT DEFAULT '',
@@ -480,7 +488,9 @@ class DatabaseHelper {
       status TEXT DEFAULT 'open',
       fix_note TEXT DEFAULT '',
       created_at TEXT NOT NULL,
-      updated_at TEXT
+      updated_at TEXT,
+      cloud_id INTEGER,
+      sync_status TEXT DEFAULT 'pending'
     )''');
     await db.execute('''CREATE TABLE app_settings (
       key TEXT PRIMARY KEY,
@@ -838,6 +848,22 @@ class DatabaseHelper {
     // --- Версия 27: мастер-приёмщик отдельно от администратора ---
     if (oldVersion < 27) {
       await _ensureColumn(db, 'orders', 'receptionist_id', 'INTEGER DEFAULT NULL');
+    }
+    // --- Версия 28: ЗП мастера на блок цеха в заказе ---
+    if (oldVersion < 28) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS order_workshop_payroll (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        workshop TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        master_id INTEGER,
+        UNIQUE(order_id, workshop)
+      )''');
+    }
+    // --- Версия 29: баг-репорты → облако ---
+    if (oldVersion < 29) {
+      await _ensureColumn(db, 'bug_reports', 'cloud_id', 'INTEGER');
+      await _ensureColumn(db, 'bug_reports', 'sync_status', "TEXT DEFAULT 'pending'");
     }
   }
 
@@ -3893,34 +3919,131 @@ class DatabaseHelper {
     return (rows.first['debt'] as num?)?.toDouble() ?? 0;
   }
 
-  /// Подсказка: сумма работ мастера за период (по master_ids в order_items).
+  /// Подсказка: сумма ЗП по блокам цехов (order_workshop_payroll) за период.
+  /// Если начислений нет — 0 (старая «сумма прайса» больше не подставляется).
   Future<double> suggestMasterPayroll(int masterId, String startDate, String endDate) async {
     if (CloudDbBridge.active) {
       return CloudDbBridge.instance.suggestMasterPayroll(masterId, startDate, endDate);
     }
     final db = await database;
+    await db.execute('''CREATE TABLE IF NOT EXISTS order_workshop_payroll (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      workshop TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      master_id INTEGER,
+      UNIQUE(order_id, workshop)
+    )''');
     final rows = await db.rawQuery('''
-      SELECT COALESCE(SUM(price), 0) as total
-      FROM order_items
-      WHERE (master_ids = ? OR master_ids LIKE ? OR master_ids LIKE ? OR master_ids LIKE ?)
-        AND (
-          (start_time IS NOT NULL AND start_time != '' AND date(replace(start_time, 'T', ' ')) >= date(?) AND date(replace(start_time, 'T', ' ')) <= date(?))
-          OR
-          ((start_time IS NULL OR start_time = '') AND order_id IN (
-            SELECT id FROM orders WHERE date(created_at) >= date(?) AND date(created_at) <= date(?)
-          ))
-        )
-    ''', [
-      '$masterId',
-      '$masterId,%',
-      '%,$masterId',
-      '%,$masterId,%',
-      startDate,
-      endDate,
-      startDate,
-      endDate,
-    ]);
+      SELECT COALESCE(SUM(p.amount), 0) as total
+      FROM order_workshop_payroll p
+      INNER JOIN orders o ON o.id = p.order_id
+      WHERE p.master_id = ?
+        AND p.amount > 0
+        AND date(replace(coalesce(nullif(o.start_time, ''), o.created_at), 'T', ' ')) >= date(?)
+        AND date(replace(coalesce(nullif(o.start_time, ''), o.created_at), 'T', ' ')) <= date(?)
+    ''', [masterId, startDate, endDate]);
     return (rows.first['total'] as num?)?.toDouble() ?? 0;
+  }
+
+  /// Выплаты ЗП/аванса мастеру из кассы за период.
+  Future<double> sumMasterPayrollPaid(int masterId, String startDate, String endDate) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.sumMasterPayrollPaid(masterId, startDate, endDate);
+    }
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT COALESCE(SUM(amount), 0) as total
+      FROM cash_flow
+      WHERE master_id = ?
+        AND type = 'Расход'
+        AND category IN ('Зарплата', 'Аванс')
+        AND date(replace(created_at, 'T', ' ')) >= date(?)
+        AND date(replace(created_at, 'T', ' ')) <= date(?)
+    ''', [masterId, startDate, endDate]);
+    return (rows.first['total'] as num?)?.toDouble() ?? 0;
+  }
+
+  Future<List<Map<String, dynamic>>> getOrderWorkshopPayroll(int orderId) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.getOrderWorkshopPayroll(orderId);
+    }
+    final db = await database;
+    await db.execute('''CREATE TABLE IF NOT EXISTS order_workshop_payroll (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      workshop TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      master_id INTEGER,
+      UNIQUE(order_id, workshop)
+    )''');
+    return await db.query(
+      'order_workshop_payroll',
+      where: 'order_id = ?',
+      whereArgs: [orderId],
+      orderBy: 'workshop ASC',
+    );
+  }
+
+  /// Upsert ЗП блока цеха. amount <= 0 удаляет запись.
+  Future<void> upsertOrderWorkshopPayroll({
+    required int orderId,
+    required String workshop,
+    required double amount,
+    int? masterId,
+  }) async {
+    final ws = workshop.trim();
+    if (ws.isEmpty) return;
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.upsertOrderWorkshopPayroll(
+        orderId: orderId,
+        workshop: ws,
+        amount: amount,
+        masterId: masterId,
+      );
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    await db.execute('''CREATE TABLE IF NOT EXISTS order_workshop_payroll (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      workshop TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      master_id INTEGER,
+      UNIQUE(order_id, workshop)
+    )''');
+    if (amount <= 0) {
+      await db.delete(
+        'order_workshop_payroll',
+        where: 'order_id = ? AND workshop = ?',
+        whereArgs: [orderId, ws],
+      );
+      bumpDataRevision();
+      return;
+    }
+    final existing = await db.query(
+      'order_workshop_payroll',
+      where: 'order_id = ? AND workshop = ?',
+      whereArgs: [orderId, ws],
+      limit: 1,
+    );
+    if (existing.isEmpty) {
+      await db.insert('order_workshop_payroll', {
+        'order_id': orderId,
+        'workshop': ws,
+        'amount': amount,
+        'master_id': masterId,
+      });
+    } else {
+      await db.update(
+        'order_workshop_payroll',
+        {'amount': amount, 'master_id': masterId},
+        where: 'id = ?',
+        whereArgs: [(existing.first['id'] as num).toInt()],
+      );
+    }
+    bumpDataRevision();
   }
 
   Future<double> getRevenueToday() async {
@@ -3999,6 +4122,11 @@ class DatabaseHelper {
   Future<void> applyInventoryUnitDefaultsIfNeeded() async {
     final done = await getAppSetting(InventorySeedCatalog.unitsFixKey);
     if (done == '1') return;
+    if (CloudDbBridge.active) {
+      // В облаке остатки живут на API — локальный UPDATE inventory ничего не меняет.
+      await setAppSetting(InventorySeedCatalog.unitsFixKey, '1');
+      return;
+    }
     final db = await database;
     var changed = 0;
     for (final s in InventorySeedCatalog.items) {
@@ -4016,61 +4144,149 @@ class DatabaseHelper {
     if (changed > 0) bumpDataRevision();
   }
 
+  static bool _inventorySeedBusy = false;
+
   /// Один раз наполняет склад стандартными позициями (без дублей по имени+категории).
   Future<int> seedStandardInventoryIfNeeded() async {
+    if (_inventorySeedBusy) return 0;
     final done = await getAppSetting(InventorySeedCatalog.settingKey);
     if (done == '1') return 0;
-    final db = await database;
+    _inventorySeedBusy = true;
+    // Сразу ставим флаг — иначе bumpDataRevision → DbRefreshMixin → повторный сид в облаке.
+    await setAppSetting(InventorySeedCatalog.settingKey, '1');
     var added = 0;
-    for (final s in InventorySeedCatalog.items) {
-      final rows = await db.rawQuery(
-        '''
-        SELECT id FROM inventory
-        WHERE category = ? AND lower(trim(name)) = lower(trim(?))
-        LIMIT 1
-        ''',
-        [s.category, s.name],
-      );
-      late final int invId;
-      if (rows.isNotEmpty) {
-        invId = (rows.first['id'] as num).toInt();
-      } else {
-        invId = await addInventoryItem(
-          s.name,
-          0,
-          s.unit,
-          minQty: s.minQty,
-          category: s.category,
-          metersPerRoll: s.metersPerRoll,
-        );
-        added++;
+    try {
+      if (CloudDbBridge.active) {
+        final existing = await CloudDbBridge.instance.getInventory();
+        final have = <String>{};
+        for (final row in existing) {
+          final cat = (row['category']?.toString() ?? '').trim().toLowerCase();
+          final name = (row['name']?.toString() ?? '').trim().toLowerCase();
+          if (cat.isEmpty && name.isEmpty) continue;
+          have.add('$cat|$name');
+        }
+        for (final s in InventorySeedCatalog.items) {
+          final key =
+              '${s.category.trim().toLowerCase()}|${s.name.trim().toLowerCase()}';
+          if (have.contains(key)) continue;
+          await CloudDbBridge.instance.addInventoryItem(
+            s.name,
+            0,
+            s.unit,
+            minQty: s.minQty,
+            category: s.category,
+            metersPerRoll: s.metersPerRoll,
+          );
+          have.add(key);
+          added++;
+        }
+        if (added > 0) bumpDataRevision();
+        return added;
       }
-      // Плёнки — сразу в каталог цеха оклейки/тонировки.
-      if (InventoryCategories.isFilm(s.category)) {
-        final films = await db.query(
-          'wrap_films',
-          where: 'lower(trim(name)) = lower(trim(?))',
-          whereArgs: [s.name],
-          limit: 1,
+
+      final db = await database;
+      for (final s in InventorySeedCatalog.items) {
+        final rows = await db.rawQuery(
+          '''
+          SELECT id FROM inventory
+          WHERE category = ? AND lower(trim(name)) = lower(trim(?))
+          LIMIT 1
+          ''',
+          [s.category, s.name],
         );
-        if (films.isEmpty) {
-          await db.insert('wrap_films', {'name': s.name, 'inventory_id': invId});
+        late final int invId;
+        if (rows.isNotEmpty) {
+          invId = (rows.first['id'] as num).toInt();
         } else {
-          final filmInv = (films.first['inventory_id'] as num?)?.toInt();
-          if (filmInv == null || filmInv <= 0) {
-            await db.update(
-              'wrap_films',
-              {'inventory_id': invId},
-              where: 'id = ?',
-              whereArgs: [(films.first['id'] as num).toInt()],
-            );
+          invId = await addInventoryItem(
+            s.name,
+            0,
+            s.unit,
+            minQty: s.minQty,
+            category: s.category,
+            metersPerRoll: s.metersPerRoll,
+          );
+          added++;
+        }
+        // Плёнки — сразу в каталог цеха оклейки/тонировки.
+        if (InventoryCategories.isFilm(s.category)) {
+          final films = await db.query(
+            'wrap_films',
+            where: 'lower(trim(name)) = lower(trim(?))',
+            whereArgs: [s.name],
+            limit: 1,
+          );
+          if (films.isEmpty) {
+            await db.insert('wrap_films', {'name': s.name, 'inventory_id': invId});
+          } else {
+            final filmInv = (films.first['inventory_id'] as num?)?.toInt();
+            if (filmInv == null || filmInv <= 0) {
+              await db.update(
+                'wrap_films',
+                {'inventory_id': invId},
+                where: 'id = ?',
+                whereArgs: [(films.first['id'] as num).toInt()],
+              );
+            }
           }
         }
       }
+      if (added > 0) bumpDataRevision();
+      return added;
+    } finally {
+      _inventorySeedBusy = false;
     }
-    await setAppSetting(InventorySeedCatalog.settingKey, '1');
-    if (added > 0) bumpDataRevision();
-    return added;
+  }
+
+  /// Схлопывает дубли склада (имя+категория). В облаке — одним запросом на API.
+  Future<int> dedupeInventoryIfNeeded() async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.dedupeInventory();
+    }
+    final db = await database;
+    final rows = await db.query('inventory');
+    final groups = <String, List<Map<String, dynamic>>>{};
+    for (final row in rows) {
+      final cat = (row['category']?.toString() ?? '').trim().toLowerCase();
+      final name = (row['name']?.toString() ?? '').trim().toLowerCase();
+      groups.putIfAbsent('$cat|$name', () => []).add(Map<String, dynamic>.from(row));
+    }
+    var removed = 0;
+    for (final g in groups.values) {
+      if (g.length < 2) continue;
+      g.sort((a, b) => ((a['id'] as num).toInt()).compareTo((b['id'] as num).toInt()));
+      final keepId = (g.first['id'] as num).toInt();
+      final sumQty = g.fold<double>(0, (a, r) => a + ((r['quantity'] as num?)?.toDouble() ?? 0));
+      final maxMin = g.fold<double>(0, (a, r) {
+        final m = (r['min_qty'] as num?)?.toDouble() ?? 0;
+        return m > a ? m : a;
+      });
+      await db.update(
+        'inventory',
+        {'quantity': sumQty, 'min_qty': maxMin},
+        where: 'id = ?',
+        whereArgs: [keepId],
+      );
+      for (final dup in g.skip(1)) {
+        final dupId = (dup['id'] as num).toInt();
+        await db.update(
+          'wrap_films',
+          {'inventory_id': keepId},
+          where: 'inventory_id = ?',
+          whereArgs: [dupId],
+        );
+        await db.update(
+          'film_rolls',
+          {'inventory_id': keepId},
+          where: 'inventory_id = ?',
+          whereArgs: [dupId],
+        );
+        await db.delete('inventory', where: 'id = ?', whereArgs: [dupId]);
+        removed++;
+      }
+    }
+    if (removed > 0) bumpDataRevision();
+    return removed;
   }
 
   Future<int> addInventoryItem(
@@ -5026,6 +5242,8 @@ class DatabaseHelper {
     required String place,
     required String situation,
     required String details,
+    String syncStatus = 'pending',
+    int? cloudId,
   }) async {
     final db = await database;
     final now = DateTime.now().toIso8601String().substring(0, 19);
@@ -5037,12 +5255,23 @@ class DatabaseHelper {
       'fix_note': '',
       'created_at': now,
       'updated_at': now,
+      'sync_status': syncStatus,
+      'cloud_id': cloudId,
     });
   }
 
   Future<List<Map<String, dynamic>>> getBugReports() async {
     final db = await database;
     return await db.query('bug_reports', orderBy: "CASE status WHEN 'open' THEN 0 ELSE 1 END, id DESC");
+  }
+
+  Future<List<Map<String, dynamic>>> getBugReportsPendingSync() async {
+    final db = await database;
+    return await db.query(
+      'bug_reports',
+      where: "sync_status IN ('pending', 'failed') AND (cloud_id IS NULL OR cloud_id = 0)",
+      orderBy: 'id ASC',
+    );
   }
 
   Future<int> countOpenBugReports() async {
@@ -5064,6 +5293,20 @@ class DatabaseHelper {
     };
     if (status != null) data['status'] = status;
     if (fixNote != null) data['fix_note'] = fixNote;
+    await db.update('bug_reports', data, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> updateBugReportSync(
+    int id, {
+    required String syncStatus,
+    int? cloudId,
+  }) async {
+    final db = await database;
+    final data = <String, dynamic>{
+      'sync_status': syncStatus,
+      'updated_at': DateTime.now().toIso8601String().substring(0, 19),
+    };
+    if (cloudId != null) data['cloud_id'] = cloudId;
     await db.update('bug_reports', data, where: 'id = ?', whereArgs: [id]);
   }
 

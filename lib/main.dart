@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'access_model.dart';
 import 'app_datetime.dart';
 import 'app_diagnostics.dart';
 import 'app_menu.dart';
+import 'app_splash.dart';
 import 'app_theme.dart';
 import 'app_tour.dart';
 import 'app_version.dart';
@@ -55,26 +57,75 @@ void main() async {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
   }
-  try {
-    await SyncController.instance.load();
-    await DatabaseHelper().initDefaultData();
-    // Хост: раздаём локальную БД по Wi‑Fi. Клиент: бэкап локального файла не нужен.
-    if (!SyncController.instance.config.isClient) {
-      await BackupHelper.runDailyBackup();
+  // Сразу рисуем splash — тяжёлый boot идёт уже с анимацией на экране.
+  runApp(const AppStartup());
+}
+
+/// Старт: splash → инициализация БД/сессии → [DetApp].
+class AppStartup extends StatefulWidget {
+  const AppStartup({super.key});
+
+  @override
+  State<AppStartup> createState() => _AppStartupState();
+}
+
+class _AppStartupState extends State<AppStartup> {
+  static const _minSplash = Duration(milliseconds: 900);
+
+  Object? _error;
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    final started = DateTime.now();
+    try {
+      await SyncController.instance.load();
+      await DatabaseHelper().initDefaultData();
+      // Хост: раздаём локальную БД по Wi‑Fi. Клиент: бэкап локального файла не нужен.
+      if (!SyncController.instance.config.isClient) {
+        await BackupHelper.runDailyBackup();
+      }
+      await AppDiagnostics.instance.start();
+      // QR / deep link detapp:// — только на телефоне имеет смысл.
+      if (Platform.isAndroid || Platform.isIOS) {
+        await SyncDeepLink.instance.start();
+      }
+      // Облачная сессия: после bootstrap решаем, нужен ли LAN-хост.
+      await AuthController.instance.bootstrap();
+      AuthController.instance.addListener(_syncLanWithCloudMode);
+      await _syncLanWithCloudMode();
+
+      final elapsed = DateTime.now().difference(started);
+      final left = _minSplash - elapsed;
+      if (left > Duration.zero) await Future<void>.delayed(left);
+
+      if (!mounted) return;
+      setState(() => _ready = true);
+    } catch (e, st) {
+      debugPrint('Startup failed: $e\n$st');
+      if (!mounted) return;
+      setState(() => _error = e);
     }
-    await AppDiagnostics.instance.start();
-    // QR / deep link detapp:// — только на телефоне имеет смысл.
-    if (Platform.isAndroid || Platform.isIOS) {
-      await SyncDeepLink.instance.start();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error != null) {
+      return _StartupErrorApp(message: '$_error');
     }
-    // Облачная сессия: после bootstrap решаем, нужен ли LAN-хост.
-    await AuthController.instance.bootstrap();
-    AuthController.instance.addListener(_syncLanWithCloudMode);
-    await _syncLanWithCloudMode();
-    runApp(const DetApp());
-  } catch (e, st) {
-    debugPrint('Startup failed: $e\n$st');
-    runApp(_StartupErrorApp(message: '$e'));
+    if (!_ready) {
+      return MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.build(),
+        home: const AppSplashScreen(subtitle: 'Загрузка…'),
+      );
+    }
+    return const DetApp();
   }
 }
 
@@ -544,14 +595,24 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       context,
       onNavigate: (index) async {
         if (!mounted) return;
+        // Без лишнего setState на том же экране — иначе подсветка «моргает»
+        // и клик с прошлого шага может проскочить на кнопки следующего.
+        if (_selectedIndex == index && index != AppMenuIds.newOrder) {
+          await Future<void>.delayed(const Duration(milliseconds: 40));
+          return;
+        }
         setState(() {
+          if (_selectedIndex == AppMenuIds.newOrder && index != AppMenuIds.newOrder) {
+            _newOrderDate = null;
+            _newOrderTime = null;
+          }
           if (index == AppMenuIds.newOrder) {
             _newOrderDate = null;
             _newOrderTime = null;
           }
           _selectedIndex = index;
         });
-        await Future<void>.delayed(const Duration(milliseconds: 50));
+        await Future<void>.delayed(const Duration(milliseconds: 80));
       },
     );
   }
@@ -1188,6 +1249,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             child: SizedBox(
             width: double.infinity,
             child: OutlinedButton(
+              key: TourKeys.updateButton,
               onPressed: () async {
                 afterAction?.call();
                 await runWithPulseHighlight(_pulseUpdate, () => UpdateDialog.open(context));
@@ -1286,11 +1348,20 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 child: TextButton.icon(
                   onPressed: () async {
                     afterAction?.call();
-                    final ok = await showDialog<bool>(
+                    final result = await showDialog<String>(
                       context: context,
                       builder: (context) => const BugReportDialog(attachDiagLog: true),
                     );
-                    if (ok == true) _refreshOpenBugs();
+                    if (!mounted) return;
+                    if (result == 'sent' || result == 'local') {
+                      _refreshOpenBugs();
+                      final msg = result == 'sent'
+                          ? 'Отправлено на сервер'
+                          : 'Сохранено здесь; на сервер не ушло (проверьте связь)';
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(msg)),
+                      );
+                    }
                   },
                   icon: const Icon(Icons.bug_report_outlined, size: 18, color: AppColors.textDim),
                   label: Text(
@@ -1381,6 +1452,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             child: Align(
               alignment: Alignment.centerLeft,
               child: TextButton(
+                key: TourKeys.mobileModeButton,
                 onPressed: () {
                   afterAction?.call();
                   _openMobileModeSheet();

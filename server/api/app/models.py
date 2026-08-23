@@ -224,6 +224,24 @@ class CrmOrderItem(Base):
     order: Mapped[CrmOrder] = relationship(back_populates="items")
 
 
+class CrmOrderWorkshopPayroll(Base):
+    """ЗП мастера за блок цеха в заказе (несколько работ одного цеха → одна сумма)."""
+
+    __tablename__ = "crm_order_workshop_payroll"
+    __table_args__ = (
+        UniqueConstraint("order_id", "workshop", name="uq_order_workshop_payroll"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_orders.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    workshop: Mapped[str] = mapped_column(String(80), nullable=False)
+    amount: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    master_id: Mapped[int | None] = mapped_column(ForeignKey("crm_masters.id"), nullable=True, index=True)
+
+
 class CrmMaster(Base):
     __tablename__ = "crm_masters"
 
@@ -472,3 +490,30 @@ class CashPayment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     is_voided: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class BugReport(Base):
+    """Баг-репорты из приложения → облако (смотрит platform admin / агент)."""
+
+    __tablename__ = "bug_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    place: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    situation: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    details: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="open", nullable=False, index=True)
+    fix_note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    app_version: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    app_build: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    platform: Mapped[str] = mapped_column(String(40), default="", nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    user_email: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+    user_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    company_id: Mapped[int | None] = mapped_column(ForeignKey("companies.id"), nullable=True, index=True)
+    company_name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    company_slug: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    client_local_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
 import 'auth/auth_api.dart';
+import 'bug_reports_api.dart';
 import 'crm/cloud_mode.dart';
 import 'database.dart';
 import 'sync/sync_config.dart';
@@ -262,7 +263,7 @@ class AppDiagnostics extends ChangeNotifier {
     }
     _lastAutoBugAt = now;
     try {
-      await DatabaseHelper().addBugReport(
+      await BugReportsApi.instance.saveAndUpload(
         place: 'Автолог · ${entry.source}',
         situation: 'Сбой зафиксирован автоматически (смена на работе)',
         details: formatLogForBugReport(limit: 25),
