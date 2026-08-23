@@ -320,4 +320,16 @@ def seed_database(db: Session) -> None:
     for c in db.scalars(select(Company)).all():
         ensure_company_price_catalog(db, c.id)
 
+    # Синхронизация прав должностей (в т.ч. Мастер → orders.write) во всех студиях.
+    for c in db.scalars(select(Company)).all():
+        for role_name, codes in COMPANY_ROLE_PRESETS.items():
+            role = db.scalar(
+                select(Role).where(Role.company_id == c.id, Role.name == role_name)
+            )
+            if role is None:
+                role = Role(company_id=c.id, name=role_name, is_system=True)
+                db.add(role)
+                db.flush()
+            _set_role_permissions(db, role, codes, by_code)
+
     db.commit()
