@@ -172,6 +172,7 @@ def _set_role_permissions(
     by_code: dict[str, Permission],
 ) -> None:
     db.execute(delete(RolePermission).where(RolePermission.role_id == role.id))
+    db.flush()
     for code in codes:
         perm = by_code.get(code)
         if perm is None:
