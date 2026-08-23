@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'access_model.dart';
 import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
+import 'auth/auth_controller.dart';
 import 'cash_catalog.dart';
 import 'crm/cloud_db_bridge.dart';
 import 'database.dart';
@@ -335,14 +337,27 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         _services = [];
       }
       try {
-        _cashRegisters = await DatabaseHelper().getCashRegisters();
+        if (_canUseCash) {
+          _cashRegisters = await DatabaseHelper().getCashRegisters();
+        } else {
+          _cashRegisters = [];
+        }
       } catch (e, st) {
         debugPrint('OrderDetails.getCashRegisters: $e\n$st');
         _cashRegisters = [];
       }
       _handover = await DatabaseHelper().getOrderHandover(widget.order['id'] as int);
-      _payments = await DatabaseHelper().getOrderPayments(widget.order['id'] as int);
-      _syncRegisterForMethod(_paymentMethod, preferKeep: false);
+      try {
+        if (_canUseCash) {
+          _payments = await DatabaseHelper().getOrderPayments(widget.order['id'] as int);
+          _syncRegisterForMethod(_paymentMethod, preferKeep: false);
+        } else {
+          _payments = [];
+        }
+      } catch (e, st) {
+        debugPrint('OrderDetails.getOrderPayments: $e\n$st');
+        _payments = [];
+      }
 
       final dbItems = await DatabaseHelper().getOrderItems(widget.order['id']);
       _selectedWorks = dbItems.map((item) => Map<String, dynamic>.from(item)).toList();
@@ -432,7 +447,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     required String? value,
     required String emptyLabel,
     required Color color,
-    required VoidCallback onTap,
+    VoidCallback? onTap,
   }) {
     final hasValue = value != null && value.isNotEmpty;
     final text = hasValue ? _formatDT(value, emptyLabel) : emptyLabel;
@@ -841,6 +856,29 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   bool get _isWorkshopMode => widget.workshop != null && widget.workshop!.isNotEmpty;
 
+  /// Мастер: урезанные операции даже при открытии с доски (без параметра workshop).
+  bool get _masterRestricted => isStudioMaster(AuthController.instance.user);
+
+  /// Цех из меню ИЛИ мастер по должности — без цен / кассы / выдачи / чужих цехов.
+  bool get _opsRestricted => _isWorkshopMode || _masterRestricted;
+
+  Set<String> get _editableWorkshops {
+    if (_isWorkshopMode) return {widget.workshop!.trim()};
+    if (_masterRestricted) {
+      return (AuthController.instance.user?.workshops ?? const [])
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet();
+    }
+    return {};
+  }
+
+  bool get _canUseCash =>
+      !_opsRestricted && userHasPermission(AuthController.instance.user, 'cash.read');
+
+  bool get _canIssueOrder =>
+      !_opsRestricted && userHasPermission(AuthController.instance.user, 'orders.issue');
+
   String _resolvedWorkWorkshop(Map<String, dynamic> w) {
     final raw = (w['workshop'] as String?)?.trim() ?? "";
     if (raw.isNotEmpty && WORKSHOPS.contains(raw)) return raw;
@@ -848,8 +886,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   bool _canToggleWorkInWorkshop(Map<String, dynamic> w) {
-    if (!_isWorkshopMode) return true;
-    return _resolvedWorkWorkshop(w) == widget.workshop;
+    if (!_opsRestricted) return true;
+    final resolved = _resolvedWorkWorkshop(w);
+    if (_editableWorkshops.isEmpty) return false;
+    return _editableWorkshops.contains(resolved);
   }
 
   /// Какие плёнки показывать в расходе: оклейка и/или тонировка — по составу заказа.
@@ -876,7 +916,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   Future<void> _toggleWorkDone(int index, bool done) async {
     final w = _selectedWorks[index];
-    if (_isWorkshopMode && !_canToggleWorkInWorkshop(w)) return;
+    if (_opsRestricted && !_canToggleWorkInWorkshop(w)) return;
     final warnings = await DatabaseHelper().updateOrderItemDone(w['id'] as int, done);
     final updated = Map<String, dynamic>.from(w);
     updated['is_done'] = done ? 1 : 0;
@@ -1330,7 +1370,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   Future<void> _editWorkPrice(Map<String, dynamic> w) async {
-    if (_isWorkshopMode) return;
+    if (_opsRestricted) return;
     final id = (w['id'] as num?)?.toInt();
     if (id == null) return;
     final current = (w['price'] as num?)?.toDouble() ?? 0;
@@ -1396,6 +1436,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   Future<void> _addPayment() async {
+    if (!_canUseCash) {
+      showAppToast(context, 'Нет доступа к кассе');
+      return;
+    }
     // Справа — ручная сумма; если пусто — берём авто-долг слева
     final manual = _payAmountController.text.trim().replaceAll(',', '.');
     double amount;
@@ -1961,9 +2005,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 Padding(
                   padding: const EdgeInsets.only(right: 4),
                   child: Tooltip(
-                    message: _isWorkshopMode ? "Цена" : "Изменить цену",
+                    message: _opsRestricted ? "Цена" : "Изменить цену",
                     child: InkWell(
-                      onTap: _isWorkshopMode ? null : () => _editWorkPrice(w),
+                      onTap: _opsRestricted ? null : () => _editWorkPrice(w),
                       borderRadius: BorderRadius.circular(6),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
@@ -1978,7 +2022,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
-                            if (!_isWorkshopMode) ...[
+                            if (!_opsRestricted) ...[
                               const SizedBox(width: 4),
                               Icon(Icons.edit_outlined, size: 14, color: AppColors.success.withOpacity(0.75)),
                             ],
@@ -1988,7 +2032,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     ),
                   ),
                 ),
-              if (!_isWorkshopMode)
+              if (!_opsRestricted)
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 18),
@@ -2403,7 +2447,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                           )
                         : null,
                     value: _handoverValue(entry.key),
-                    onChanged: (value) => _setHandoverValue(entry.key, value ?? false),
+                    onChanged: _opsRestricted
+                        ? null
+                        : (value) => _setHandoverValue(entry.key, value ?? false),
                   );
                 }).toList(),
               ),
@@ -2427,22 +2473,30 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 child: Text(s, overflow: TextOverflow.ellipsis),
               ))
           .toList(),
-      onChanged: (val) async {
-        if (val == null || val == _status) return;
-        if (val == 'Выдан' && !await _ensureHandoverCompleteForIssue()) return;
-        if (!mounted) return;
-        final ok = await tryUpdateOrderStatus(
-          context,
-          widget.order['id'] as int,
-          val,
-        );
-        if (!mounted) return;
-        if (!ok) return;
-        setState(() => _status = val);
-        await DatabaseHelper().addOrderEvent(widget.order['id'], "Статус изменен на: $val");
-        _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
-        if (mounted) setState(() {});
-      },
+      onChanged: _opsRestricted
+          ? null
+          : (val) async {
+              if (val == null || val == _status) return;
+              if (val == 'Выдан') {
+                if (!_canIssueOrder) {
+                  showAppToast(context, 'Нет права на выдачу заказа');
+                  return;
+                }
+                if (!await _ensureHandoverCompleteForIssue()) return;
+              }
+              if (!mounted) return;
+              final ok = await tryUpdateOrderStatus(
+                context,
+                widget.order['id'] as int,
+                val,
+              );
+              if (!mounted) return;
+              if (!ok) return;
+              setState(() => _status = val);
+              await DatabaseHelper().addOrderEvent(widget.order['id'], "Статус изменен на: $val");
+              _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+              if (mounted) setState(() {});
+            },
     );
   }
 
@@ -2615,7 +2669,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           ],
           _buildHandoverChecklist(),
           // В полном заказе — только просмотр/правка; основное заполнение — в цехе Оклейка.
-          if (!_isWorkshopMode &&
+          if ((!_opsRestricted || _editableWorkshops.contains('Оклейка')) &&
               _selectedWorks.any((work) => work['workshop']?.toString() == 'Оклейка')) ...[
             const SizedBox(height: 12),
             OrderWrapFilmsPanel(
@@ -2653,7 +2707,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           ],
           WorksProgressBar.fromItems(_selectedWorks),
           const SizedBox(height: 12),
-          if (!_isWorkshopMode) ...[
+          if (!_opsRestricted) ...[
             Row(
               children: [
                 Expanded(
@@ -3423,6 +3477,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   Future<void> _setOrderStartTime() async {
+    if (_opsRestricted) return;
     final dt = await runWithPulseHighlight(
       'od_schedule',
       () => _pickDateTime(current: _orderStartTime),
@@ -3453,6 +3508,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   Future<void> _setOrderEndTime() async {
+    if (_opsRestricted) return;
     final dt = await runWithPulseHighlight(
       'od_schedule',
       () => _pickDateTime(current: _orderEndTime ?? _orderStartTime),
@@ -3511,7 +3567,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                   value: _orderStartTime,
                   emptyLabel: 'Приём',
                   color: AppColors.success,
-                  onTap: _setOrderStartTime,
+                  onTap: _opsRestricted ? null : _setOrderStartTime,
                 ),
               ),
               const SizedBox(width: 8),
@@ -3520,7 +3576,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                   value: _orderEndTime,
                   emptyLabel: 'Выдача',
                   color: AppColors.danger,
-                  onTap: _setOrderEndTime,
+                  onTap: _opsRestricted ? null : _setOrderEndTime,
                 ),
               ),
               const SizedBox(width: 8),
@@ -4719,13 +4775,14 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 subtitle: "Диалог и лента",
                 child: _buildNotesColumn(fill: false),
               ),
-              _mobileAccordion(
-                key: TourKeys.orderDetailsPayment,
-                title: "Оплата",
-                subtitle: "Итого ${_formatMoney(_initialPrice)} ₽ · долг ${_formatMoney(_debt)} ₽",
-                initiallyExpanded: true,
-                child: _buildMobileFooter(),
-              ),
+              if (!_opsRestricted)
+                _mobileAccordion(
+                  key: TourKeys.orderDetailsPayment,
+                  title: "Оплата",
+                  subtitle: "Итого ${_formatMoney(_initialPrice)} ₽ · долг ${_formatMoney(_debt)} ₽",
+                  initiallyExpanded: true,
+                  child: _buildMobileFooter(),
+                ),
             ],
           ),
         ),
@@ -4740,10 +4797,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         KeyedSubtree(key: TourKeys.orderDetailsHeader, child: _buildHeader()),
         const Divider(height: 1),
         Expanded(child: _adminColumnsBody()),
-        PulseAnchor(
-          active: isPulseActive('od_pay') || isPulseActive('od_promo'),
-          child: KeyedSubtree(key: TourKeys.orderDetailsPayment, child: _buildFooter()),
-        ),
+        if (!_opsRestricted)
+          PulseAnchor(
+            active: isPulseActive('od_pay') || isPulseActive('od_promo'),
+            child: KeyedSubtree(key: TourKeys.orderDetailsPayment, child: _buildFooter()),
+          ),
       ],
     );
   }

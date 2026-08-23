@@ -50,7 +50,7 @@ COMPANY_ROLE_PRESETS: dict[str, list[str]] = {
     "Мастер": [
         "orders.read",
         "orders.write",
-        "orders.issue",
         "inventory.read",
+        "inventory.write",
     ],
 }

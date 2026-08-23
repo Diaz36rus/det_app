@@ -183,6 +183,7 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
   Future<void> _add() async {
     final description = _description.text.trim();
     if (description.isEmpty && _newPhotos.isEmpty) return;
+    final hadPhotos = _newPhotos.isNotEmpty;
     setState(() => _saving = true);
     try {
       final part = detectDefectPart(description);
@@ -199,10 +200,10 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
       if (part != kDefectPartOther) _partFilter = part;
       await _load();
       if (mounted) {
-        showAppToast(
-          context,
-          part == kDefectPartOther ? 'Дефект сохранён' : 'Дефект → $part',
-        );
+        final msg = !hadPhotos
+            ? (part == kDefectPartOther ? 'Дефект сохранён' : 'Дефект → $part')
+            : (part == kDefectPartOther ? 'Фото сохранены' : 'Фото сохранены → $part');
+        showAppToast(context, msg);
       }
     } catch (e) {
       if (mounted) showAppToast(context, 'Ошибка сохранения: $e');
@@ -531,11 +532,40 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
                         icon: const Icon(Icons.photo_library_outlined),
                         label: const Text('Галерея'),
                       ),
-                      ElevatedButton(
-                        onPressed: _saving ? null : _add,
-                        child: Text(_saving ? 'Сохраняем…' : 'Добавить'),
-                      ),
                     ],
+                  ),
+                  if (_newPhotos.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _newPhotos.length == 1
+                          ? '1 фото в черновике — нажмите «Сохранить фото»'
+                          : '${_newPhotos.length} фото в черновике — нажмите «Сохранить фото»',
+                      style: GoogleFonts.manrope(
+                        color: AppColors.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton.icon(
+                      onPressed: _saving || (draft.isEmpty && _newPhotos.isEmpty) ? null : _add,
+                      icon: Icon(
+                        _newPhotos.isNotEmpty ? Icons.save_alt_rounded : Icons.add_rounded,
+                        size: 20,
+                      ),
+                      label: Text(
+                        _saving
+                            ? 'Сохраняем…'
+                            : _newPhotos.isNotEmpty
+                                ? 'Сохранить фото'
+                                : 'Сохранить дефект',
+                        style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 15),
+                      ),
+                    ),
                   ),
                   const Divider(height: 22),
                   Text(

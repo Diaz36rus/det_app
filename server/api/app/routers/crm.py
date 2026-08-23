@@ -3,7 +3,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
-from app.deps import require_permissions
+from app.deps import require_permissions, user_permission_codes
 from app.models import (
     Branch,
     CashFlow,
@@ -12,6 +12,7 @@ from app.models import (
     CrmClient,
     CrmDefect,
     CrmInventoryMove,
+    CrmMaster,
     CrmOrder,
     CrmOrderEvent,
     CrmOrderItem,
@@ -48,6 +49,49 @@ def _company_id(user: User) -> int:
     if user.company_id is None:
         raise HTTPException(status_code=400, detail="Пользователь без компании")
     return user.company_id
+
+
+def _is_studio_master(user: User) -> bool:
+    if user.is_platform_admin:
+        return False
+    codes = user_permission_codes(user)
+    # Полный доступ студии — не мастер.
+    if "users.manage" in codes or "company.manage" in codes or "cash.write" in codes:
+        return False
+    role_names = {r.name for r in (user.roles or [])}
+    if role_names & {"Владелец", "Управляющий", "Администратор", "Администратор компании"}:
+        return False
+    return "Мастер" in role_names or ("orders.write" in codes and "cash.read" not in codes)
+
+
+def _user_workshops(db: Session, user: User) -> set[str]:
+    mid = getattr(user, "master_id", None)
+    if not mid:
+        return set()
+    m = db.get(CrmMaster, mid)
+    if m is None or not m.role:
+        return set()
+    return {p.strip() for p in m.role.split(",") if p.strip()}
+
+
+def _forbid_master_order_meta(user: User) -> None:
+    if _is_studio_master(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Мастер не может менять даты, цены, выдачу и состав заказа",
+        )
+
+
+def _assert_master_item_workshop(db: Session, user: User, workshop: str | None) -> None:
+    if not _is_studio_master(user):
+        return
+    allowed = _user_workshops(db, user)
+    ws = (workshop or "").strip()
+    if not allowed or ws not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail="Мастер может менять только работы своего цеха",
+        )
 
 
 def _item_out(it: CrmOrderItem) -> CrmOrderItemOut:
@@ -418,6 +462,8 @@ def delete_order(
     user: User = Depends(require_permissions("orders.write")),
     db: Session = Depends(get_db),
 ):
+    if _is_studio_master(user):
+        raise HTTPException(status_code=403, detail="Мастер не может удалять заказы")
     company_id = _company_id(user)
     order = db.scalar(
         select(CrmOrder).where(CrmOrder.id == order_id, CrmOrder.company_id == company_id)
@@ -454,6 +500,8 @@ def create_order(
     user: User = Depends(require_permissions("orders.write")),
     db: Session = Depends(get_db),
 ):
+    if _is_studio_master(user):
+        raise HTTPException(status_code=403, detail="Мастер не может создавать заказы")
     company_id = _company_id(user)
     client = db.scalar(
         select(CrmClient).where(CrmClient.id == body.client_id, CrmClient.company_id == company_id)
@@ -537,7 +585,35 @@ def update_order(
     )
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
+    if _is_studio_master(user):
+        # Мастер: только заметки мастера; даты/статус/скидки/выдача — нет.
+        if (
+            body.status is not None
+            or body.due_date is not None
+            or body.start_time is not None
+            or body.end_time is not None
+            or body.end_date is not None
+            or body.discount_percent is not None
+            or body.discount_fixed is not None
+            or body.promo_code is not None
+            or body.payment_method is not None
+            or body.car_id is not None
+            or any(
+                getattr(body, k, None) is not None
+                for k in (
+                    "handover_ready",
+                    "handover_works",
+                    "handover_payment",
+                    "handover_keys",
+                    "handover_inspect",
+                    "handover_notified",
+                )
+            )
+        ):
+            _forbid_master_order_meta(user)
     if body.status is not None:
+        if body.status.strip() == "Выдан" and "orders.issue" not in user_permission_codes(user) and not user.is_platform_admin:
+            raise HTTPException(status_code=403, detail="Нет права на выдачу заказа")
         order.status = body.status.strip()
     if body.notes is not None:
         order.notes = body.notes
@@ -690,6 +766,8 @@ def create_order_item(
     db: Session = Depends(get_db),
 ):
     company_id = _company_id(user)
+    if _is_studio_master(user):
+        _forbid_master_order_meta(user)
     order = _get_company_order(db, order_id, company_id)
     row = CrmOrderItem(order_id=order.id)
     _fill_item_from_in(row, body)
@@ -715,6 +793,10 @@ def patch_order_item(
     row = next((it for it in order.items if it.id == item_id), None)
     if row is None:
         raise HTTPException(status_code=404, detail="Позиция не найдена")
+    if _is_studio_master(user):
+        if body.price is not None or body.name is not None or body.workshop is not None or body.parent_id is not None:
+            _forbid_master_order_meta(user)
+        _assert_master_item_workshop(db, user, row.workshop)
     if body.name is not None:
         row.name = body.name.strip()
     if body.price is not None:
@@ -748,6 +830,8 @@ def delete_order_item(
     db: Session = Depends(get_db),
 ):
     company_id = _company_id(user)
+    if _is_studio_master(user):
+        _forbid_master_order_meta(user)
     order = _get_company_order(db, order_id, company_id)
     row = next((it for it in order.items if it.id == item_id), None)
     if row is None:

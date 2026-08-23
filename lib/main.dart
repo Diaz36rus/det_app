@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'access_model.dart';
 import 'app_datetime.dart';
 import 'app_diagnostics.dart';
 import 'app_menu.dart';
@@ -281,11 +282,24 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     );
   }
 
-  /// Пункты, видимые в текущем контексте (desktop / full phone / light).
+  /// Пункты, видимые в текущем контексте (desktop / full phone / light / мастер).
   List<Map<String, dynamic>> _visibleMenuItems(BuildContext context) {
+    var items = _menuItems;
+    final user = AuthController.instance.user;
+    if (isStudioMaster(user)) {
+      items = items.where((m) => !kMasterHiddenMenuIds.contains(m['id'] as int)).toList();
+    }
     final mobile = AppResponsive.isMobile(context);
-    if (!mobile || _mobileFullPhone) return _menuItems;
-    return _menuItems.where((m) => !AppMenuIds.lightHidden.contains(m['id'] as int)).toList();
+    if (!mobile || _mobileFullPhone || isStudioMaster(user)) return items;
+    return items.where((m) => !AppMenuIds.lightHidden.contains(m['id'] as int)).toList();
+  }
+
+  List<String> get _menuWorkshops {
+    final user = AuthController.instance.user;
+    if (isStudioMaster(user) && user != null && user.workshops.isNotEmpty) {
+      return user.workshops;
+    }
+    return WORKSHOPS;
   }
 
   Future<void> _refreshOpenBugs() async {
@@ -739,7 +753,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             title: Text("Цеха", style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 14.5, fontWeight: FontWeight.w600)),
             iconColor: AppColors.primary,
             collapsedIconColor: AppColors.textMuted,
-            children: WORKSHOPS.map((w) {
+            children: _menuWorkshops.map((w) {
               final active = _selectedIndex == AppMenuIds.workshop && _selectedWorkshop == w;
               return _navItem(
                 icon: Icons.circle,
@@ -1451,7 +1465,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             _buildFooterActions(
               showTraining: true,
               showWipe: false,
-              showMobileMode: true,
+              showMobileMode: !isStudioMaster(AuthController.instance.user),
               afterAction: close,
             ),
           ],

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.deps import get_current_user, user_permission_codes
-from app.models import Branch, Company, Role, User, UserBranch
+from app.models import Branch, Company, CrmMaster, Role, User, UserBranch
 from app.permissions_catalog import PERMISSIONS
 from app.phone_util import looks_like_email, phone_digits10
 from app.schemas import (
@@ -29,13 +29,19 @@ from app.studio_provision import provision_studio
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _user_out(user: User) -> UserOut:
+def _user_out(user: User, db: Session | None = None) -> UserOut:
     perms = sorted(user_permission_codes(user))
     if user.is_platform_admin:
         perms = sorted({code for code, _, _ in PERMISSIONS})
     company = getattr(user, "company", None)
     company_slug = company.slug if company is not None else None
     company_name = company.name if company is not None else None
+    workshops: list[str] = []
+    mid = getattr(user, "master_id", None)
+    if mid and db is not None:
+        m = db.get(CrmMaster, mid)
+        if m and m.role:
+            workshops = [p.strip() for p in m.role.split(",") if p.strip()]
     return UserOut(
         id=user.id,
         email=user.email,
@@ -51,7 +57,7 @@ def _user_out(user: User) -> UserOut:
         permissions=perms,
         pending_assignment=bool(getattr(user, "pending_assignment", False)),
         master_id=getattr(user, "master_id", None),
-        workshops=[],
+        workshops=workshops,
     )
 
 
@@ -108,8 +114,8 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)):
-    return _user_out(user)
+def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return _user_out(user, db)
 
 
 @router.get("/studio-lookup", response_model=StudioLookupOut)

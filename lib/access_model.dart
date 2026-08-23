@@ -13,6 +13,7 @@
 /// опасные действия (wipe и т.п.) — только он + PIN.
 library;
 
+import 'app_menu.dart';
 import 'auth/auth_models.dart';
 
 /// Должности компании (отображаемые имена = имена Role в API).
@@ -65,6 +66,27 @@ bool canManageAssignments(AccessRank rank) =>
     rank == AccessRank.platformOwner || rank == AccessRank.studioFull;
 
 bool canSeeConnectionExtras(AccessRank rank) => canManageAssignments(rank);
+
+/// Мастер студии (не владелец/админ).
+bool isStudioMaster(AuthUser? user) =>
+    accessRankOf(user) == AccessRank.master;
+
+bool userHasPermission(AuthUser? user, String code) {
+  if (user == null) return false;
+  if (user.isPlatformAdmin) return true;
+  return user.permissions.contains(code);
+}
+
+/// Пункты меню, скрытые у мастера.
+const Set<int> kMasterHiddenMenuIds = {
+  AppMenuIds.newOrder,
+  AppMenuIds.clients,
+  AppMenuIds.cash,
+  AppMenuIds.stats,
+  AppMenuIds.staff,
+  AppMenuIds.services,
+  AppMenuIds.preview,
+};
 
 /// PIN владельца приложения для необратимых действий (wipe и т.п.).
 const kOwnerDestructivePin = '9294';

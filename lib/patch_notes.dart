@@ -29,6 +29,14 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 91,
+    version: '1.0.1',
+    items: [
+      'Права мастера: своё меню, цех, склад со списанием; без кассы/клиентов/нового заказа',
+      'Дефекты: кнопка «Сохранить фото»',
+    ],
+  ),
+  PatchRelease(
     build: 90,
     version: '1.0.1',
     items: [
