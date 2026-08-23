@@ -170,11 +170,17 @@ class CompanyRole {
 class CompanyBranch {
   final int id;
   final String name;
+  final bool isActive;
 
-  const CompanyBranch({required this.id, required this.name});
+  const CompanyBranch({
+    required this.id,
+    required this.name,
+    this.isActive = true,
+  });
 
   factory CompanyBranch.fromJson(Map<String, dynamic> j) => CompanyBranch(
         id: (j['id'] as num?)?.toInt() ?? 0,
         name: j['name']?.toString() ?? '',
+        isActive: j['is_active'] != false,
       );
 }

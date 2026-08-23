@@ -1422,34 +1422,37 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   }
 
   Widget _buildDrawer() {
+    // Один скролл: иначе календарь + футер съедают высоту и «МЕНЮ» сжимается в 0.
+    void close() {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+    }
+
     return Drawer(
       backgroundColor: AppColors.surface,
       child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: ListView(
+          padding: EdgeInsets.zero,
           children: [
             _buildBrandHeader(compact: true),
             _buildSearchTile(
               showShortcut: false,
-              afterTap: () => Navigator.of(context).pop(),
+              afterTap: close,
             ),
-            _buildQuickDateBlock(
-              afterSelect: () => Navigator.of(context).pop(),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: _buildMenuList(
-                  afterSelect: () => Navigator.of(context).pop(),
-                ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: _buildMenuList(afterSelect: close),
               ),
             ),
+            const SizedBox(height: 8),
+            _buildQuickDateBlock(afterSelect: close),
+            const SizedBox(height: 8),
             _buildFooterActions(
               showTraining: true,
               showWipe: false,
               showMobileMode: true,
-              afterAction: () => Navigator.of(context).pop(),
+              afterAction: close,
             ),
           ],
         ),

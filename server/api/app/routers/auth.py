@@ -76,6 +76,10 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Пользователь отключён")
+    if user.company_id and not user.is_platform_admin:
+        company = db.get(Company, user.company_id)
+        if company is not None and not company.is_active:
+            raise HTTPException(status_code=403, detail="Студия отключена администратором платформы")
     return TokenResponse(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),

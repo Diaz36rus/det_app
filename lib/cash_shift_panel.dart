@@ -7,6 +7,7 @@ import 'cash_catalog.dart';
 import 'cash_operation_dialog.dart';
 import 'database.dart';
 import 'pulse_anchor.dart';
+import 'responsive.dart';
 import 'shift_z_report_pdf.dart';
 
 /// Панель смены: несколько касс, открытие/закрытие, добавление кассы.
@@ -384,12 +385,57 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
   Widget build(BuildContext context) {
     final open = shift != null;
     final openedAt = AppDateTime.format(shift?['opened_at']);
+    final mobile = AppResponsive.isMobile(context);
+
+    final statusText = open
+        ? (openedAt.isEmpty ? 'открыта' : 'открыта · $openedAt')
+        : 'закрыта';
+
+    final actions = <Widget>[
+      TextButton.icon(
+        onPressed: () => _addRegister(context),
+        icon: const Icon(Icons.add, size: 16),
+        label: Text('Касса', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
+      ),
+      if (open) ...[
+        OutlinedButton(
+          onPressed: () => _collection(context),
+          style: OutlinedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          ),
+          child: Text('Инкассация', style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 12)),
+        ),
+        ElevatedButton(
+          onPressed: () => _closeShift(context),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.danger.withOpacity(0.9),
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
+          child: Text('Закрыть', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
+        ),
+      ] else ...[
+        TextButton(
+          onPressed: () => _showLastZReport(context),
+          child: Text('Z-отчёт', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
+        ),
+        ElevatedButton(
+          onPressed: () => _openShift(context),
+          style: ElevatedButton.styleFrom(
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          ),
+          child: Text('Открыть смену', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
+        ),
+      ],
+    ];
 
     return PulseAnchor(
       active: isPulseActive(_pulsePanel),
       accent: open ? AppColors.success : AppColors.primary,
       child: Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      padding: EdgeInsets.fromLTRB(mobile ? 12 : 16, 14, mobile ? 12 : 16, 14),
       decoration: BoxDecoration(
         color: AppColors.surface2.withOpacity(0.92),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
@@ -403,51 +449,43 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Text('Смена', style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16)),
-              const SizedBox(width: 10),
-              Text(
-                open
-                    ? (openedAt.isEmpty ? 'открыта' : 'открыта · $openedAt')
-                    : 'закрыта',
-                style: GoogleFonts.manrope(
-                  color: open ? AppColors.success : AppColors.danger,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
+          if (mobile) ...[
+            Text('Смена', style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16)),
+            const SizedBox(height: 4),
+            Text(
+              statusText,
+              style: GoogleFonts.manrope(
+                color: open ? AppColors.success : AppColors.danger,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
               ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => _addRegister(context),
-                icon: const Icon(Icons.add, size: 16),
-                label: Text('Касса', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
-              ),
-              if (open) ...[
-                const SizedBox(width: 4),
-                OutlinedButton(
-                  onPressed: () => _collection(context),
-                  child: Text('Инкассация', style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 12)),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: actions,
+            ),
+          ] else
+            Row(
+              children: [
+                Text('Смена', style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 16)),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    statusText,
+                    style: GoogleFonts.manrope(
+                      color: open ? AppColors.success : AppColors.danger,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-                const SizedBox(width: 6),
-                ElevatedButton(
-                  onPressed: () => _closeShift(context),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
-                  child: Text('Закрыть', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
-                ),
-              ] else ...[
-                TextButton(
-                  onPressed: () => _showLastZReport(context),
-                  child: Text('Z-отчёт', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
-                ),
-                const SizedBox(width: 6),
-                ElevatedButton(
-                  onPressed: () => _openShift(context),
-                  child: Text('Открыть смену', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
-                ),
+                const SizedBox(width: 8),
+                ...actions.expand((w) => [const SizedBox(width: 6), w]),
               ],
-            ],
-          ),
+            ),
           const SizedBox(height: 10),
           if (registerSnapshots.isEmpty)
             Text(
@@ -458,14 +496,17 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
             LayoutBuilder(
               builder: (context, constraints) {
                 final w = constraints.maxWidth;
-                final cardW = w < 700 ? (w - 8) / 2 : (w - 24) / 4;
+                // На узком экране — одна колонка, иначе 2 / 4.
+                final cols = w < 360 ? 1 : (w < 700 ? 2 : 4);
+                final gap = 8.0;
+                final cardW = (w - gap * (cols - 1)) / cols;
                 return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: gap,
+                  runSpacing: gap,
                   children: [
                     for (final s in registerSnapshots)
                       SizedBox(
-                        width: cardW.clamp(140.0, 280.0),
+                        width: cardW.clamp(120.0, 280.0),
                         child: _registerCard(s, open),
                       ),
                   ],

@@ -26,6 +26,7 @@ import 'sync/qr_scan_sheet.dart';
 import 'sync/sync_config.dart';
 import 'sync/sync_controller.dart';
 import 'sync/sync_qr.dart';
+import 'owner_pin.dart';
 import 'update/update_channel.dart';
 
 bool get _canScanSyncQr => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
@@ -981,6 +982,7 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
   final _api = PlatformApi();
   List<PlatformCompany> _companies = const [];
   Map<int, List<CompanyBranch>> _branches = const {};
+  Map<int, List<PlatformUser>> _users = const {};
   bool _loading = false;
   String? _error;
   int? _expandedId;
@@ -1020,15 +1022,17 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
       return;
     }
     setState(() => _expandedId = c.id);
-    if (_branches.containsKey(c.id)) return;
     final token = AuthController.instance.accessToken;
     if (token == null) return;
     try {
-      final list = await _api.listCompanyBranches(accessToken: token, companyId: c.id);
-      if (!mounted) return;
-      setState(() {
-        _branches = {..._branches, c.id: list};
-      });
+      if (!_branches.containsKey(c.id)) {
+        final list = await _api.listCompanyBranches(accessToken: token, companyId: c.id);
+        if (!mounted) return;
+        setState(() => _branches = {..._branches, c.id: list});
+      }
+      if (!_users.containsKey(c.id)) {
+        await _loadUsers(c);
+      }
     } catch (e) {
       if (!mounted) return;
       showAppToast(context, '$e');
@@ -1071,6 +1075,168 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
         cur.add(b);
         _branches = {..._branches, c.id: cur};
         _expandedId = c.id;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
+  Future<void> _toggleCompanyActive(PlatformCompany c) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final next = !c.isActive;
+    final title = next ? 'Включить студию «${c.name}»' : 'Выключить студию «${c.name}»';
+    if (!next) {
+      final pinOk = await confirmOwnerDestructivePin(context, actionTitle: title);
+      if (!pinOk || !mounted) return;
+    }
+    try {
+      final updated = await _api.setCompanyActive(
+        accessToken: token,
+        companyId: c.id,
+        isActive: next,
+      );
+      if (!mounted) return;
+      showAppToast(context, next ? 'Студия включена' : 'Студия выключена');
+      setState(() {
+        _companies = [
+          for (final x in _companies) if (x.id == updated.id) updated else x,
+        ];
+      });
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
+  Future<void> _wipeCompany(PlatformCompany c, {required bool hard}) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final title = hard
+        ? 'Удалить студию «${c.name}» навсегда'
+        : 'Очистить данные студии «${c.name}»';
+    final pinOk = await confirmOwnerDestructivePin(context, actionTitle: title);
+    if (!pinOk || !mounted) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text(title, style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
+        content: Text(
+          hard
+              ? 'Будут удалены пользователи, заказы, касса и сама студия. Это необратимо.'
+              : 'Заказы, клиенты, касса и пользователи студии будут стёрты. Студия останется выключенной (slug сохранится).',
+          style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(hard ? 'Удалить' : 'Очистить'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    try {
+      final res = await _api.wipeOrDeleteCompany(
+        accessToken: token,
+        companyId: c.id,
+        hard: hard,
+        wipeData: !hard,
+      );
+      if (!mounted) return;
+      final deleted = res['deleted'] == true;
+      showAppToast(context, deleted ? 'Студия удалена' : 'Данные студии очищены');
+      await _load();
+      setState(() {
+        _branches = {..._branches}..remove(c.id);
+        _users = {..._users}..remove(c.id);
+        if (deleted && _expandedId == c.id) _expandedId = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
+  Future<void> _loadUsers(PlatformCompany c) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    try {
+      final list = await _api.listCompanyUsers(accessToken: token, companyId: c.id);
+      if (!mounted) return;
+      setState(() => _users = {..._users, c.id: list});
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
+  Future<void> _toggleUser(PlatformCompany c, PlatformUser u) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    try {
+      final updated = await _api.setUserActive(
+        accessToken: token,
+        userId: u.id,
+        isActive: !u.isActive,
+      );
+      if (!mounted) return;
+      setState(() {
+        final cur = [...(_users[c.id] ?? const <PlatformUser>[])];
+        final i = cur.indexWhere((x) => x.id == u.id);
+        if (i >= 0) cur[i] = updated;
+        _users = {..._users, c.id: cur};
+      });
+      showAppToast(context, updated.isActive ? 'Пользователь включён' : 'Пользователь отключён');
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
+  Future<void> _deleteUser(PlatformCompany c, PlatformUser u) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    final pinOk = await confirmOwnerDestructivePin(
+      context,
+      actionTitle: 'Удалить логин ${u.displayLabel}',
+    );
+    if (!pinOk || !mounted) return;
+    try {
+      await _api.deleteUser(accessToken: token, userId: u.id);
+      if (!mounted) return;
+      setState(() {
+        _users = {
+          ..._users,
+          c.id: [...(_users[c.id] ?? const <PlatformUser>[])].where((x) => x.id != u.id).toList(),
+        };
+      });
+      showAppToast(context, 'Логин удалён');
+    } catch (e) {
+      if (!mounted) return;
+      showAppToast(context, '$e');
+    }
+  }
+
+  Future<void> _toggleBranch(PlatformCompany c, CompanyBranch b) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null) return;
+    try {
+      final updated = await _api.setBranchActive(
+        accessToken: token,
+        branchId: b.id,
+        isActive: !b.isActive,
+      );
+      if (!mounted) return;
+      setState(() {
+        final cur = [...(_branches[c.id] ?? const <CompanyBranch>[])];
+        final i = cur.indexWhere((x) => x.id == b.id);
+        if (i >= 0) cur[i] = updated;
+        _branches = {..._branches, c.id: cur};
       });
     } catch (e) {
       if (!mounted) return;
@@ -1132,6 +1298,7 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
             ..._companies.map((c) {
               final open = _expandedId == c.id;
               final branches = _branches[c.id];
+              final users = _users[c.id];
               return Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Material(
@@ -1146,7 +1313,11 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                           padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
                           child: Row(
                             children: [
-                              const Icon(Icons.apartment_outlined, size: 18, color: AppColors.primary),
+                              Icon(
+                                Icons.apartment_outlined,
+                                size: 18,
+                                color: c.isActive ? AppColors.primary : AppColors.textDim,
+                              ),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Column(
@@ -1161,8 +1332,11 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                                       ),
                                     ),
                                     Text(
-                                      c.slug,
-                                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
+                                      c.isActive ? c.slug : '${c.slug} · выкл',
+                                      style: GoogleFonts.manrope(
+                                        color: c.isActive ? AppColors.textDim : AppColors.danger,
+                                        fontSize: 11,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1181,12 +1355,6 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                                 },
                                 icon: const Icon(Icons.qr_code_2_rounded, size: 18, color: AppColors.primary),
                               ),
-                              IconButton(
-                                visualDensity: VisualDensity.compact,
-                                tooltip: 'Филиал',
-                                onPressed: () => _addBranch(c),
-                                icon: const Icon(Icons.storefront_outlined, size: 18, color: AppColors.primary),
-                              ),
                               Icon(
                                 open ? Icons.expand_less : Icons.expand_more,
                                 color: AppColors.textDim,
@@ -1202,6 +1370,38 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                children: [
+                                  OutlinedButton(
+                                    onPressed: () => _toggleCompanyActive(c),
+                                    child: Text(c.isActive ? 'Выключить' : 'Включить'),
+                                  ),
+                                  OutlinedButton(
+                                    onPressed: () => _wipeCompany(c, hard: false),
+                                    child: const Text('Очистить данные'),
+                                  ),
+                                  if (c.slug != 'demo')
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppColors.danger.withOpacity(0.9),
+                                      ),
+                                      onPressed: () => _wipeCompany(c, hard: true),
+                                      child: const Text('Удалить студию'),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Филиалы',
+                                style: GoogleFonts.manrope(
+                                  color: AppColors.textDim,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
                               if (branches == null)
                                 const Padding(
                                   padding: EdgeInsets.symmetric(vertical: 8),
@@ -1218,10 +1418,26 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                               else
                                 ...branches.map(
                                   (b) => Padding(
-                                    padding: const EdgeInsets.only(bottom: 4),
-                                    child: Text(
-                                      '· ${b.name}',
-                                      style: GoogleFonts.manrope(color: AppColors.text, fontSize: 12),
+                                    padding: const EdgeInsets.only(bottom: 2),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            '· ${b.name}${b.isActive ? '' : ' (выкл)'}',
+                                            style: GoogleFonts.manrope(
+                                              color: b.isActive ? AppColors.text : AppColors.textDim,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                        TextButton(
+                                          onPressed: () => _toggleBranch(c, b),
+                                          child: Text(
+                                            b.isActive ? 'выкл' : 'вкл',
+                                            style: GoogleFonts.manrope(fontSize: 11),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
@@ -1230,6 +1446,90 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                                 icon: const Icon(Icons.add, size: 16),
                                 label: const Text('Добавить филиал'),
                               ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Text(
+                                    'Пользователи',
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.textDim,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  IconButton(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: 'Обновить список',
+                                    onPressed: () => _loadUsers(c),
+                                    icon: const Icon(Icons.refresh, size: 16, color: AppColors.textDim),
+                                  ),
+                                ],
+                              ),
+                              if (users == null)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 8),
+                                  child: Center(
+                                    child: SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    ),
+                                  ),
+                                )
+                              else if (users.isEmpty)
+                                Text('Нет пользователей', style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12))
+                              else
+                                ...users.map(
+                                  (u) => Padding(
+                                    padding: const EdgeInsets.only(bottom: 4),
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                u.displayLabel,
+                                                style: GoogleFonts.manrope(
+                                                  color: u.isActive ? AppColors.text : AppColors.textDim,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                              Text(
+                                                [
+                                                  u.email,
+                                                  if (u.roles.isNotEmpty) u.roles.join(', '),
+                                                  if (u.pendingAssignment) 'ожидает',
+                                                  if (!u.isActive) 'выкл',
+                                                ].join(' · '),
+                                                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 10),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        IconButton(
+                                          visualDensity: VisualDensity.compact,
+                                          tooltip: u.isActive ? 'Отключить' : 'Включить',
+                                          onPressed: () => _toggleUser(c, u),
+                                          icon: Icon(
+                                            u.isActive ? Icons.person_off_outlined : Icons.person_outline,
+                                            size: 18,
+                                            color: AppColors.primary,
+                                          ),
+                                        ),
+                                        IconButton(
+                                          visualDensity: VisualDensity.compact,
+                                          tooltip: 'Удалить логин',
+                                          onPressed: () => _deleteUser(c, u),
+                                          icon: const Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),

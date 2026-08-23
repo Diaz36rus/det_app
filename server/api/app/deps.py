@@ -36,6 +36,10 @@ def get_current_user(
     )
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Пользователь неактивен")
+    if user.company_id and not user.is_platform_admin:
+        company = getattr(user, "company", None)
+        if company is not None and not company.is_active:
+            raise HTTPException(status_code=403, detail="Студия отключена")
     return user
 
 

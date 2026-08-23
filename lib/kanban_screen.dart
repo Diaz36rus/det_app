@@ -187,7 +187,72 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
     });
   }
 
-  Widget _buildOrderCard(Map<String, dynamic> o, String status, {bool isFeedback = false}) {
+  Future<void> _changeOrderStatus(Map<String, dynamic> o) async {
+    final current = o['status']?.toString() ?? '';
+    final options = List<String>.from(STATUSES);
+    final next = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+                child: Text(
+                  'Статус заказа #${o['id']}',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              for (final s in options)
+                ListTile(
+                  leading: Icon(
+                    s == current ? Icons.check_circle : Icons.circle_outlined,
+                    color: s == current
+                        ? (kOrderStatusColors[s] ?? AppColors.primary)
+                        : AppColors.textDim,
+                    size: 20,
+                  ),
+                  title: Text(
+                    s,
+                    style: GoogleFonts.manrope(
+                      color: AppColors.text,
+                      fontWeight: s == current ? FontWeight.w800 : FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                  onTap: () => Navigator.pop(ctx, s),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (next == null || next == current || !mounted) return;
+    final ok = await tryUpdateOrderStatus(context, (o['id'] as num).toInt(), next);
+    if (!ok) {
+      if (mounted) setState(() {});
+      return;
+    }
+    await DatabaseHelper().addOrderEvent((o['id'] as num).toInt(), 'Статус изменен на: $next');
+    _loadOrders();
+  }
+
+  Widget _buildOrderCard(
+    Map<String, dynamic> o,
+    String status, {
+    bool isFeedback = false,
+    bool showStatusButton = false,
+  }) {
     final accent = kOrderStatusColors[status] ?? AppColors.primary;
     final orderId = (o['id'] as num?)?.toInt();
     return PulseAnchor(
@@ -253,6 +318,27 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                     style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.25),
                     overflow: TextOverflow.ellipsis,
                     maxLines: 2,
+                  ),
+                ],
+                if (showStatusButton && !isFeedback) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _changeOrderStatus(o),
+                      icon: const Icon(Icons.flag_outlined, size: 16),
+                      label: Text(
+                        status,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12.5),
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: accent,
+                        side: BorderSide(color: accent.withOpacity(0.55)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ),
                   ),
                 ],
                 if (!isFeedback) ...[
@@ -382,6 +468,175 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
     );
   }
 
+  Widget _buildStatusColumn({
+    required String status,
+    required List<Map<String, dynamic>> colOrders,
+    required double colWidth,
+    required bool mobile,
+    required Color accent,
+  }) {
+    Widget cardList() {
+      return ListView.builder(
+        primary: false,
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: colOrders.length,
+        itemBuilder: (context, i) {
+          final o = colOrders[i];
+          final card = GestureDetector(
+            onTap: () async {
+              final shouldRefresh = await OrderDetailsDialog.open(context, o);
+              if (shouldRefresh == true) _loadOrders();
+            },
+            child: _buildOrderCard(o, status, showStatusButton: mobile),
+          );
+          if (mobile) return card;
+          return Draggable<Map<String, dynamic>>(
+            data: o,
+            feedback: Material(
+              color: Colors.transparent,
+              elevation: 8,
+              child: Opacity(
+                opacity: 0.92,
+                child: SizedBox(
+                  width: colWidth - 24,
+                  child: _buildOrderCard(o, status, isFeedback: true),
+                ),
+              ),
+            ),
+            childWhenDragging: Opacity(
+              opacity: 0.25,
+              child: _buildOrderCard(o, status),
+            ),
+            child: card,
+          );
+        },
+      );
+    }
+
+    final columnBody = AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      width: colWidth,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border(
+          top: BorderSide(color: accent.withOpacity(0.55), width: 3),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  status,
+                  style: GoogleFonts.manrope(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                "${colOrders.length}",
+                style: GoogleFonts.manrope(
+                  color: AppColors.textDim,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Expanded(child: cardList()),
+        ],
+      ),
+    );
+
+    if (mobile) return columnBody;
+
+    return DragTarget<Map<String, dynamic>>(
+      onAcceptWithDetails: (details) async {
+        final order = details.data;
+        if (order['status'] != status) {
+          final ok = await tryUpdateOrderStatus(
+            context,
+            order['id'] as int,
+            status,
+          );
+          if (!ok) {
+            if (mounted) setState(() {});
+            return;
+          }
+          await DatabaseHelper().addOrderEvent(order['id'], "Статус изменен на: $status");
+          _loadOrders();
+        }
+      },
+      builder: (context, candidateData, rejectedData) {
+        final hovering = candidateData.isNotEmpty;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          width: colWidth,
+          margin: const EdgeInsets.only(right: 12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: hovering
+                ? AppColors.primarySoft.withOpacity(0.45)
+                : AppColors.surface.withOpacity(0.55),
+            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+            border: Border(
+              top: BorderSide(color: accent.withOpacity(hovering ? 0.9 : 0.55), width: 3),
+            ),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      status,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.text,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Text(
+                    "${colOrders.length}",
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textDim,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Expanded(child: cardList()),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -485,108 +740,12 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                     }
                     final accent = kOrderStatusColors[status] ?? AppColors.primary;
 
-                    return DragTarget<Map<String, dynamic>>(
-                      onAcceptWithDetails: (details) async {
-                        final order = details.data;
-                        if (order['status'] != status) {
-                          final ok = await tryUpdateOrderStatus(
-                            context,
-                            order['id'] as int,
-                            status,
-                          );
-                          if (!ok) {
-                            if (mounted) setState(() {});
-                            return;
-                          }
-                          await DatabaseHelper().addOrderEvent(order['id'], "Статус изменен на: $status");
-                          _loadOrders();
-                        }
-                      },
-                      builder: (context, candidateData, rejectedData) {
-                        final hovering = candidateData.isNotEmpty;
-                        return AnimatedContainer(
-                          duration: const Duration(milliseconds: 180),
-                          width: colWidth,
-                          margin: const EdgeInsets.only(right: 12),
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: hovering
-                                ? AppColors.primarySoft.withOpacity(0.45)
-                                : AppColors.surface.withOpacity(0.55),
-                            borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                            border: Border(
-                              top: BorderSide(color: accent.withOpacity(hovering ? 0.9 : 0.55), width: 3),
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              Row(
-                                children: [
-                                  Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      status,
-                                      style: GoogleFonts.manrope(
-                                        color: AppColors.text,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 14,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  Text(
-                                    "${colOrders.length}",
-                                    style: GoogleFonts.manrope(
-                                      color: AppColors.textDim,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 12),
-                              Expanded(
-                                child: ListView.builder(
-                                  itemCount: colOrders.length,
-                                  itemBuilder: (context, i) {
-                                    final o = colOrders[i];
-                                    return Draggable<Map<String, dynamic>>(
-                                      data: o,
-                                      feedback: Material(
-                                        color: Colors.transparent,
-                                        elevation: 8,
-                                        child: Opacity(
-                                          opacity: 0.92,
-                                          child: SizedBox(
-                                            width: colWidth - 24,
-                                            child: _buildOrderCard(o, status, isFeedback: true),
-                                          ),
-                                        ),
-                                      ),
-                                      childWhenDragging: Opacity(
-                                        opacity: 0.25,
-                                        child: _buildOrderCard(o, status),
-                                      ),
-                                      child: GestureDetector(
-                                        onTap: () async {
-                                          final shouldRefresh = await OrderDetailsDialog.open(context, o);
-                                          if (shouldRefresh == true) _loadOrders();
-                                        },
-                                        child: _buildOrderCard(o, status),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
+                    return _buildStatusColumn(
+                      status: status,
+                      colOrders: colOrders,
+                      colWidth: colWidth,
+                      mobile: mobile,
+                      accent: accent,
                     );
                             },
                           ),

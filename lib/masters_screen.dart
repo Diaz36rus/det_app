@@ -269,7 +269,7 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
     );
   }
 
-  Widget _buildToolbar() {
+  Widget _buildToolbar({bool compactRoles = false}) {
     final mobile = AppResponsive.isMobile(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 12),
@@ -301,28 +301,70 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
                 onSubmitted: (_) => _addMaster(),
               ),
               const SizedBox(height: 12),
-              Text(
-                "Роли (можно несколько)",
-                style: GoogleFonts.manrope(
-                  color: AppColors.textDim,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+              if (compactRoles)
+                Theme(
+                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                  child: ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: const EdgeInsets.only(bottom: 4),
+                    initiallyExpanded: false,
+                    title: Text(
+                      'Роли (${_selectedRoles.length})',
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    subtitle: Text(
+                      _selectedRoles.isEmpty
+                          ? 'не выбраны'
+                          : _selectedRoles.join(', '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 11),
+                    ),
+                    children: [
+                      _roleChipWrap(
+                        options: _roles,
+                        selected: _selectedRoles,
+                        onToggle: (r, enable) {
+                          setState(() {
+                            if (enable) {
+                              _selectedRoles.add(r);
+                            } else {
+                              _selectedRoles.remove(r);
+                            }
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                )
+              else ...[
+                Text(
+                  "Роли (можно несколько)",
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textDim,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              _roleChipWrap(
-                options: _roles,
-                selected: _selectedRoles,
-                onToggle: (r, enable) {
-                  setState(() {
-                    if (enable) {
-                      _selectedRoles.add(r);
-                    } else {
-                      _selectedRoles.remove(r);
-                    }
-                  });
-                },
-              ),
+                const SizedBox(height: 8),
+                _roleChipWrap(
+                  options: _roles,
+                  selected: _selectedRoles,
+                  onToggle: (r, enable) {
+                    setState(() {
+                      if (enable) {
+                        _selectedRoles.add(r);
+                      } else {
+                        _selectedRoles.remove(r);
+                      }
+                    });
+                  },
+                ),
+              ],
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerRight,
@@ -444,11 +486,49 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
   @override
   Widget build(BuildContext context) {
     final mobile = AppResponsive.isMobile(context);
+
+    // Мобилка: один общий скролл (форма + список), без Expanded-ловушки.
+    if (mobile) {
+      return ListView(
+        padding: const EdgeInsets.only(bottom: 28),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: Text("Сотрудники", style: AppTheme.pageTitle),
+          ),
+          _buildToolbar(compactRoles: true),
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.all(40),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_masters.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 24, 12, 24),
+              child: Text(
+                "Пока нет сотрудников — добавьте первого выше",
+                textAlign: TextAlign.center,
+                style: GoogleFonts.manrope(color: AppColors.textMuted),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+              child: Column(
+                children: [
+                  for (final m in _masters) _buildMasterCard(m),
+                ],
+              ),
+            ),
+        ],
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Padding(
-          padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, mobile ? 12 : 20, mobile ? 12 : 24, 8),
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
           child: Text("Сотрудники", style: AppTheme.pageTitle),
         ),
         _buildToolbar(),
@@ -463,7 +543,7 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
                       ),
                     )
                   : ListView.builder(
-                      padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 24),
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
                       itemCount: _masters.length,
                       itemBuilder: (context, index) => _buildMasterCard(_masters[index]),
                     ),

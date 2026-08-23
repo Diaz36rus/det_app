@@ -71,6 +71,30 @@ class CompanyOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CompanyPatch(BaseModel):
+    is_active: bool | None = None
+
+
+class PlatformUserOut(BaseModel):
+    id: int
+    email: EmailStr
+    phone: str | None = None
+    full_name: str
+    is_active: bool
+    roles: list[str] = []
+    pending_assignment: bool = False
+    company_id: int | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class WipeResultOut(BaseModel):
+    ok: bool = True
+    company_id: int
+    deleted: bool = False
+    stats: dict[str, int] = {}
+
+
 class CompanyCreate(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     slug: str = Field(min_length=2, max_length=80)
