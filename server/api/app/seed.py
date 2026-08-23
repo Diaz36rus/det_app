@@ -299,8 +299,6 @@ def seed_database(db: Session) -> None:
         if db.scalars(select(CrmMaster).where(CrmMaster.company_id == company.id).limit(1)).first() is None:
             db.add(CrmMaster(company_id=company.id, name="Иван Мастер", role="Универсал"))
             db.add(CrmMaster(company_id=company.id, name="Алексей", role="Полировка"))
-        # Полный прайс (SERVICES_TREE + оклейка) — upsert, не только пустая база
-        ensure_company_price_catalog(db, company.id)
         if (
             db.scalars(select(CrmInventoryItem).where(CrmInventoryItem.company_id == company.id).limit(1)).first()
             is None
@@ -316,5 +314,10 @@ def seed_database(db: Session) -> None:
                     meters_per_roll=15,
                 )
             )
+
+    # Прайс по умолчанию — во все студии (новые уже получают его в provision_studio).
+    # На публичном запуске оставим только список услуг без цен.
+    for c in db.scalars(select(Company)).all():
+        ensure_company_price_catalog(db, c.id)
 
     db.commit()

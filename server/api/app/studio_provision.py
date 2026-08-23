@@ -9,7 +9,7 @@ from app.models import Branch, Company, Role, User, UserBranch, UserRole
 from app.permissions_catalog import COMPANY_ROLE_PRESETS
 from app.phone_util import phone_digits10
 from app.security import hash_password
-from app.seed import _ensure_permissions, _set_role_permissions
+from app.seed import _ensure_permissions, _set_role_permissions, ensure_company_price_catalog
 from fastapi import HTTPException
 
 
@@ -74,4 +74,6 @@ def provision_studio(
     if owner_role is not None:
         db.add(UserRole(user_id=owner.id, role_id=owner_role.id))
     db.add(UserBranch(user_id=owner.id, branch_id=branch.id))
+    # Пока: полный прайс студии с нашими ценами. На релизе оставим список услуг без цен.
+    ensure_company_price_catalog(db, company.id)
     return company, branch, owner
