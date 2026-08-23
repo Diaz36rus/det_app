@@ -27,6 +27,7 @@ class AuthStore {
         'is_platform_admin': user.isPlatformAdmin,
         'company_id': user.companyId,
         'company_slug': user.companySlug,
+        'company_name': user.companyName,
         'roles': user.roles,
         'branch_ids': user.branchIds,
         'permissions': user.permissions,

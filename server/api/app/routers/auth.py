@@ -35,6 +35,7 @@ def _user_out(user: User) -> UserOut:
         perms = sorted({code for code, _, _ in PERMISSIONS})
     company = getattr(user, "company", None)
     company_slug = company.slug if company is not None else None
+    company_name = company.name if company is not None else None
     return UserOut(
         id=user.id,
         email=user.email,
@@ -44,6 +45,7 @@ def _user_out(user: User) -> UserOut:
         is_platform_admin=user.is_platform_admin,
         company_id=user.company_id,
         company_slug=company_slug,
+        company_name=company_name,
         roles=[r.name for r in user.roles],
         branch_ids=[b.id for b in user.branches],
         permissions=perms,

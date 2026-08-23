@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
 
@@ -418,6 +419,7 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
                             _InviteBlock(
                               inviteUrl: _inviteUrlForUser(user),
                               studioSlug: user.companySlug,
+                              studioName: user.companyName,
                               canManage: canManageAssignments(accessRankOf(user)),
                               onStaffCreated: () => _studioKey.currentState?.reloadPending(),
                             ),
@@ -1807,11 +1809,13 @@ class _InviteBlock extends StatelessWidget {
     required this.inviteUrl,
     required this.canManage,
     this.studioSlug,
+    this.studioName,
     this.onStaffCreated,
   });
 
   final String? inviteUrl;
   final String? studioSlug;
+  final String? studioName;
   final bool canManage;
   final VoidCallback? onStaffCreated;
 
@@ -1832,7 +1836,11 @@ class _InviteBlock extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = inviteUrl;
     final slug = studioSlug?.trim().toLowerCase();
+    final name = (studioName?.trim().isNotEmpty == true)
+        ? studioName!.trim()
+        : (slug != null && slug.isNotEmpty ? slug : null);
     final hasInvite = url != null && url.isNotEmpty;
+
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
@@ -1844,7 +1852,7 @@ class _InviteBlock extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            canManage ? 'Пригласить в студию' : 'Подключение',
+            canManage ? 'Сотрудники' : 'Подключение',
             style: GoogleFonts.manrope(
               color: AppColors.textDim,
               fontSize: 11,
@@ -1852,32 +1860,102 @@ class _InviteBlock extends StatelessWidget {
               letterSpacing: 0.6,
             ),
           ),
-          if (canManage) ...[
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: () => _openCreate(context),
-              icon: const Icon(Icons.person_add_alt_1, size: 18),
-              label: Text(
-                'Добавить с должностью',
-                style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
-              ),
-            ),
+          if (name != null) ...[
             const SizedBox(height: 6),
             Text(
-              'Владелец / управляющий / админ / мастер — сразу с филиалом и доступом.',
-              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+              name,
+              style: GoogleFonts.manrope(
+                color: AppColors.text,
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-            const SizedBox(height: 14),
+          ],
+          if (canManage) ...[
+            const SizedBox(height: 12),
             Text(
-              'Или по QR (сам запросит доступ)',
+              'Два способа добавить человека',
               style: GoogleFonts.manrope(
                 color: AppColors.textMuted,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
               ),
             ),
-          ],
-          if (hasInvite) ...[
+            const SizedBox(height: 10),
+            _InviteStepCard(
+              step: '1',
+              title: 'Вы создаёте логин сами',
+              body:
+                  'Сразу задаёте должность (владелец / управляющий / админ / мастер), филиал и пароль. Человек входит по этим данным — без заявки.',
+              child: FilledButton.icon(
+                onPressed: () => _openCreate(context),
+                icon: const Icon(Icons.person_add_alt_1, size: 18),
+                label: Text(
+                  'Добавить сотрудника',
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            _InviteStepCard(
+              step: '2',
+              title: 'Человек входит сам по QR / ссылке',
+              body:
+                  'На телефоне: установить Det App → «Меня пригласили» → код студии или QR. '
+                  'Появится заявка в блоке «Назначения» выше — вы нажмёте «Назначить» и выдадите должность.',
+              child: hasInvite
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: QrImageView(
+                              data: url,
+                              version: QrVersions.auto,
+                              size: 132,
+                              backgroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                        if (slug != null && slug.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            'Код студии: $slug',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.manrope(
+                              color: AppColors.text,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            await Clipboard.setData(ClipboardData(text: url));
+                            if (!context.mounted) return;
+                            showAppToast(context, 'Ссылка приглашения скопирована');
+                          },
+                          icon: const Icon(Icons.link_rounded, size: 18),
+                          label: const Text('Скопировать ссылку'),
+                        ),
+                      ],
+                    )
+                  : Text(
+                      'QR появится после входа как пользователь студии (не как владелец приложения без студии).',
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+            ),
+          ] else if (hasInvite) ...[
             const SizedBox(height: 10),
             Center(
               child: Container(
@@ -1889,19 +1967,22 @@ class _InviteBlock extends StatelessWidget {
                 child: QrImageView(
                   data: url,
                   version: QrVersions.auto,
-                  size: canManage ? 132 : 148,
+                  size: 148,
                   backgroundColor: Colors.white,
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            Text(
-              slug != null && slug.isNotEmpty
-                  ? 'Код студии: $slug\nСотрудник сканирует QR → «Меня пригласили» → заявка в «Назначениях».'
-                  : 'Сотрудник ставит приложение и запрашивает доступ — появится в «Назначениях».',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
-            ),
+            const SizedBox(height: 8),
+            if (slug != null && slug.isNotEmpty)
+              Text(
+                'Код: $slug',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.manrope(
+                  color: AppColors.text,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () async {
@@ -1915,13 +1996,90 @@ class _InviteBlock extends StatelessWidget {
           ] else ...[
             const SizedBox(height: 10),
             Text(
-              canManage
-                  ? 'QR появится, когда у аккаунта будет код студии (войдите как пользователь студии). '
-                      'Владелец платформы приглашает через блок «Студии» или создаёт сотрудника здесь.'
-                  : 'Нет кода студии для QR — попросите администратора прислать ссылку.',
+              'Нет кода студии для QR — попросите администратора прислать ссылку.',
               style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12, height: 1.35),
             ),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _InviteStepCard extends StatelessWidget {
+  const _InviteStepCard({
+    required this.step,
+    required this.title,
+    required this.body,
+    required this.child,
+  });
+
+  final String step;
+  final String title;
+  final String body;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: AppColors.bg.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  step,
+                  style: GoogleFonts.manrope(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.text,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      body,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          child,
         ],
       ),
     );
@@ -2043,41 +2201,93 @@ class _StudioAccessBlock extends StatefulWidget {
 
 class _StudioAccessBlockState extends State<_StudioAccessBlock> {
   final _api = CompanyApi();
+  final _authApi = AuthApi();
   List<AuthUser> _pending = const [];
+  List<CompanyBranch> _branches = const [];
+  String? _studioName;
   bool _loading = false;
   String? _error;
+  Timer? _poll;
 
   @override
   void initState() {
     super.initState();
     final rank = accessRankOf(AuthController.instance.user);
+    _resolveStudioName();
+    _loadBranches();
     if (canManageAssignments(rank)) {
-      _loadPending();
+      _loadPending(quiet: false);
+      _poll = Timer.periodic(const Duration(seconds: 5), (_) {
+        if (!mounted) return;
+        _loadPending(quiet: true);
+      });
     }
   }
 
-  void reloadPending() => _loadPending();
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
 
-  Future<void> _loadPending() async {
+  void reloadPending() => _loadPending(quiet: false);
+
+  Future<void> _resolveStudioName() async {
+    final user = AuthController.instance.user;
+    final fromUser = user?.companyName?.trim();
+    if (fromUser != null && fromUser.isNotEmpty) {
+      if (mounted) setState(() => _studioName = fromUser);
+      return;
+    }
+    final slug = user?.companySlug?.trim();
+    if (slug == null || slug.isEmpty) return;
+    try {
+      final look = await _authApi.studioLookup(slug);
+      if (!mounted) return;
+      setState(() => _studioName = look.name);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _studioName = slug);
+    }
+  }
+
+  Future<void> _loadBranches() async {
     final token = AuthController.instance.accessToken;
     if (token == null || token.isEmpty) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    try {
+      final rows = await _api.listBranches(accessToken: token);
+      if (!mounted) return;
+      setState(() => _branches = rows);
+    } catch (_) {}
+  }
+
+  Future<void> _loadPending({required bool quiet}) async {
+    final token = AuthController.instance.accessToken;
+    if (token == null || token.isEmpty) return;
+    if (!quiet && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final rows = await _api.listUsers(accessToken: token, pending: true);
       if (!mounted) return;
       setState(() {
         _pending = rows;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = e.toString();
-      });
+      if (quiet) {
+        setState(() => _loading = false);
+      } else {
+        setState(() {
+          _loading = false;
+          _error = e.toString();
+        });
+      }
     }
   }
 
@@ -2090,7 +2300,7 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
     );
     if (ok == true) {
       showAppToast(context, 'Назначено: ${u.displayLabel}');
-      await _loadPending();
+      await _loadPending(quiet: false);
     }
   }
 
@@ -2103,7 +2313,7 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
     );
     if (created != null && mounted) {
       showAppToast(context, 'Создан: ${created.displayLabel}');
-      await _loadPending();
+      await _loadPending(quiet: false);
     }
   }
 
@@ -2124,6 +2334,7 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
       final b = await _api.createBranch(accessToken: token, name: name.trim());
       if (!mounted) return;
       showAppToast(context, 'Филиал создан: ${b.name}');
+      await _loadBranches();
     } catch (e) {
       if (!mounted) return;
       showAppToast(context, '$e');
@@ -2134,8 +2345,17 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
   Widget build(BuildContext context) {
     final user = AuthController.instance.user;
     final rank = accessRankOf(user);
-    final branchLabel = _branchLabel(user);
+    final branchLabel = _branchLabel(user, _branches);
     final jobLabel = _jobLabel(user, rank);
+    final studioTitle = () {
+      final n = _studioName?.trim();
+      if (n != null && n.isNotEmpty) return n;
+      final fromUser = user?.companyName?.trim();
+      if (fromUser != null && fromUser.isNotEmpty) return fromUser;
+      final slug = user?.companySlug?.trim();
+      if (slug != null && slug.isNotEmpty) return slug;
+      return null;
+    }();
 
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -2176,6 +2396,26 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
                 ),
             ],
           ),
+          if (studioTitle != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              studioTitle,
+              style: GoogleFonts.manrope(
+                color: AppColors.text,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            if (user?.companySlug != null &&
+                user!.companySlug!.trim().isNotEmpty &&
+                user.companySlug!.trim().toLowerCase() != studioTitle.toLowerCase()) ...[
+              const SizedBox(height: 2),
+              Text(
+                'Код: ${user.companySlug}',
+                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+              ),
+            ],
+          ],
           const SizedBox(height: 8),
           _kv('Филиал', branchLabel),
           const SizedBox(height: 4),
@@ -2210,17 +2450,22 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
                 else
                   IconButton(
                     visualDensity: VisualDensity.compact,
-                    tooltip: 'Обновить',
-                    onPressed: _loadPending,
+                    tooltip: 'Обновить сейчас',
+                    onPressed: () => _loadPending(quiet: false),
                     icon: const Icon(Icons.refresh, size: 18, color: AppColors.textDim),
                   ),
               ],
             ),
+            Text(
+              'Заявки по QR обновляются сами каждые 5 сек.',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11, height: 1.3),
+            ),
+            const SizedBox(height: 6),
             if (_error != null)
               Text(_error!, style: GoogleFonts.manrope(color: Colors.redAccent, fontSize: 11))
             else if (_pending.isEmpty)
               Text(
-                'Никто не ждёт роль. Новый сотрудник появится здесь после подключения.',
+                'Пока пусто. Когда сотрудник войдёт через «Меня пригласили», заявка появится здесь.',
                 style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
               )
             else
@@ -2285,24 +2530,30 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
     );
   }
 
-  static String _branchLabel(dynamic user) {
+  static String _branchLabel(AuthUser? user, List<CompanyBranch> branches) {
     if (user == null) return 'Не вошли';
-    final ids = (user.branchIds as List?) ?? const [];
+    final ids = user.branchIds;
     if (ids.isEmpty) {
-      if (user.isPlatformAdmin == true) return 'Все филиалы (владелец приложения)';
+      if (user.isPlatformAdmin) return 'Все филиалы (владелец приложения)';
       return 'Основной филиал';
     }
-    if (ids.length == 1) return 'Филиал #${ids.first}';
-    return '${ids.length} филиала(ов)';
+    String nameOf(int id) {
+      for (final b in branches) {
+        if (b.id == id) return b.name;
+      }
+      return 'Филиал #$id';
+    }
+
+    if (ids.length == 1) return nameOf(ids.first);
+    return ids.map(nameOf).join(', ');
   }
 
-  static String _jobLabel(dynamic user, AccessRank rank) {
+  static String _jobLabel(AuthUser? user, AccessRank rank) {
     if (user == null) return '—';
     if (rank == AccessRank.platformOwner) return 'Владелец приложения';
     if (user.pendingAssignment == true) return 'Ожидает назначение';
-    final roles = (user.roles as List?)?.map((e) => e.toString()).toList() ?? const [];
-    if (roles.isEmpty) return 'Без должности';
-    return roles.join(', ');
+    if (user.roles.isEmpty) return 'Без должности';
+    return user.roles.join(', ');
   }
 
   static Widget _kv(String k, String v) {
@@ -2313,13 +2564,21 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
           width: 88,
           child: Text(
             k,
-            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, fontWeight: FontWeight.w600),
+            style: GoogleFonts.manrope(
+              color: AppColors.textDim,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
         Expanded(
           child: Text(
             v,
-            style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13, fontWeight: FontWeight.w700),
+            style: GoogleFonts.manrope(
+              color: AppColors.text,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ],

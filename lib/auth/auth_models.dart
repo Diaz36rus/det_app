@@ -25,6 +25,7 @@ class AuthUser {
   final bool isPlatformAdmin;
   final int? companyId;
   final String? companySlug;
+  final String? companyName;
   final List<String> roles;
   final List<int> branchIds;
   final List<String> permissions;
@@ -40,6 +41,7 @@ class AuthUser {
     required this.isPlatformAdmin,
     this.companyId,
     this.companySlug,
+    this.companyName,
     this.roles = const [],
     this.branchIds = const [],
     this.permissions = const [],
@@ -56,6 +58,7 @@ class AuthUser {
         isPlatformAdmin: j['is_platform_admin'] == true,
         companyId: (j['company_id'] as num?)?.toInt(),
         companySlug: j['company_slug']?.toString(),
+        companyName: j['company_name']?.toString(),
         roles: (j['roles'] as List?)?.map((e) => e.toString()).toList() ?? const [],
         branchIds: (j['branch_ids'] as List?)
                 ?.map((e) => (e as num).toInt())
@@ -73,5 +76,14 @@ class AuthUser {
     if (fullName.trim().isNotEmpty) return fullName.trim();
     if (email.isNotEmpty) return email;
     return phone ?? 'Пользователь';
+  }
+
+  /// Название студии для UI: имя, иначе код.
+  String get studioDisplayName {
+    final n = companyName?.trim();
+    if (n != null && n.isNotEmpty) return n;
+    final s = companySlug?.trim();
+    if (s != null && s.isNotEmpty) return s;
+    return 'Без студии';
   }
 }

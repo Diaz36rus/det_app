@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 89,
+    version: '1.0.1',
+    items: [
+      'Связь: название студии, понятные 2 способа добавить сотрудника, автообновление назначений',
+    ],
+  ),
+  PatchRelease(
     build: 88,
     version: '1.0.1',
     items: [

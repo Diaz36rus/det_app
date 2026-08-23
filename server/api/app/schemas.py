@@ -122,6 +122,7 @@ class UserOut(BaseModel):
     is_platform_admin: bool
     company_id: int | None
     company_slug: str | None = None
+    company_name: str | None = None
     roles: list[str] = []
     branch_ids: list[int] = []
     permissions: list[str] = []
