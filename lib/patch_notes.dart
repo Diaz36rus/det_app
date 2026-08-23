@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 90,
+    version: '1.0.1',
+    items: [
+      'Дефекты: фото больше не мигают при вводе и фоновом обновлении',
+    ],
+  ),
+  PatchRelease(
     build: 89,
     version: '1.0.1',
     items: [

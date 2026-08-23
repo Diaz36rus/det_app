@@ -46,11 +46,13 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
   List<Map<String, dynamic>> _defects = [];
   final List<String> _newPhotos = [];
   final Set<int> _expandedIds = {};
+  /// Кэш decoded JPEG — иначе при каждом setState новый Uint8List → мигание Image.memory.
+  final Map<String, Uint8List> _photoBytes = {};
   String _partFilter = _allTab;
   bool _loading = true;
   bool _saving = false;
   bool _loadBusy = false;
-  Timer? _livePoll;
+  String _defectsFp = '';
   int _lastSeenRev = -1;
 
   @override
@@ -61,16 +63,11 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
     });
     _lastSeenRev = DatabaseHelper.dataRevision.value;
     DatabaseHelper.dataRevision.addListener(_onDataRevision);
-    // Подстраховка на хосте: LAN-insert иногда обгоняет кадр UI.
-    _livePoll = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!_saving) unawaited(_load(soft: true));
-    });
     _load();
   }
 
   @override
   void dispose() {
-    _livePoll?.cancel();
     DatabaseHelper.dataRevision.removeListener(_onDataRevision);
     _description.dispose();
     super.dispose();
@@ -85,14 +82,54 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
 
   String get _draftPart => detectDefectPart(_description.text);
 
+  String _fingerprint(List<Map<String, dynamic>> defects) {
+    final buf = StringBuffer();
+    for (final d in defects) {
+      final id = d['id'];
+      final desc = d['description'] ?? '';
+      final photos = (d['photos'] as List?) ?? const [];
+      buf.write('$id|$desc|${photos.length};');
+      for (final p in photos) {
+        final b64 = (p is Map ? p['photo_b64'] : null)?.toString() ?? '';
+        buf.write('${b64.length}:');
+        if (b64.length >= 24) {
+          buf.write(b64.substring(0, 12));
+          buf.write(b64.substring(b64.length - 12));
+        } else {
+          buf.write(b64);
+        }
+        buf.write(',');
+      }
+    }
+    return buf.toString();
+  }
+
+  Uint8List? _bytesFor(String b64) {
+    if (b64.isEmpty) return null;
+    final cached = _photoBytes[b64];
+    if (cached != null) return cached;
+    try {
+      final bytes = base64Decode(b64);
+      _photoBytes[b64] = bytes;
+      return bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _load({bool soft = false}) async {
     if (_loadBusy) return;
     _loadBusy = true;
     try {
       final defects = await DatabaseHelper().getOrderDefects(widget.orderId);
       if (!mounted) return;
+      final fp = _fingerprint(defects);
+      if (soft && fp == _defectsFp && !_loading) {
+        return;
+      }
       setState(() {
         _defects = defects;
+        _defectsFp = fp;
         _loading = false;
         if (!soft && defects.isNotEmpty) {
           final id = (defects.first['id'] as num?)?.toInt();
@@ -175,12 +212,8 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
   }
 
   void _openPhoto(String b64) {
-    late final Uint8List bytes;
-    try {
-      bytes = base64Decode(b64);
-    } catch (_) {
-      return;
-    }
+    final bytes = _bytesFor(b64);
+    if (bytes == null) return;
     showDialog<void>(
       context: context,
       builder: (ctx) => Dialog(
@@ -189,7 +222,13 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
         child: Stack(
           children: [
             InteractiveViewer(
-              child: Center(child: Image.memory(bytes, fit: BoxFit.contain)),
+              child: Center(
+                child: Image.memory(
+                  bytes,
+                  fit: BoxFit.contain,
+                  gaplessPlayback: true,
+                ),
+              ),
             ),
             Positioned(
               top: 4,
@@ -206,10 +245,7 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
   }
 
   Widget _thumb(String b64, {VoidCallback? onDelete, VoidCallback? onTap}) {
-    Uint8List? bytes;
-    try {
-      if (b64.isNotEmpty) bytes = base64Decode(b64);
-    } catch (_) {}
+    final bytes = _bytesFor(b64);
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -227,7 +263,15 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
                       height: 72,
                       child: Icon(Icons.broken_image, color: AppColors.textDim),
                     )
-                  : Image.memory(bytes, width: 72, height: 72, fit: BoxFit.cover),
+                  : Image.memory(
+                      bytes,
+                      width: 72,
+                      height: 72,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                      // Stable identity across rebuilds while typing / soft reload.
+                      key: ValueKey<int>(identityHashCode(bytes)),
+                    ),
             ),
           ),
         ),
