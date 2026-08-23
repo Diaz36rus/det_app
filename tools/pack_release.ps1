@@ -240,6 +240,13 @@ if (Test-Path $ApkSrc) {
   $latest['android_size'] = $apkSize
   $apkMb = [math]::Round($apkSize / 1MB, 1)
   Write-Host ("APK: {0} ({1} MB)" -f $ApkName, $apkMb) -ForegroundColor Green
+
+  # Ручная установка на телефон — на D: рядом с проектом (не Desktop / не C:).
+  $ApkDropDir = Join-Path $ProjectRoot 'apk'
+  New-Item -ItemType Directory -Path $ApkDropDir -Force | Out-Null
+  Copy-Item $ApkDist -Destination (Join-Path $ApkDropDir $ApkName) -Force
+  Copy-Item $ApkDist -Destination (Join-Path $ApkDropDir 'DetApp-latest-android.apk') -Force
+  Write-Host ("APK drop:  {0}" -f $ApkDropDir) -ForegroundColor Green
 } else {
   Write-Host "No app-release.apk - skip android fields. Run: flutter build apk --release" -ForegroundColor Yellow
 }
@@ -295,6 +302,9 @@ if ($packDirReady) {
 Write-Host ("App update: {0} ({1} MB)" -f $AppZipPath, $appZipMb)
 Write-Host "Manifest:   $latestPath"
 Write-Host "SHA256:     $sha"
+if ($apkSha) {
+  Write-Host ("Phone APK:  {0}\DetApp-latest-android.apk" -f (Join-Path $ProjectRoot 'apk'))
+}
 Write-Host ""
 Write-Host "Publish to home server:" -ForegroundColor Yellow
 Write-Host "  powershell -ExecutionPolicy Bypass -File tools\publish_update.ps1 -PublishDir D:\detapp-updates -BaseUrl http://192.168.3.2:8080"

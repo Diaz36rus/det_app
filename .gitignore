@@ -45,4 +45,5 @@ app.*.map.json
 
 # Portable release output / VC++ redistributable cache
 /dist/
+/apk/
 /tools/cache/
