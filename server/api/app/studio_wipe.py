@@ -24,6 +24,7 @@ from app.models import (
     CrmOrderEvent,
     CrmOrderItem,
     CrmOrderMaster,
+    CrmOrderWorkshopPayroll,
     CrmOrderWrapFilm,
     CrmPromocode,
     CrmService,
@@ -57,7 +58,14 @@ def wipe_company_data(db: Session, company_id: int) -> dict[str, int]:
             .where(CrmInventoryMove.order_id.in_(order_ids))
             .values(order_id=None)
         )
-        for model in (CrmOrderWrapFilm, CrmDefect, CrmOrderEvent, CrmOrderMaster, CrmOrderItem):
+        for model in (
+            CrmOrderWrapFilm,
+            CrmDefect,
+            CrmOrderEvent,
+            CrmOrderMaster,
+            CrmOrderWorkshopPayroll,
+            CrmOrderItem,
+        ):
             n = db.execute(delete(model).where(model.order_id.in_(order_ids))).rowcount
             stats[model.__tablename__] = int(n or 0)
         n = db.execute(delete(CrmOrder).where(CrmOrder.company_id == company_id)).rowcount

@@ -377,3 +377,19 @@ class CrmOrderEventOut(BaseModel):
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class CrmOrderWorkshopPayrollIn(BaseModel):
+    workshop: str = Field(min_length=1, max_length=80)
+    amount: float = 0
+    master_id: int | None = None
+
+
+class CrmOrderWorkshopPayrollOut(BaseModel):
+    id: int
+    order_id: int
+    workshop: str
+    amount: float
+    master_id: int | None = None
+
+    model_config = {"from_attributes": True}

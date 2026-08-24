@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
@@ -17,6 +17,7 @@ from app.models import (
     CrmOrderEvent,
     CrmOrderItem,
     CrmOrderMaster,
+    CrmOrderWorkshopPayroll,
     CrmOrderWrapFilm,
     User,
 )
@@ -35,6 +36,8 @@ from app.schemas import (
     CrmOrderItemPatch,
     CrmOrderOut,
     CrmOrderUpdate,
+    CrmOrderWorkshopPayrollIn,
+    CrmOrderWorkshopPayrollOut,
 )
 
 router = APIRouter(prefix="/crm", tags=["crm"])
@@ -140,6 +143,7 @@ def _purge_orders_by_ids(db: Session, ids: list[int]) -> int:
     db.execute(delete(CrmOrderWrapFilm).where(CrmOrderWrapFilm.order_id.in_(uniq)))
     db.execute(delete(CrmOrderEvent).where(CrmOrderEvent.order_id.in_(uniq)))
     db.execute(delete(CrmOrderMaster).where(CrmOrderMaster.order_id.in_(uniq)))
+    db.execute(delete(CrmOrderWorkshopPayroll).where(CrmOrderWorkshopPayroll.order_id.in_(uniq)))
     # Self-FK parent_id: wipe children first, then remaining items.
     db.execute(
         delete(CrmOrderItem).where(
@@ -846,6 +850,117 @@ def delete_order_item(
     _recalc_order_price(order)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/payroll/accrued")
+def payroll_accrued(
+    master_id: int = Query(...),
+    start: str = Query(..., min_length=8, max_length=32),
+    end: str = Query(..., min_length=8, max_length=32),
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    """Сумма ЗП по блокам цехов для мастера за период (по дате заказа)."""
+    company_id = _company_id(user)
+    start_d = start.strip()[:10]
+    end_d = end.strip()[:10]
+    rows = db.execute(
+        select(CrmOrderWorkshopPayroll.amount, CrmOrder.start_time, CrmOrder.due_date, CrmOrder.created_at)
+        .join(CrmOrder, CrmOrder.id == CrmOrderWorkshopPayroll.order_id)
+        .where(
+            CrmOrderWorkshopPayroll.company_id == company_id,
+            CrmOrderWorkshopPayroll.master_id == master_id,
+            CrmOrderWorkshopPayroll.amount > 0,
+        )
+    ).all()
+    total = 0.0
+    for amount, start_time, due_date, created_at in rows:
+        day = ""
+        for cand in (start_time, due_date, str(created_at or "")):
+            s = (cand or "").strip()
+            if len(s) >= 10:
+                day = s[:10]
+                break
+        if not day:
+            continue
+        if day < start_d or day > end_d:
+            continue
+        total += float(amount or 0)
+    return {"master_id": master_id, "start": start_d, "end": end_d, "accrued": total}
+
+
+@router.get("/orders/{order_id}/payroll", response_model=list[CrmOrderWorkshopPayrollOut])
+def list_order_payroll(
+    order_id: int,
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    _get_company_order(db, order_id, company_id)
+    rows = db.scalars(
+        select(CrmOrderWorkshopPayroll)
+        .where(
+            CrmOrderWorkshopPayroll.order_id == order_id,
+            CrmOrderWorkshopPayroll.company_id == company_id,
+        )
+        .order_by(CrmOrderWorkshopPayroll.workshop)
+    ).all()
+    return list(rows)
+
+
+@router.put("/orders/{order_id}/payroll", response_model=CrmOrderWorkshopPayrollOut | dict)
+def upsert_order_payroll(
+    order_id: int,
+    body: CrmOrderWorkshopPayrollIn,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    order = _get_company_order(db, order_id, company_id)
+    workshop = (body.workshop or "").strip()
+    if not workshop:
+        raise HTTPException(status_code=400, detail="Укажите цех")
+    if _is_studio_master(user):
+        _assert_master_item_workshop(db, user, workshop)
+    amount = float(body.amount or 0)
+    if amount < 0:
+        amount = 0
+    master_id = body.master_id
+    if master_id is not None:
+        m = db.scalar(
+            select(CrmMaster).where(CrmMaster.id == master_id, CrmMaster.company_id == company_id)
+        )
+        if m is None:
+            raise HTTPException(status_code=400, detail="Мастер не найден")
+
+    row = db.scalar(
+        select(CrmOrderWorkshopPayroll).where(
+            CrmOrderWorkshopPayroll.order_id == order.id,
+            CrmOrderWorkshopPayroll.company_id == company_id,
+            CrmOrderWorkshopPayroll.workshop == workshop,
+        )
+    )
+    if amount <= 0:
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        return {"ok": True, "deleted": True, "workshop": workshop}
+
+    if row is None:
+        row = CrmOrderWorkshopPayroll(
+            company_id=company_id,
+            order_id=order.id,
+            workshop=workshop,
+            amount=amount,
+            master_id=master_id,
+        )
+        db.add(row)
+    else:
+        row.amount = amount
+        row.master_id = master_id
+    db.commit()
+    db.refresh(row)
+    return row
 
 
 @router.get("/orders/{order_id}/events", response_model=list[CrmOrderEventOut])

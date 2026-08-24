@@ -344,12 +344,24 @@ def create_inventory(
     db: Session = Depends(get_db),
 ):
     cid = _company_id(user)
+    name = body.name.strip()
+    category = (body.category or "Прочее").strip() or "Прочее"
+    # Идемпотентность: не плодим дубли по имени+категории (сид склада / повторные POST).
+    existing = db.scalar(
+        select(CrmInventoryItem).where(
+            CrmInventoryItem.company_id == cid,
+            CrmInventoryItem.category == category,
+            CrmInventoryItem.name == name,
+        )
+    )
+    if existing is not None:
+        return existing
     row = CrmInventoryItem(
         company_id=cid,
-        name=body.name.strip(),
+        name=name,
         quantity=float(body.quantity or 0),
         unit=body.unit or "шт",
-        category=body.category or "Прочее",
+        category=category,
         min_qty=float(body.min_qty or 0),
         meters_per_roll=float(getattr(body, "meters_per_roll", 0) or 0),
     )
@@ -357,6 +369,120 @@ def create_inventory(
     db.commit()
     db.refresh(row)
     return row
+
+
+@router.post("/inventory/dedupe")
+def dedupe_inventory(
+    user: User = Depends(require_permissions("inventory.write")),
+    db: Session = Depends(get_db),
+):
+    """Схлопывает дубли склада: одна позиция на (category, lower(name))."""
+    cid = _company_id(user)
+    rows = list(
+        db.scalars(select(CrmInventoryItem).where(CrmInventoryItem.company_id == cid)).all()
+    )
+    groups: dict[tuple[str, str], list[CrmInventoryItem]] = {}
+    for row in rows:
+        key = ((row.category or "").strip().lower(), (row.name or "").strip().lower())
+        groups.setdefault(key, []).append(row)
+
+    removed = 0
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        items.sort(key=lambda r: int(r.id))
+        keep = items[0]
+        keep.quantity = float(sum(float(i.quantity or 0) for i in items))
+        keep.min_qty = max(float(i.min_qty or 0) for i in items)
+        if not (keep.unit or "").strip():
+            for i in items:
+                if (i.unit or "").strip():
+                    keep.unit = i.unit
+                    break
+        keep.meters_per_roll = max(float(i.meters_per_roll or 0) for i in items)
+
+        for dup in items[1:]:
+            dup_id = int(dup.id)
+            keep_id = int(keep.id)
+            # Рулоны: перенос или слияние метров при конфликте номера.
+            keep_roll_nums = {
+                (r.roll_number or "").strip().lower()
+                for r in db.scalars(
+                    select(CrmFilmRoll).where(
+                        CrmFilmRoll.company_id == cid,
+                        CrmFilmRoll.inventory_id == keep_id,
+                    )
+                ).all()
+            }
+            for roll in list(
+                db.scalars(
+                    select(CrmFilmRoll).where(
+                        CrmFilmRoll.company_id == cid,
+                        CrmFilmRoll.inventory_id == dup_id,
+                    )
+                ).all()
+            ):
+                rn = (roll.roll_number or "").strip().lower()
+                if rn in keep_roll_nums:
+                    # Сливаем остаток в любой рулон keep с тем же номером, дубль дропаем.
+                    twin = db.scalar(
+                        select(CrmFilmRoll).where(
+                            CrmFilmRoll.company_id == cid,
+                            CrmFilmRoll.inventory_id == keep_id,
+                            CrmFilmRoll.roll_number == roll.roll_number,
+                        )
+                    )
+                    if twin is not None:
+                        twin.meters_left = float(twin.meters_left or 0) + float(roll.meters_left or 0)
+                    db.delete(roll)
+                else:
+                    roll.inventory_id = keep_id
+                    keep_roll_nums.add(rn)
+
+            db.execute(
+                update(CrmOrderWrapFilm)
+                .where(CrmOrderWrapFilm.film_id == dup_id, CrmOrderWrapFilm.company_id == cid)
+                .values(film_id=keep_id)
+            )
+            db.execute(
+                update(CrmInventoryMove)
+                .where(CrmInventoryMove.item_id == dup_id, CrmInventoryMove.company_id == cid)
+                .values(item_id=keep_id)
+            )
+            db.execute(
+                update(CashFlow)
+                .where(CashFlow.inventory_id == dup_id, CashFlow.company_id == cid)
+                .values(inventory_id=keep_id)
+            )
+            # Рецепты: если уже есть на keep — просто дропаем дубль (CASCADE).
+            keep_recipe_keys = {
+                (r.service_name or "").strip().lower()
+                for r in db.scalars(
+                    select(CrmServiceRecipe).where(
+                        CrmServiceRecipe.company_id == cid,
+                        CrmServiceRecipe.inventory_id == keep_id,
+                    )
+                ).all()
+            }
+            for recipe in list(
+                db.scalars(
+                    select(CrmServiceRecipe).where(
+                        CrmServiceRecipe.company_id == cid,
+                        CrmServiceRecipe.inventory_id == dup_id,
+                    )
+                ).all()
+            ):
+                sk = (recipe.service_name or "").strip().lower()
+                if sk in keep_recipe_keys:
+                    db.delete(recipe)
+                else:
+                    recipe.inventory_id = keep_id
+                    keep_recipe_keys.add(sk)
+            db.delete(dup)
+            removed += 1
+
+    db.commit()
+    return {"ok": True, "removed": removed, "groups": len(groups)}
 
 
 @router.patch("/inventory/{item_id}", response_model=CrmInventoryOut)
@@ -880,23 +1006,27 @@ def put_order_wrap_films(
         )
         if inv is None:
             continue
-        if f.roll_id is not None:
+        roll_id = f.roll_id
+        if roll_id is not None:
             roll = db.scalar(
                 select(CrmFilmRoll).where(
-                    CrmFilmRoll.id == f.roll_id,
+                    CrmFilmRoll.id == roll_id,
                     CrmFilmRoll.company_id == cid,
                     CrmFilmRoll.inventory_id == inv.id,
                 )
             )
             if roll is None:
-                warnings.append(f"Рулон не подходит к плёнке {inv.name}")
-                continue
+                # Не блокируем расход: сохраняем метры без привязки к рулону.
+                warnings.append(
+                    f"Рулон не подходит к плёнке {inv.name} — сохранено без рулона"
+                )
+                roll_id = None
         db.add(
             CrmOrderWrapFilm(
                 company_id=cid,
                 order_id=order_id,
                 film_id=inv.id,
-                roll_id=f.roll_id,
+                roll_id=roll_id,
                 meters=meters,
             )
         )
