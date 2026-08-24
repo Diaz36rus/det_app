@@ -225,11 +225,13 @@ class CrmOrderItem(Base):
 
 
 class CrmOrderWorkshopPayroll(Base):
-    """ЗП мастера за блок цеха в заказе (несколько работ одного цеха → одна сумма)."""
+    """ЗП мастеров за блок цеха в заказе (несколько мастеров → несколько строк)."""
 
     __tablename__ = "crm_order_workshop_payroll"
     __table_args__ = (
-        UniqueConstraint("order_id", "workshop", name="uq_order_workshop_payroll"),
+        UniqueConstraint(
+            "order_id", "workshop", "master_id", name="uq_order_workshop_payroll_master"
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

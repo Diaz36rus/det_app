@@ -9,13 +9,14 @@ from sqlalchemy import select
 from app.db import Base, SessionLocal, engine
 from app.models import Company
 from app.routers import auth, bugs, cash, company, crm, crm_extra, platform, updates
-from app.seed import ensure_user_phone_column, seed_database
+from app.seed import ensure_payroll_multi_master, ensure_user_phone_column, seed_database
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     ensure_user_phone_column()
+    ensure_payroll_multi_master()
     db = SessionLocal()
     try:
         seed_database(db)
@@ -24,7 +25,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Det App API", version="0.16.17", lifespan=lifespan)
+app = FastAPI(title="Det App API", version="0.16.18", lifespan=lifespan)
 app.include_router(auth.router)
 app.include_router(platform.router)
 app.include_router(company.router)
@@ -37,7 +38,7 @@ app.include_router(bugs.router)
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "det-app-api", "version": "0.16.17"}
+    return {"ok": True, "service": "det-app-api", "version": "0.16.18"}
 
 
 @app.get("/")
@@ -52,7 +53,7 @@ def root():
         "updates": "/updates/latest.json",
         "bugs": "/bugs",
         "join": "/join?slug=код-студии",
-        "version": "0.16.17",
+        "version": "0.16.18",
     }
 
 

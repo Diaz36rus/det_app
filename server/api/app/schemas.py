@@ -379,10 +379,16 @@ class CrmOrderEventOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class CrmOrderWorkshopPayrollIn(BaseModel):
-    workshop: str = Field(min_length=1, max_length=80)
+class CrmOrderWorkshopPayrollLineIn(BaseModel):
+    master_id: int
     amount: float = 0
-    master_id: int | None = None
+
+
+class CrmOrderWorkshopPayrollPut(BaseModel):
+    """Замена всех строк ЗП по цеху: по одной сумме на мастера."""
+
+    workshop: str = Field(min_length=1, max_length=80)
+    lines: list[CrmOrderWorkshopPayrollLineIn] = []
 
 
 class CrmOrderWorkshopPayrollOut(BaseModel):

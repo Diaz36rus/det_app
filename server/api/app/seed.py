@@ -151,6 +151,32 @@ def ensure_user_phone_column() -> None:
         )
 
 
+def ensure_payroll_multi_master() -> None:
+    """ЗП: одна строка на (заказ, цех, мастер) вместо одной на (заказ, цех)."""
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE crm_order_workshop_payroll "
+                "DROP CONSTRAINT IF EXISTS uq_order_workshop_payroll"
+            )
+        )
+        conn.execute(text("DROP INDEX IF EXISTS uq_order_workshop_payroll"))
+        # Индекс/constraint с новым именем — create_all на свежей БД уже мог создать constraint.
+        conn.execute(
+            text(
+                "ALTER TABLE crm_order_workshop_payroll "
+                "DROP CONSTRAINT IF EXISTS uq_order_workshop_payroll_master"
+            )
+        )
+        conn.execute(text("DROP INDEX IF EXISTS uq_order_workshop_payroll_master"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_workshop_payroll_master "
+                "ON crm_order_workshop_payroll (order_id, workshop, master_id)"
+            )
+        )
+
+
 def _ensure_permissions(db: Session) -> dict[str, Permission]:
     by_code: dict[str, Permission] = {
         p.code: p for p in db.scalars(select(Permission)).all()

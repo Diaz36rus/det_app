@@ -36,8 +36,8 @@ from app.schemas import (
     CrmOrderItemPatch,
     CrmOrderOut,
     CrmOrderUpdate,
-    CrmOrderWorkshopPayrollIn,
     CrmOrderWorkshopPayrollOut,
+    CrmOrderWorkshopPayrollPut,
 )
 
 router = APIRouter(prefix="/crm", tags=["crm"])
@@ -903,18 +903,19 @@ def list_order_payroll(
             CrmOrderWorkshopPayroll.order_id == order_id,
             CrmOrderWorkshopPayroll.company_id == company_id,
         )
-        .order_by(CrmOrderWorkshopPayroll.workshop)
+        .order_by(CrmOrderWorkshopPayroll.workshop, CrmOrderWorkshopPayroll.master_id)
     ).all()
     return list(rows)
 
 
-@router.put("/orders/{order_id}/payroll", response_model=CrmOrderWorkshopPayrollOut | dict)
-def upsert_order_payroll(
+@router.put("/orders/{order_id}/payroll", response_model=list[CrmOrderWorkshopPayrollOut])
+def put_order_payroll(
     order_id: int,
-    body: CrmOrderWorkshopPayrollIn,
+    body: CrmOrderWorkshopPayrollPut,
     user: User = Depends(require_permissions("orders.write")),
     db: Session = Depends(get_db),
 ):
+    """Заменить ЗП цеха: несколько мастеров — несколько сумм (касса суммирует по master_id)."""
     company_id = _company_id(user)
     order = _get_company_order(db, order_id, company_id)
     workshop = (body.workshop or "").strip()
@@ -922,45 +923,46 @@ def upsert_order_payroll(
         raise HTTPException(status_code=400, detail="Укажите цех")
     if _is_studio_master(user):
         _assert_master_item_workshop(db, user, workshop)
-    amount = float(body.amount or 0)
-    if amount < 0:
-        amount = 0
-    master_id = body.master_id
-    if master_id is not None:
+
+    # Схлопываем дубли по master_id (последняя сумма побеждает).
+    by_master: dict[int, float] = {}
+    for line in body.lines or []:
+        mid = int(line.master_id)
+        amt = float(line.amount or 0)
+        if amt < 0:
+            amt = 0
+        if amt <= 0:
+            by_master.pop(mid, None)
+            continue
         m = db.scalar(
-            select(CrmMaster).where(CrmMaster.id == master_id, CrmMaster.company_id == company_id)
+            select(CrmMaster).where(CrmMaster.id == mid, CrmMaster.company_id == company_id)
         )
         if m is None:
-            raise HTTPException(status_code=400, detail="Мастер не найден")
+            raise HTTPException(status_code=400, detail=f"Мастер #{mid} не найден")
+        by_master[mid] = amt
 
-    row = db.scalar(
-        select(CrmOrderWorkshopPayroll).where(
+    db.execute(
+        delete(CrmOrderWorkshopPayroll).where(
             CrmOrderWorkshopPayroll.order_id == order.id,
             CrmOrderWorkshopPayroll.company_id == company_id,
             CrmOrderWorkshopPayroll.workshop == workshop,
         )
     )
-    if amount <= 0:
-        if row is not None:
-            db.delete(row)
-            db.commit()
-        return {"ok": True, "deleted": True, "workshop": workshop}
-
-    if row is None:
+    rows: list[CrmOrderWorkshopPayroll] = []
+    for mid, amt in by_master.items():
         row = CrmOrderWorkshopPayroll(
             company_id=company_id,
             order_id=order.id,
             workshop=workshop,
-            amount=amount,
-            master_id=master_id,
+            amount=amt,
+            master_id=mid,
         )
         db.add(row)
-    else:
-        row.amount = amount
-        row.master_id = master_id
+        rows.append(row)
     db.commit()
-    db.refresh(row)
-    return row
+    for row in rows:
+        db.refresh(row)
+    return rows
 
 
 @router.get("/orders/{order_id}/events", response_model=list[CrmOrderEventOut])
