@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'app_notifications.dart';
 import 'app_theme.dart';
 import 'database.dart';
 
@@ -11,7 +12,10 @@ Future<bool> tryUpdateOrderStatus(
   String newStatus,
 ) async {
   final ok = await DatabaseHelper().updateStatus(orderId, newStatus);
-  if (ok) return true;
+  if (ok) {
+    await AppNotifications.postStatusChanged(orderId: orderId, newStatus: newStatus);
+    return true;
+  }
   if (!context.mounted) return false;
 
   final reasons = await DatabaseHelper().validateIssueOrder(orderId);

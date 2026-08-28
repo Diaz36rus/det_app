@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+import 'access_model.dart';
+import 'app_notifications.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
+import 'auth/auth_controller.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'issue_guard.dart';
@@ -34,14 +38,14 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
   void didUpdateWidget(covariant WorkshopsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.selectedWorkshop != oldWidget.selectedWorkshop) {
-      _loadOrders(widget.selectedWorkshop);
+      _loadOrders(widget.selectedWorkshop, showSpinner: true);
     }
   }
 
   @override
   void initState() {
     super.initState();
-    _loadOrders(widget.selectedWorkshop);
+    _loadOrders(widget.selectedWorkshop, showSpinner: true);
   }
 
   Future<void> _markWorkshopDone(Map<String, dynamic> order) async {
@@ -53,10 +57,20 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
     final client = order['client_name']?.toString() ?? '';
     final car = "${order['make_model'] ?? ''} · ${order['plate'] ?? ''}".trim();
     showAppToast(context, "$client\n$car\nЦех «$workshop»: готово");
+    await AppNotifications.postWorkshopDone(
+      orderId: orderId,
+      workshop: workshop,
+      clientName: client,
+      carLabel: car,
+    );
     _loadOrders(workshop);
   }
 
   Future<void> _openMoveDialog(Map<String, dynamic> order) async {
+    if (isStudioMaster(AuthController.instance.user)) {
+      showAppToast(context, 'Мастер не меняет статус заказа — только отметка работ цеха');
+      return;
+    }
     final orderId = order['id'] as int;
     String? newStatus = await runWithPulseHighlight(
       orderId,
@@ -108,8 +122,10 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
     _loadOrders(widget.selectedWorkshop);
   }
 
-  Future<void> _loadOrders(String workshop) async {
-    setState(() => _isLoading = true);
+  Future<void> _loadOrders(String workshop, {bool showSpinner = false}) async {
+    if (showSpinner || _orders.isEmpty) {
+      setState(() => _isLoading = true);
+    }
     final allOrders = await DatabaseHelper().getAllOrders();
     final masters = await DatabaseHelper().getAllMastersFull();
     final filtered = allOrders.where((o) => o['status'] == workshop).toList();
@@ -170,6 +186,9 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
       context,
       orderId: (order['id'] as num).toInt(),
       workshop: widget.selectedWorkshop,
+      clientName: order['client_name']?.toString() ?? '',
+      makeModel: order['make_model']?.toString() ?? '',
+      plate: order['plate']?.toString() ?? '',
     );
     if (mounted) _loadOrders(widget.selectedWorkshop);
   }
@@ -200,14 +219,11 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
           margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
             color: isDone
-                ? AppColors.success.withOpacity(0.06)
+                ? AppColors.success.withOpacity(0.08)
                 : AppColors.surface2.withOpacity(0.92),
             borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-            border: Border(
-              left: BorderSide(
-                color: (isDone ? AppColors.success : AppColors.primary).withOpacity(0.85),
-                width: 3,
-              ),
+            border: Border.all(
+              color: (isDone ? AppColors.success : AppColors.primary).withOpacity(0.45),
             ),
           ),
           child: Column(
@@ -306,26 +322,30 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
                     Align(
                       alignment: Alignment.centerRight,
                       child: isDone
-                          ? ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.surface,
-                                foregroundColor: AppColors.textMuted,
-                                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-                              ),
-                              onPressed: () => _openMoveDialog(o),
-                              child: Text("Перевести", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-                            )
+                          ? (isStudioMaster(AuthController.instance.user)
+                              ? const SizedBox.shrink()
+                              : ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.surface,
+                                    foregroundColor: AppColors.textMuted,
+                                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                                  ),
+                                  onPressed: () => _openMoveDialog(o),
+                                  child: Text("Перевести", style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                                ))
                           : Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                TextButton(
-                                  onPressed: () => _openMoveDialog(o),
-                                  child: Text(
-                                    "Перевести",
-                                    style: GoogleFonts.manrope(color: AppColors.textDim, fontWeight: FontWeight.w600),
+                                if (!isStudioMaster(AuthController.instance.user))
+                                  TextButton(
+                                    onPressed: () => _openMoveDialog(o),
+                                    child: Text(
+                                      "Перевести",
+                                      style: GoogleFonts.manrope(color: AppColors.textDim, fontWeight: FontWeight.w600),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 4),
+                                if (!isStudioMaster(AuthController.instance.user))
+                                  const SizedBox(width: 4),
                                 TextButton.icon(
                                   onPressed: () => _openDefects(o),
                                   icon: const Icon(Icons.report_problem_outlined, size: 18),
@@ -335,7 +355,7 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
                                 ElevatedButton(
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: AppColors.primary,
-                                    foregroundColor: Colors.white,
+                                    foregroundColor: AppColors.onPrimary,
                                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                                   ),
                                   onPressed: () => _markWorkshopDone(o),
@@ -365,28 +385,34 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
         children: [
           if (!mobile)
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Цех", style: AppTheme.pageTitle),
-                  const SizedBox(width: 12),
-                  Text(
-                    widget.selectedWorkshop,
-                    style: GoogleFonts.manrope(
-                      color: AppColors.primary,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  Row(
+                    children: [
+                      Text("Цех", style: AppTheme.pageTitle),
+                      const SizedBox(width: 12),
+                      Text(
+                        widget.selectedWorkshop,
+                        style: GoogleFonts.manrope(
+                          color: AppColors.primary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        "${_orders.length}",
+                        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ),
-                  const Spacer(),
-                  Text(
-                    "${_orders.length}",
-                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
+                  const SizedBox(height: 4),
+                  Text('Заказы в работе этого цеха', style: AppTheme.pageSubtitle),
                 ],
               ),
             ),
-          if (!mobile) const Divider(height: 1),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))

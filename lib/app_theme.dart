@@ -1,40 +1,43 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Цвета приложения — тёмная студия детейлинга (не «админ-коробки»).
-/// surface / surface2 — непрозрачные: drawer, сайдбар и карточки не смешивают текст
-/// с фоном. Картинка меню — только в [MenuBackgrounds] под прозрачным контентом.
+/// Тёмная студия как на ui-board: нейтральный уголь + violet только для акцентов.
 class AppColors {
-  static const bg = Color(0xFF0B0D12);
-  /// Панели / сайдбар / диалоги / drawer.
-  static const surface = Color(0xFF141821);
-  /// Карточки, поля ввода, колонки.
-  static const surface2 = Color(0xFF1A2030);
-  /// Мягкая линия разделения (почти невидима на фоне).
-  static const border = Color(0xFF2A3344);
-  /// Ещё тише — для неактивных обводок.
-  static const borderSoft = Color(0xFF222A38);
-  static const primary = Color(0xFF3B82F6);
-  static const primarySoft = Color(0xFF1E3A5F);
+  /// Фон приложения.
+  static const bg = Color(0xFF0B0B0F);
+  /// Сайдбар / диалоги.
+  static const surface = Color(0xFF121217);
+  /// Карточки, колонки, поля.
+  static const surface2 = Color(0xFF1A1A22);
+  /// Линии (нейтральные, не фиолетовые).
+  static const border = Color(0xFF2E2E3A);
+  static const borderSoft = Color(0xFF23232C);
+  /// Акцент действий / active.
+  static const primary = Color(0xFFA78BFA);
+  static const primarySoft = Color(0xFF2A2438);
+  static const primaryDeep = Color(0xFF7C3AED);
+  static const onPrimary = Color(0xFF0B0B0F);
   static const success = Color(0xFF22C55E);
   static const danger = Color(0xFFEF4444);
-  static const text = Color(0xFFF1F5F9);
-  static const textMuted = Color(0xFF94A3B8);
-  static const textDim = Color(0xFF64748B);
+  static const text = Color(0xFFF4F4F5);
+  static const textMuted = Color(0xFFA1A1AA);
+  static const textDim = Color(0xFF71717A);
 }
 
 /// Цвета статусов заказа — календарь, доска, карточка заказа.
+/// Разведены по hue (~каждый в своём секторе); предварительная — серый.
 const Map<String, Color> kOrderStatusColors = {
-  "Предварительная запись": AppColors.textDim,
-  "Принят в работу": AppColors.primary,
-  "Мойка": Color(0xFF22D3EE),
-  "Химчистка": Color(0xFFA78BFA),
-  "Полировка": Color(0xFFF59E0B),
-  "Оклейка": AppColors.danger,
-  "Интерьер": Color(0xFF14B8A6),
-  "Оборудование": Color(0xFFD97706),
-  "Подготовка к выдаче": Color(0xFF6366F1),
-  "Выдан": AppColors.success,
+  "Предварительная запись": Color(0xFF94A3B8), // slate / серый
+  "Принят в работу": Color(0xFF1D4ED8), // глубокий синий
+  "Мойка": Color(0xFF22D3EE), // cyan / вода
+  "Химчистка": Color(0xFF9333EA), // фиолетовый
+  "Полировка": Color(0xFFEAB308), // жёлтое золото
+  "Кузовные работы": Color(0xFF64748B), // slate / металл
+  "Оклейка": Color(0xFFEC4899), // розовый
+  "Интерьер": Color(0xFF84CC16), // лайм
+  "Оборудование": Color(0xFFC2410C), // кирпичный / медь
+  "Подготовка к выдаче": Color(0xFFF97316), // оранжевый
+  "Выдан": AppColors.success, // зелёный
 };
 
 class AppTheme {
@@ -42,11 +45,32 @@ class AppTheme {
   static const double radiusLg = 16;
   static const EdgeInsets pagePadding = EdgeInsets.all(24);
 
+  /// Заголовок страницы с учётом ширины (на телефоне меньше — AppBar уже показывает title).
+  static TextStyle pageTitleFor(BuildContext context, {bool inAppBar = false}) {
+    final mobile = MediaQuery.sizeOf(context).width < 900;
+    if (inAppBar) {
+      return GoogleFonts.manrope(
+        color: AppColors.text,
+        fontSize: 18,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.2,
+      );
+    }
+    return pageTitle.copyWith(fontSize: mobile ? 22 : 26);
+  }
+
   static TextStyle get pageTitle => GoogleFonts.manrope(
         color: AppColors.text,
         fontSize: 26,
         fontWeight: FontWeight.w800,
         letterSpacing: -0.3,
+      );
+
+  static TextStyle get pageSubtitle => GoogleFonts.manrope(
+        color: AppColors.textDim,
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        height: 1.35,
       );
 
   static TextStyle get sectionTitle => GoogleFonts.manrope(
@@ -56,32 +80,43 @@ class AppTheme {
       );
 
   static TextStyle get sectionLabel => GoogleFonts.manrope(
-        color: AppColors.textMuted,
-        fontSize: 12,
+        color: AppColors.textDim,
+        fontSize: 11,
         fontWeight: FontWeight.w700,
-        letterSpacing: 0.6,
+        letterSpacing: 1.1,
       );
 
-  /// Карточка без рамки — фон + лёгкая тень.
+  /// Карточка: нейтральная обводка (violet — только акцентным элементам).
   static BoxDecoration get cardDecoration => BoxDecoration(
         color: AppColors.surface2,
         borderRadius: BorderRadius.circular(radius),
-        boxShadow: const [
+        border: Border.all(color: AppColors.borderSoft),
+        boxShadow: [
           BoxShadow(
-            color: Color(0x28000000),
-            blurRadius: 16,
-            offset: Offset(0, 4),
+            color: Colors.black.withOpacity(0.35),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
           ),
         ],
       );
 
-  /// Секция / колонка в диалогах — мягкий fill, без бордера.
   static BoxDecoration get panelDecoration => BoxDecoration(
         color: AppColors.surface2.withOpacity(0.92),
         borderRadius: BorderRadius.circular(radiusLg),
+        border: Border.all(color: AppColors.borderSoft),
       );
 
-  /// Интерактивный блок (кликабельный) — тонкая рамка.
+  /// Строка списка (клиент / сотрудник / завершённый): мягкая рамка.
+  /// Левый акцент — только через равномерный border (иначе radius+clip режут контент).
+  static BoxDecoration listTileDecoration({Color? accent}) {
+    final edge = accent ?? AppColors.primary;
+    return BoxDecoration(
+      color: AppColors.surface2.withOpacity(0.92),
+      borderRadius: BorderRadius.circular(radiusLg),
+      border: Border.all(color: edge.withOpacity(0.45)),
+    );
+  }
+
   static BoxDecoration interactiveDecoration({
     Color? accent,
     bool emphasized = false,
@@ -97,7 +132,6 @@ class AppTheme {
     );
   }
 
-  /// KPI / метрика: цветной акцент слева, без коробки.
   static BoxDecoration kpiDecoration({required Color accent, bool emphasize = false}) {
     return BoxDecoration(
       color: emphasize ? AppColors.surface2 : AppColors.surface2.withOpacity(0.7),
@@ -118,7 +152,7 @@ class AppTheme {
         secondary: AppColors.success,
         surface: AppColors.surface,
         error: AppColors.danger,
-        onPrimary: Colors.white,
+        onPrimary: AppColors.onPrimary,
         onSecondary: Colors.white,
         onSurface: AppColors.text,
         onError: Colors.white,
@@ -135,6 +169,7 @@ class AppTheme {
         elevation: 0,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radius),
+          side: const BorderSide(color: AppColors.borderSoft),
         ),
       ),
       dividerTheme: const DividerThemeData(
@@ -147,9 +182,36 @@ class AppTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusLg)),
         elevation: 0,
       ),
-      floatingActionButtonTheme: FloatingActionButtonThemeData(
+      checkboxTheme: CheckboxThemeData(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        side: const BorderSide(color: AppColors.border, width: 1.4),
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) return AppColors.primary;
+          return AppColors.surface2;
+        }),
+        checkColor: WidgetStateProperty.all(AppColors.onPrimary),
+      ),
+      chipTheme: ChipThemeData(
         backgroundColor: AppColors.surface2,
-        foregroundColor: AppColors.textMuted,
+        selectedColor: AppColors.primarySoft,
+        disabledColor: AppColors.surface,
+        labelStyle: GoogleFonts.manrope(
+          color: AppColors.textMuted,
+          fontWeight: FontWeight.w600,
+          fontSize: 12.5,
+        ),
+        secondaryLabelStyle: GoogleFonts.manrope(
+          color: AppColors.text,
+          fontWeight: FontWeight.w700,
+          fontSize: 12.5,
+        ),
+        side: const BorderSide(color: AppColors.borderSoft),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+      ),
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: AppColors.primary,
+        foregroundColor: AppColors.onPrimary,
         elevation: 0,
         extendedPadding: const EdgeInsets.symmetric(horizontal: 16),
         shape: RoundedRectangleBorder(
@@ -158,7 +220,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.bg.withOpacity(0.55),
+        fillColor: AppColors.surface2,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         labelStyle: const TextStyle(color: AppColors.textMuted),
         hintStyle: const TextStyle(color: AppColors.textDim),
@@ -178,27 +240,48 @@ class AppTheme {
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.primary,
-          foregroundColor: Colors.white,
-          disabledBackgroundColor: const Color(0xFF334155),
+          foregroundColor: AppColors.onPrimary,
+          disabledBackgroundColor: AppColors.borderSoft,
           disabledForegroundColor: AppColors.textMuted,
           elevation: 0,
+          minimumSize: const Size(48, 48),
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
-          textStyle: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w700),
+          textStyle: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w800),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: AppColors.onPrimary,
+          disabledBackgroundColor: AppColors.borderSoft,
+          disabledForegroundColor: AppColors.textMuted,
+          minimumSize: const Size(48, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
+          textStyle: GoogleFonts.manrope(fontSize: 15, fontWeight: FontWeight.w800),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: AppColors.textMuted,
+          minimumSize: const Size(44, 44),
           textStyle: GoogleFonts.manrope(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.text,
-          side: const BorderSide(color: AppColors.borderSoft),
+          side: const BorderSide(color: AppColors.border),
+          minimumSize: const Size(48, 48),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          foregroundColor: AppColors.textMuted,
         ),
       ),
     );

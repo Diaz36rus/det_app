@@ -1,0 +1,28 @@
+Det App — стабильный снимок (бэкап перед сложными правками)
+============================================================
+
+Текущий стабильный релиз: 1.0.1+111
+Дата фиксации: 2026-08-28
+
+Что внутри 111:
+  - Марка / модель с автоподстановкой (ручной ввод тоже ок)
+  - Реальные логотипы марок (~390) в assets/brands
+  - Совместимость со старым полем make_model
+  - Portable Windows (папка), без обязательного установщика
+
+Артефакты:
+  Windows update zip: dist\DetApp-app-1.0.1+111.zip
+  Portable zip:       dist\DetApp-portable-20260828-2131.zip
+  Android APK:        dist\DetApp-1.0.1-b111-android.apk
+  Облако:             http://api.det-app.ru/updates/latest.json
+  sha256 zip:         6c2c0770e18f19473adaa69376a16462503772417e02dbe7468f8dd82a37edc1
+  sha256 apk:         3b715807de98e14866616bdd1fd68d58899fc8e075380808d6d43cd154f84638
+  db_version:         32
+
+Запуск с флешки / ПК:
+  Распаковать portable → vc_redist.x64.exe (один раз) → app\det_app.exe
+  Рабочая копия: D:\DetApp\app\det_app.exe
+
+Откат:
+  git checkout / tag release-1.0.1-b111
+  или поставить zip/portable с диска / Desktop

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:path/path.dart' as p;
@@ -55,6 +56,8 @@ class PreparedApkUpdate {
     required this.apkPath,
   });
 }
+
+typedef UpdateProgress = void Function(double progress, String phase);
 
 class UpdateService {
   UpdateService._();
@@ -147,7 +150,7 @@ class UpdateService {
   /// Android: скачать APK, проверить sha256.
   Future<PreparedApkUpdate> prepareAndroidUpdate(
     UpdateManifest manifest, {
-    void Function(double progress)? onProgress,
+    UpdateProgress? onProgress,
   }) async {
     await AppVersion.ensureLoaded();
     if (!Platform.isAndroid) {
@@ -171,7 +174,13 @@ class UpdateService {
     final file = File(apkPath);
     if (await file.exists()) await file.delete();
 
-    await _downloadToFile(manifest.androidUrl, apkPath, onProgress: onProgress);
+    await _downloadToFile(
+      manifest.androidUrl,
+      apkPath,
+      onProgress: onProgress,
+      expectedSize: manifest.androidSize,
+    );
+    onProgress?.call(1, 'Проверка файла…');
     final hash = await _sha256File(apkPath);
     if (hash != manifest.androidSha256.toLowerCase()) {
       throw StateError(
@@ -195,10 +204,10 @@ class UpdateService {
     return r.message;
   }
 
-  /// Windows: скачать, проверить sha256, распаковать.
+  /// Windows: скачать, проверить sha256, распаковать. Без закрытия приложения.
   Future<PreparedUpdate> prepareUpdate(
     UpdateManifest manifest, {
-    void Function(double progress)? onProgress,
+    UpdateProgress? onProgress,
   }) async {
     await AppVersion.ensureLoaded();
 
@@ -228,9 +237,8 @@ class UpdateService {
         'не из build\\…\\Release.\n\n'
         'Сейчас запуск:\n${exeDir.path}\n\n'
         'Закройте приложение и откройте:\n'
-        'D:\\Projects\\det_app\\dist\\DetApp-portable\\app\\det_app.exe\n'
-        'или D:\\DetApp\\app\\det_app.exe\n\n'
-        'Там снова: Обновление → Скачать и установить.',
+        'D:\\DetApp\\app\\det_app.exe\n\n'
+        'Или скачайте zip вручную кнопкой ниже и распакуйте в DetApp\\app\\.',
       );
     }
 
@@ -245,7 +253,14 @@ class UpdateService {
     final extractDir = Directory(p.join(work.path, 'new_app'));
     await extractDir.create(recursive: true);
 
-    await _downloadToFile(manifest.url, zipPath, onProgress: onProgress);
+    await _downloadToFile(
+      manifest.url,
+      zipPath,
+      onProgress: onProgress,
+      expectedSize: manifest.size,
+    );
+
+    onProgress?.call(1, 'Проверка файла…');
     final hash = await _sha256File(zipPath);
     if (hash != manifest.sha256.toLowerCase()) {
       throw StateError(
@@ -253,6 +268,7 @@ class UpdateService {
       );
     }
 
+    onProgress?.call(1, 'Распаковка…');
     await _extractZip(zipPath, extractDir.path);
     final newAppDir = _resolveAppContentDir(extractDir);
     final exeProbe = File(p.join(newAppDir.path, 'det_app.exe'));
@@ -260,7 +276,11 @@ class UpdateService {
       throw StateError('В архиве нет det_app.exe (после распаковки)');
     }
 
+    // Обновить скрипт рядом с portable (из ассета этой сборки).
+    await _refreshPortableUpdaterScript(updaterPs1.path);
+
     await _backupDbBeforeUpdate(manifest.version);
+    onProgress?.call(1, 'Готово к установке');
 
     return PreparedUpdate(
       manifest: manifest,
@@ -271,58 +291,112 @@ class UpdateService {
     );
   }
 
+  /// Закрыть приложение и подменить файлы через PowerShell (из TEMP-копии скрипта).
   Future<void> applyPreparedAndRestart(PreparedUpdate prepared) async {
     await markPatchNotesUpdateFrom();
     final myPid = pid;
 
+    final tmp = await getTemporaryDirectory();
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final scriptPath = p.join(tmp.path, 'detapp-updater-$stamp.ps1');
+    final readyPath = p.join(tmp.path, 'detapp-updater-$stamp.ready');
+
+    // Всегда свежий скрипт из ассета (не зависим от старого update\ на диске).
+    final scriptBody = await _loadUpdaterScript();
+    await File(scriptPath).writeAsString(scriptBody, flush: true);
+    // Зеркало в portable\update на будущее.
+    try {
+      await _refreshPortableUpdaterScript(prepared.updaterPs1, body: scriptBody);
+    } catch (_) {}
+
+    if (await File(readyPath).exists()) await File(readyPath).delete();
+
     final args = <String>[
       '-NoProfile',
-      '-WindowStyle', 'Hidden',
       '-ExecutionPolicy', 'Bypass',
-      '-File', prepared.updaterPs1,
+      '-WindowStyle', 'Hidden',
+      '-File', scriptPath,
       '-AppDir', prepared.appDir,
       '-NewAppDir', prepared.newAppDir,
       '-WaitPid', '$myPid',
       '-ExeName', 'det_app.exe',
+      '-ReadyFile', readyPath,
     ];
 
-    // Detached: updater ждёт выхода нашего PID, меняет файлы и сам стартует det_app.exe.
-    await Process.start(
+    final proc = await Process.start(
       'powershell.exe',
       args,
       mode: ProcessStartMode.detached,
       workingDirectory: prepared.portableRoot,
       runInShell: false,
     );
+    if (proc.pid <= 0) {
+      throw StateError('Не удалось запустить установщик обновления (PowerShell).');
+    }
 
-    await Future<void>.delayed(const Duration(milliseconds: 600));
+    // Дождаться сигнала, что скрипт реально стартовал (не молча упал).
+    final deadline = DateTime.now().add(const Duration(seconds: 8));
+    var started = false;
+    while (DateTime.now().isBefore(deadline)) {
+      if (await File(readyPath).exists()) {
+        final t = (await File(readyPath).readAsString()).trim();
+        if (t.startsWith('error:')) {
+          throw StateError('Установщик сразу сообщил об ошибке:\n${t.substring(6)}');
+        }
+        started = true;
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+    if (!started) {
+      throw StateError(
+        'Установщик обновления не подтвердил запуск.\n'
+        'Лог: %TEMP%\\detapp-update-logs\\\n'
+        'Попробуйте «Скачать zip вручную» и распаковать в DetApp\\app\\.',
+      );
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 400));
     exit(0);
   }
 
   Future<void> _downloadToFile(
     String url,
     String destPath, {
-    void Function(double progress)? onProgress,
+    UpdateProgress? onProgress,
+    int? expectedSize,
   }) async {
     final client = http.Client();
     try {
+      onProgress?.call(0, 'Подключение…');
       final req = http.Request('GET', Uri.parse(url));
-      final resp = await client.send(req).timeout(const Duration(seconds: 60));
+      final resp = await client.send(req).timeout(const Duration(seconds: 45));
       if (resp.statusCode != 200) {
-        throw StateError('Скачивание: HTTP ${resp.statusCode}');
+        throw StateError('Скачивание: HTTP ${resp.statusCode}\n$url');
       }
-      final total = resp.contentLength ?? 0;
+      final total = resp.contentLength ?? expectedSize ?? 0;
       final sink = File(destPath).openWrite();
       var received = 0;
-      await for (final chunk in resp.stream) {
+      var lastUi = DateTime.fromMillisecondsSinceEpoch(0);
+      await for (final chunk in resp.stream.timeout(const Duration(seconds: 90))) {
         sink.add(chunk);
         received += chunk.length;
-        if (total > 0 && onProgress != null) {
-          onProgress(received / total);
+        final now = DateTime.now();
+        if (onProgress != null && now.difference(lastUi).inMilliseconds >= 100) {
+          lastUi = now;
+          final pct = total > 0 ? (received / total).clamp(0.0, 0.99) : 0.0;
+          final mb = (received / (1024 * 1024)).toStringAsFixed(1);
+          final phase = total > 0
+              ? 'Скачивание… $mb / ${(total / (1024 * 1024)).toStringAsFixed(1)} МБ'
+              : 'Скачивание… $mb МБ';
+          onProgress(pct, phase);
         }
       }
       await sink.close();
-      if (onProgress != null) onProgress(1);
+      if (received <= 0) {
+        throw StateError('Скачан пустой файл.\n$url');
+      }
+      onProgress?.call(1, 'Скачивание завершено');
     } finally {
       client.close();
     }
@@ -338,6 +412,7 @@ class UpdateService {
       'powershell.exe',
       [
         '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
         '-Command',
         "Expand-Archive -LiteralPath '$zipPath' -DestinationPath '$destDir' -Force",
       ],
@@ -358,6 +433,26 @@ class UpdateService {
       if (File(p.join(nested.path, 'det_app.exe')).existsSync()) return nested;
     }
     return extractRoot;
+  }
+
+  Future<String> _loadUpdaterScript() async {
+    try {
+      return await rootBundle.loadString('assets/update/DetAppUpdate.ps1');
+    } catch (_) {
+      final root = UpdateChannel.portableRoot();
+      if (root != null) {
+        final f = File(p.join(root, 'update', 'DetAppUpdate.ps1'));
+        if (await f.exists()) return await f.readAsString();
+      }
+      throw StateError('Не найден скрипт DetAppUpdate.ps1');
+    }
+  }
+
+  Future<void> _refreshPortableUpdaterScript(String destPath, {String? body}) async {
+    final text = body ?? await _loadUpdaterScript();
+    final f = File(destPath);
+    await f.parent.create(recursive: true);
+    await f.writeAsString(text, flush: true);
   }
 
   Future<void> _backupDbBeforeUpdate(String version) async {

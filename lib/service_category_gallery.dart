@@ -114,26 +114,43 @@ class ServiceCategoryGallery extends StatelessWidget {
       );
     }
 
-    return GridView.builder(
-      padding: const EdgeInsets.only(bottom: 4),
-      itemCount: categories.length,
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 263,
-        mainAxisExtent: 263,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-      ),
-      itemBuilder: (context, index) {
-        final cat = categories[index];
-        final items = grouped[cat]!;
-        final selectedCount = cat == 'Оклейка (Пленка)'
-            ? wrapSelectedNames.length
-            : items.where((s) => selectedNames.contains(s['name']?.toString())).length;
-        return _CategoryTile(
-          category: cat,
-          asset: imageAssetForCategory(cat),
-          selectedCount: selectedCount,
-          onTap: () => _openCategory(context, cat, items),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth.isFinite && constraints.maxWidth > 0
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        // На узком/низком окне плитки меньше — все иконки видны и сетка скроллится.
+        final extent = w < 420
+            ? 128.0
+            : w < 640
+                ? 156.0
+                : w < 900
+                    ? 200.0
+                    : 263.0;
+        final titleSize = extent < 150 ? 12.0 : extent < 200 ? 13.5 : 15.0;
+        return GridView.builder(
+          padding: const EdgeInsets.only(bottom: 4),
+          itemCount: categories.length,
+          gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+            maxCrossAxisExtent: extent,
+            mainAxisExtent: extent,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+          ),
+          itemBuilder: (context, index) {
+            final cat = categories[index];
+            final items = grouped[cat]!;
+            final selectedCount = cat == 'Оклейка (Пленка)'
+                ? wrapSelectedNames.length
+                : items.where((s) => selectedNames.contains(s['name']?.toString())).length;
+            return _CategoryTile(
+              category: cat,
+              asset: imageAssetForCategory(cat),
+              selectedCount: selectedCount,
+              titleSize: titleSize,
+              onTap: () => _openCategory(context, cat, items),
+            );
+          },
         );
       },
     );
@@ -144,6 +161,7 @@ class _CategoryTile extends StatelessWidget {
   final String category;
   final String? asset;
   final int selectedCount;
+  final double titleSize;
   final VoidCallback onTap;
 
   const _CategoryTile({
@@ -151,6 +169,7 @@ class _CategoryTile extends StatelessWidget {
     required this.asset,
     required this.selectedCount,
     required this.onTap,
+    this.titleSize = 15,
   });
 
   @override
@@ -183,7 +202,7 @@ class _CategoryTile extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.manrope(
                           color: Colors.white,
-                          fontSize: 15,
+                          fontSize: titleSize,
                           fontWeight: FontWeight.w800,
                           height: 1.15,
                           shadows: const [Shadow(blurRadius: 8, color: Colors.black54)],

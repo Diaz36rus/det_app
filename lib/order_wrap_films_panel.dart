@@ -184,7 +184,11 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
       final warnings = await DatabaseHelper().setOrderWrapFilms(widget.orderId, payload);
       if (!mounted) return;
       if (warnings.isNotEmpty) {
-        showAppToast(context, warnings.first);
+        // Склад ушёл в минус — предупреждение, но расход уже сохранён.
+        showAppToast(
+          context,
+          '${warnings.first}. Расход сохранён.',
+        );
       } else if (showOk) {
         showAppToast(context, 'Расход плёнки сохранён');
       }
@@ -487,9 +491,15 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
               orElse: () => null,
             )?['stock_meters'] as num?)
             ?.toDouble();
+    final overStock = stock != null && row.meters > stock + 0.001;
+    final stockHint = stock == null
+        ? 'Можно без рулона — склад не блокирует'
+        : overStock
+            ? 'На складе ${_fmtMeters(stock)} м — меньше расхода; всё равно сохранится'
+            : 'На складе: ${_fmtMeters(stock)} м';
 
     return Padding(
-      padding: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.only(top: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -500,7 +510,12 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
             decoration: InputDecoration(
               labelText: 'Плёнка',
               isDense: true,
-              helperText: stock == null ? null : 'На складе: ${_fmtMeters(stock)} м',
+              helperText: stockHint,
+              helperMaxLines: 2,
+              helperStyle: TextStyle(
+                color: overStock ? const Color(0xFFF59E0B) : AppColors.textDim,
+                fontSize: 11,
+              ),
             ),
             items: _catalog
                 .map(
@@ -525,22 +540,29 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
           Row(
             children: [
               Expanded(
-                child: DropdownButtonFormField<int>(
+                child: DropdownButtonFormField<int?>(
                   value: rollValue,
                   isDense: true,
                   isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Рулон №', isDense: true),
-                  items: row.rolls
-                      .map(
-                        (r) => DropdownMenuItem<int>(
-                          value: (r['id'] as num).toInt(),
-                          child: Text(
-                            '${r['roll_number']} · ${_fmtMeters((r['meters_left'] as num?)?.toDouble() ?? 0)} м',
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                  decoration: const InputDecoration(
+                    labelText: 'Рулон (необязательно)',
+                    isDense: true,
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('Без рулона'),
+                    ),
+                    ...row.rolls.map(
+                      (r) => DropdownMenuItem<int?>(
+                        value: (r['id'] as num).toInt(),
+                        child: Text(
+                          '${r['roll_number']} · ${_fmtMeters((r['meters_left'] as num?)?.toDouble() ?? 0)} м',
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      )
-                      .toList(),
+                      ),
+                    ),
+                  ],
                   onChanged: (id) async {
                     setState(() => row.rollId = id);
                     await _save(showOk: false);
@@ -548,7 +570,7 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
                 ),
               ),
               IconButton(
-                tooltip: 'Новый рулон на склад',
+                tooltip: 'Добавить рулон на склад',
                 onPressed: () => _addRollForRow(row),
                 icon: const Icon(Icons.qr_code_2_outlined, color: AppColors.primary),
               ),
@@ -567,16 +589,19 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                   ],
                   decoration: const InputDecoration(
-                    labelText: 'Расход, м.п.',
-                    hintText: 'например 12.5',
+                    labelText: 'Сколько ушло, м.п.',
+                    hintText: '12.5',
                     isDense: true,
                   ),
-                  onChanged: (_) => _scheduleSave(),
+                  onChanged: (_) {
+                    setState(() {});
+                    _scheduleSave();
+                  },
                   onSubmitted: (_) => _save(showOk: true),
                 ),
               ),
               IconButton(
-                tooltip: 'Удалить',
+                tooltip: 'Убрать строку',
                 onPressed: () async {
                   setState(() {
                     row.dispose();
@@ -584,7 +609,7 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
                   });
                   await _save(showOk: false);
                 },
-                icon: const Icon(Icons.remove_circle_outline, color: AppColors.textMuted),
+                icon: const Icon(Icons.delete_outline, color: AppColors.textMuted),
               ),
             ],
           ),
@@ -599,31 +624,48 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          Text(
+            'Пишите расход сразу — сохраняется само. Нехватка на складе не мешает.',
+            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+          ),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
-            runSpacing: 4,
+            runSpacing: 8,
             children: [
               ElevatedButton.icon(
                 onPressed: _addRow,
                 icon: const Icon(Icons.add, size: 18),
-                label: Text('Строка', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                label: Text(
+                  _catalog.isEmpty ? 'Создать плёнку' : 'Добавить расход',
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+                ),
               ),
-              OutlinedButton(
-                onPressed: _addFilmToCatalog,
-                child: Text('Новая плёнка', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
-              ),
-              TextButton(
-                onPressed: () => _save(showOk: true),
-                child: Text('Сохранить', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-              ),
+              if (_catalog.isNotEmpty)
+                OutlinedButton.icon(
+                  onPressed: _addFilmToCatalog,
+                  icon: const Icon(Icons.library_add_outlined, size: 18),
+                  label: Text(
+                    'В каталог',
+                    style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
+                  ),
+                ),
             ],
           ),
           if (_catalog.isEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.only(top: 10),
               child: Text(
-                'Сначала «Новая плёнка» — попадёт на склад, затем рулон и расход.',
+                'Пока нет плёнок в складе. Нажмите «Создать плёнку», потом укажите метры.',
                 style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+              ),
+            )
+          else if (_rows.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text(
+                'Расход ещё не указан — «Добавить расход».',
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
               ),
             )
           else

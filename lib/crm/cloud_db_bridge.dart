@@ -389,6 +389,16 @@ class CloudDbBridge {
     return car.id;
   }
 
+  Future<List<String>> distinctCarMakeModels() async {
+    await _ensureCars();
+    final set = <String>{};
+    for (final c in _cars.values) {
+      final m = c.makeModel.trim();
+      if (m.isNotEmpty && m != '—') set.add(m);
+    }
+    return set.toList();
+  }
+
   Future<int> addClient(String name, String phone, {int isVip = 0}) async {
     final c = await _crm.createClient(name: name, phone: phone);
     if (isVip == 1) {
@@ -580,6 +590,43 @@ class CloudDbBridge {
   Future<void> deleteInventoryItem(int id) async {
     await _crm.deleteInventoryItem(id);
     _inventory = _inventory.where((e) => e.id != id).toList();
+  }
+
+  Future<int> dedupeInventory() async {
+    try {
+      final removed = await _crm.dedupeInventory();
+      if (removed > 0) {
+        _inventory = await _crm.listInventory();
+      }
+      return removed;
+    } catch (_) {
+      // API без /inventory/dedupe — чистим поштучно.
+      _inventory = await _crm.listInventory();
+      final groups = <String, List<CrmInventoryItem>>{};
+      for (final item in _inventory) {
+        final key =
+            '${item.category.trim().toLowerCase()}|${item.name.trim().toLowerCase()}';
+        groups.putIfAbsent(key, () => []).add(item);
+      }
+      var removed = 0;
+      for (final g in groups.values) {
+        if (g.length < 2) continue;
+        g.sort((a, b) => a.id.compareTo(b.id));
+        final keep = g.first;
+        final sumQty = g.fold<double>(0, (a, i) => a + i.quantity);
+        if (sumQty != keep.quantity) {
+          await _crm.patchInventory(keep.id, {'quantity': sumQty});
+        }
+        for (final dup in g.skip(1)) {
+          await _crm.deleteInventoryItem(dup.id);
+          removed++;
+        }
+      }
+      if (removed > 0) {
+        _inventory = await _crm.listInventory();
+      }
+      return removed;
+    }
   }
 
   Future<List<Map<String, dynamic>>> getOrderDefects(int orderId) async {
@@ -821,11 +868,19 @@ class CloudDbBridge {
   Future<List<Map<String, dynamic>>> getOrderDebts({int limit = 50}) async {
     await _ensureOrders();
     await _ensureClients();
-    return _orders.values
-        .where((o) => o.debt > 0.01 && o.status != 'Выдан')
-        .map(orderToMap)
-        .take(limit)
-        .toList();
+    final out = <Map<String, dynamic>>[];
+    for (final o in _orders.values) {
+      if (o.status == 'Выдан') continue;
+      final debt = o.debt;
+      if (debt <= 0.01) continue;
+      final m = orderToMap(o);
+      m['debt'] = debt;
+      out.add(m);
+      if (out.length >= limit) break;
+    }
+    out.sort((a, b) => ((b['debt'] as num?)?.toDouble() ?? 0)
+        .compareTo((a['debt'] as num?)?.toDouble() ?? 0));
+    return out;
   }
 
   Future<double> getTotalDebt() async {
@@ -1028,11 +1083,22 @@ class CloudDbBridge {
   String? _workshopFromName(String? name) {
     final blob = (name ?? '').toLowerCase();
     if (blob.isEmpty) return null;
-    const workshops = ['Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование', 'Мойка'];
+    const workshops = [
+      'Кузовные работы',
+      'Химчистка',
+      'Полировка',
+      'Оклейка',
+      'Интерьер',
+      'Оборудование',
+      'Мойка',
+    ];
     for (final w in workshops) {
       if (blob.contains(w.toLowerCase())) return w;
     }
     if (blob.contains('химчист')) return 'Химчистка';
+    if (blob.contains('кузовн') || blob.contains('разбор') || blob.contains('сборк') || blob.contains('демонтаж')) {
+      return 'Кузовные работы';
+    }
     if (blob.contains('полир') || blob.contains('керамик') || blob.contains('силант')) return 'Полировка';
     if (blob.contains('оклей') || blob.contains('пленк') || blob.contains('тонир')) return 'Оклейка';
     if (blob.contains('интерьер') || blob.contains('салон')) return 'Интерьер';
@@ -1945,7 +2011,15 @@ class CloudDbBridge {
     if (order == null) return 0;
     final csv = masterIds.join(',');
     var updated = 0;
-    const workshops = {'Мойка', 'Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование'};
+    const workshops = {
+      'Мойка',
+      'Химчистка',
+      'Полировка',
+      'Кузовные работы',
+      'Оклейка',
+      'Интерьер',
+      'Оборудование',
+    };
     for (final it in order.items) {
       if ((it.name).trim() == 'Оклейка' && it.parentId == null) continue;
       var resolved = it.workshop.trim();
@@ -1967,7 +2041,15 @@ class CloudDbBridge {
     await _ensureMasters();
     final order = _orders[orderId];
     if (order == null) return '';
-    const workshops = {'Мойка', 'Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование'};
+    const workshops = {
+      'Мойка',
+      'Химчистка',
+      'Полировка',
+      'Кузовные работы',
+      'Оклейка',
+      'Интерьер',
+      'Оборудование',
+    };
     final idSet = <int>{};
     for (final it in order.items) {
       var resolved = it.workshop.trim();
@@ -2231,36 +2313,59 @@ class CloudDbBridge {
   }
 
   Future<double> suggestMasterPayroll(int masterId, String startDate, String endDate) async {
-    await _ensureOrders();
     final start = startDate.length >= 10 ? startDate.substring(0, 10) : startDate;
     final end = endDate.length >= 10 ? endDate.substring(0, 10) : endDate;
-    double total = 0;
-    for (final o in _orders.values) {
-      for (final it in o.items) {
-        if (!_itemHasMaster(it.masterIds, masterId)) continue;
-        final day = _itemDay(it, o);
-        if (day == null) continue;
-        if (day.compareTo(start) < 0 || day.compareTo(end) > 0) continue;
-        total += it.price;
+    try {
+      return await _crm.payrollAccrued(masterId: masterId, start: start, end: end);
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<double> sumMasterPayrollPaid(int masterId, String startDate, String endDate) async {
+    final start = startDate.length >= 10 ? startDate.substring(0, 10) : startDate;
+    final end = endDate.length >= 10 ? endDate.substring(0, 10) : endDate;
+    try {
+      final journal = await getCashJournal(start, end);
+      var total = 0.0;
+      for (final row in journal) {
+        if ((row['master_id'] as num?)?.toInt() != masterId) continue;
+        if (row['type']?.toString() != 'Расход') continue;
+        final cat = row['category']?.toString() ?? '';
+        if (cat != 'Зарплата' && cat != 'Аванс') continue;
+        total += (row['amount'] as num?)?.toDouble() ?? 0;
       }
+      return total;
+    } catch (_) {
+      return 0;
     }
-    return total;
   }
 
-  bool _itemHasMaster(String masterIds, int masterId) {
-    final raw = masterIds.trim();
-    if (raw.isEmpty) return false;
-    for (final part in raw.split(',')) {
-      if (int.tryParse(part.trim()) == masterId) return true;
-    }
-    return false;
+  Future<List<Map<String, dynamic>>> getOrderWorkshopPayroll(int orderId) async {
+    final rows = await _crm.listOrderPayroll(orderId);
+    return rows
+        .map(
+          (r) => {
+            'id': r['id'],
+            'order_id': r['order_id'] ?? orderId,
+            'workshop': r['workshop']?.toString() ?? '',
+            'amount': (r['amount'] as num?)?.toDouble() ?? 0,
+            'master_id': (r['master_id'] as num?)?.toInt(),
+          },
+        )
+        .toList();
   }
 
-  String? _itemDay(CrmOrderItem it, CrmOrder o) {
-    final fromItem = _dayPart(it.startTime.isNotEmpty ? it.startTime : it.endTime);
-    if (fromItem != null) return fromItem;
-    final fromOrder = _dayPart(o.startTime.isNotEmpty ? o.startTime : o.dueDate);
-    return fromOrder;
+  Future<void> setOrderWorkshopPayroll({
+    required int orderId,
+    required String workshop,
+    required List<Map<String, dynamic>> lines,
+  }) async {
+    await _crm.putOrderPayroll(
+      orderId: orderId,
+      workshop: workshop,
+      lines: lines,
+    );
   }
 
   Future<Map<String, dynamic>> getCompanyStats({String? masterDay, int days = 30}) async {

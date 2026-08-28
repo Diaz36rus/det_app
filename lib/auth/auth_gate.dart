@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import '../app_theme.dart';
+import '../app_splash.dart';
 import 'auth_controller.dart';
 import 'login_screen.dart';
 
@@ -19,26 +18,7 @@ class AuthGate extends StatelessWidget {
         final auth = AuthController.instance;
         switch (auth.status) {
           case AuthStatus.bootstrapping:
-            return Scaffold(
-              backgroundColor: AppColors.bg,
-              body: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: CircularProgressIndicator(strokeWidth: 2.5),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Проверка сессии…',
-                      style: GoogleFonts.manrope(color: AppColors.textMuted),
-                    ),
-                  ],
-                ),
-              ),
-            );
+            return const AppSplashScreen(subtitle: 'Проверка сессии…');
           case AuthStatus.signedOut:
             return const LoginScreen();
           case AuthStatus.signedIn:

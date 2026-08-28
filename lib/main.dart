@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -37,11 +38,15 @@ import 'warehouse_screen.dart';
 import 'masters_screen.dart';
 import 'menu_backgrounds.dart';
 import 'orders_screen.dart';
+import 'open_url.dart';
 import 'patch_notes.dart';
+import 'placeholder_settings_screen.dart';
+import 'notifications_screen.dart';
 import 'pulse_anchor.dart';
 import 'responsive.dart';
 import 'search_dialog.dart';
 import 'stats_screen.dart';
+import 'studio_settings_screen.dart';
 import 'sync/sync_controller.dart';
 import 'sync/sync_deep_link.dart';
 import 'workshops_screen.dart';
@@ -229,26 +234,22 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   /// Mobile: false = ПК+телефон (облегчённый), true = «полный телефон».
   /// Desktop меню всегда полное.
   bool _mobileFullPhone = false;
+  bool _quickDateExpanded = false;
 
   /// Единый список пунктов меню. [id] стабилен для switch / туров / навигации.
   final List<Map<String, dynamic>> _menuItems = [
-    {"id": AppMenuIds.board, "icon": Icons.dashboard_outlined, "label": "Доска заказов"},
-    {"id": AppMenuIds.newOrder, "icon": Icons.add_shopping_cart_outlined, "label": "Новый заказ"},
-    {"id": AppMenuIds.calendar, "icon": Icons.calendar_month_outlined, "label": "Календарь"},
-    {"id": AppMenuIds.clients, "icon": Icons.people_outline, "label": "Клиенты"},
-    {"id": AppMenuIds.cash, "icon": Icons.account_balance_wallet_outlined, "label": "Касса"},
-    {"id": AppMenuIds.stats, "icon": Icons.insights_outlined, "label": "Статистика"},
-    {"id": AppMenuIds.staff, "icon": Icons.engineering_outlined, "label": "Сотрудники"},
-    {"id": AppMenuIds.services, "icon": Icons.home_repair_service_outlined, "label": "Прайс"},
-    {"id": AppMenuIds.inventory, "icon": Icons.inventory_2_outlined, "label": "Склад"},
-    {
-      "id": AppMenuIds.preview,
-      "icon": Icons.directions_car_filled_outlined,
-      "label": "Превью",
-      "disabled": true,
-      "subtitle": "В разработке",
-    },
-    {"id": AppMenuIds.completed, "icon": Icons.task_alt_outlined, "label": "Завершённые"},
+    {"id": AppMenuIds.board, "icon": Icons.dashboard_outlined, "label": "Доска", "section": "main"},
+    {"id": AppMenuIds.newOrder, "icon": Icons.receipt_long_outlined, "label": "Заказы", "section": "main"},
+    {"id": AppMenuIds.clients, "icon": Icons.people_outline, "label": "Клиенты", "section": "main"},
+    {"id": AppMenuIds.services, "icon": Icons.home_repair_service_outlined, "label": "Услуги", "section": "main"},
+    {"id": AppMenuIds.inventory, "icon": Icons.inventory_2_outlined, "label": "Склад", "section": "main"},
+    {"id": AppMenuIds.calendar, "icon": Icons.calendar_month_outlined, "label": "Календарь", "section": "main"},
+    {"id": AppMenuIds.completed, "icon": Icons.task_alt_outlined, "label": "Завершённые", "section": "main"},
+    {"id": AppMenuIds.cash, "icon": Icons.account_balance_wallet_outlined, "label": "Касса", "section": "finance"},
+    {"id": AppMenuIds.stats, "icon": Icons.insights_outlined, "label": "Аналитика", "section": "finance"},
+    {"id": AppMenuIds.staff, "icon": Icons.engineering_outlined, "label": "Сотрудники", "section": "settings"},
+    {"id": AppMenuIds.studio, "icon": Icons.storefront_outlined, "label": "Студия", "section": "settings"},
+    {"id": AppMenuIds.notifications, "icon": Icons.notifications_none_rounded, "label": "Уведомления", "section": "settings"},
   ];
 
   Future<void> _refreshLastBackup() async {
@@ -263,12 +264,19 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     _refreshOpenBugs();
     _refreshLastBackup();
     _loadMobileMenuMode();
+    AppMenuIds.mobileMenuRevision.addListener(_loadMobileMenuMode);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await SyncDeepLink.instance.flushPending(context);
       if (!mounted) return;
       await _maybeShowPatchNotes();
       await _maybeOfferCloudUpdate();
     });
+  }
+
+  @override
+  void dispose() {
+    AppMenuIds.mobileMenuRevision.removeListener(_loadMobileMenuMode);
+    super.dispose();
   }
 
   Future<void> _maybeShowPatchNotes() async {
@@ -535,7 +543,11 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     }
     switch (_selectedIndex) {
       case AppMenuIds.board:
-        return const KanbanScreen(key: ValueKey(AppMenuIds.board));
+        return KanbanScreen(
+          key: const ValueKey(AppMenuIds.board),
+          onNewOrder: () => _selectMenu(AppMenuIds.newOrder),
+          onNavigateMenu: (i) => _selectMenu(i),
+        );
       case AppMenuIds.newOrder:
         final d = _newOrderDate;
         final t = _newOrderTime;
@@ -578,10 +590,16 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         return const ServicesScreen(key: ValueKey(AppMenuIds.services));
       case AppMenuIds.inventory:
         return const WarehouseScreen(key: ValueKey(AppMenuIds.inventory));
+      case AppMenuIds.studio:
+        return const StudioSettingsScreen(key: ValueKey(AppMenuIds.studio));
+      case AppMenuIds.notifications:
+        return const NotificationsScreen(key: ValueKey(AppMenuIds.notifications));
       case AppMenuIds.preview:
-        return const Center(
+        return const PlaceholderSettingsScreen(
           key: ValueKey(AppMenuIds.preview),
-          child: Text("Превью — в разработке", style: TextStyle(color: AppColors.textMuted)),
+          title: 'Превью',
+          icon: Icons.auto_awesome_outlined,
+          body: 'Превью оклейки появится здесь.\nПока раздел в разработке.',
         );
       case AppMenuIds.completed:
         return const CompletedOrdersScreen(key: ValueKey(AppMenuIds.completed));
@@ -623,8 +641,10 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     required bool active,
     required VoidCallback onTap,
     bool compact = false,
+    bool touchFriendly = false,
     bool disabled = false,
     String? subtitle,
+    Widget? trailing,
     Key? key,
   }) {
     final fg = disabled
@@ -633,6 +653,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     final titleColor = disabled
         ? AppColors.textDim
         : (active ? AppColors.text : AppColors.textMuted);
+    final vPad = touchFriendly ? 14.0 : (compact ? 8.0 : 11.0);
     return Padding(
       key: key,
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -644,25 +665,19 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOut,
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: compact ? 8 : 11),
+            constraints: BoxConstraints(minHeight: touchFriendly ? AppResponsive.minTap : 0),
+            padding: EdgeInsets.fromLTRB(12, vPad, trailing != null ? 4 : 12, vPad),
             decoration: BoxDecoration(
-              color: active && !disabled ? AppColors.primarySoft.withOpacity(0.55) : Colors.transparent,
+              color: active && !disabled ? AppColors.primary.withOpacity(0.18) : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
+              border: active && !disabled
+                  ? Border.all(color: AppColors.primary.withOpacity(0.28))
+                  : null,
             ),
             child: Row(
               children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  width: 3,
-                  height: 22,
-                  margin: const EdgeInsets.only(right: 10),
-                  decoration: BoxDecoration(
-                    color: active && !disabled ? AppColors.primary : Colors.transparent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                Icon(icon, size: 20, color: fg),
-                const SizedBox(width: 10),
+                Icon(icon, size: touchFriendly ? 22 : 20, color: fg),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -671,7 +686,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                         label,
                         style: GoogleFonts.manrope(
                           color: titleColor,
-                          fontSize: compact ? 13.5 : 14.5,
+                          fontSize: compact ? 13.5 : (touchFriendly ? 15.5 : 14.5),
                           fontWeight: active && !disabled ? FontWeight.w700 : FontWeight.w500,
                         ),
                       ),
@@ -687,6 +702,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                     ],
                   ),
                 ),
+                if (trailing != null) trailing,
               ],
             ),
           ),
@@ -720,12 +736,12 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
           ),
           const SizedBox(height: 4),
           Text(
-            "Detailing CRM Studio",
+            "DETAILING STUDIO",
             style: GoogleFonts.manrope(
               color: AppColors.primary,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.4,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.1,
             ),
           ),
           ListenableBuilder(
@@ -800,8 +816,68 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
 
   List<Widget> _buildMenuList({
     VoidCallback? afterSelect,
+    bool touchFriendly = false,
   }) {
     final items = _visibleMenuItems(context);
+
+    List<Widget> section(String title, String sectionId, {bool insertQuickDateAfterCalendar = false}) {
+      final rows = items.where((m) => m['section'] == sectionId).toList();
+      if (rows.isEmpty) return const [];
+      final out = <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 14, 4, 6),
+          child: Text(title, style: AppTheme.sectionLabel),
+        ),
+      ];
+      for (final item in rows) {
+        final id = item["id"] as int;
+        final disabled = item["disabled"] == true || AppMenuIds.disabled.contains(id);
+        out.add(
+          _navItem(
+            key: TourKeys.menuKeyForIndex(id),
+            icon: item["icon"] as IconData,
+            label: item["label"] as String,
+            subtitle: item["subtitle"] as String?,
+            disabled: disabled,
+            touchFriendly: touchFriendly,
+            active: _selectedIndex == id,
+            trailing: id == AppMenuIds.calendar
+                ? IconButton(
+                    tooltip: _quickDateExpanded ? 'Скрыть быструю дату' : 'Быстрая дата',
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: BoxConstraints(
+                      minWidth: touchFriendly ? AppResponsive.minTap : 32,
+                      minHeight: touchFriendly ? AppResponsive.minTap : 32,
+                    ),
+                    icon: Icon(
+                      _quickDateExpanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+                      size: 20,
+                      color: _quickDateExpanded ? AppColors.primary : AppColors.textDim,
+                    ),
+                    onPressed: () => setState(() => _quickDateExpanded = !_quickDateExpanded),
+                  )
+                : null,
+            onTap: () {
+              _selectMenu(id);
+              afterSelect?.call();
+            },
+          ),
+        );
+        if (insertQuickDateAfterCalendar &&
+            id == AppMenuIds.calendar &&
+            _quickDateExpanded) {
+          out.add(
+            Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 4),
+              child: _buildQuickDateBlock(afterSelect: afterSelect, embedded: true),
+            ),
+          );
+        }
+      }
+      return out;
+    }
+
     return [
       KeyedSubtree(
         key: TourKeys.workshops,
@@ -811,7 +887,14 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             tilePadding: const EdgeInsets.symmetric(horizontal: 4),
             childrenPadding: const EdgeInsets.only(left: 8, bottom: 6),
             leading: const Icon(Icons.build_circle_outlined, color: AppColors.textMuted, size: 20),
-            title: Text("Цеха", style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 14.5, fontWeight: FontWeight.w600)),
+            title: Text(
+              "Цеха",
+              style: GoogleFonts.manrope(
+                color: AppColors.textMuted,
+                fontSize: 14.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
             iconColor: AppColors.primary,
             collapsedIconColor: AppColors.textMuted,
             children: _menuWorkshops.map((w) {
@@ -821,6 +904,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 label: w,
                 active: active,
                 compact: true,
+                touchFriendly: touchFriendly,
                 onTap: () {
                   _selectWorkshop(w);
                   afterSelect?.call();
@@ -830,64 +914,104 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
           ),
         ),
       ),
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Text("МЕНЮ", style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.2)),
-      ),
       if (AppResponsive.isMobile(context) && !_mobileFullPhone)
         Padding(
-          padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+          padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
           child: Text(
-            'Смена на телефоне. Прайс, склад и статистика — на ПК.',
+            'Смена на телефоне. Прайс, склад и аналитика — на ПК.',
             style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11, height: 1.3),
           ),
         ),
-      ...items.map((item) {
-        final id = item["id"] as int;
-        final disabled = item["disabled"] == true || AppMenuIds.disabled.contains(id);
-        return _navItem(
-          key: TourKeys.menuKeyForIndex(id),
-          icon: item["icon"] as IconData,
-          label: item["label"] as String,
-          subtitle: item["subtitle"] as String?,
-          disabled: disabled,
-          active: _selectedIndex == id,
-          onTap: () {
-            _selectMenu(id);
-            afterSelect?.call();
-          },
-        );
-      }),
+      ...section('ОСНОВНОЕ', 'main', insertQuickDateAfterCalendar: true),
+      ...section('ФИНАНСЫ', 'finance'),
+      ...section('НАСТРОЙКИ', 'settings'),
     ];
   }
 
-  Widget _buildQuickDateBlock({VoidCallback? afterSelect}) {
+  Widget _buildQuickDateBlock({VoidCallback? afterSelect, bool embedded = false}) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+      padding: embedded
+          ? const EdgeInsets.fromLTRB(4, 2, 4, 4)
+          : const EdgeInsets.fromLTRB(14, 10, 14, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            "БЫСТРАЯ ДАТА",
-            style: GoogleFonts.manrope(
-              color: AppColors.textDim,
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.2,
+          if (!embedded) ...[
+            Text(
+              "БЫСТРАЯ ДАТА",
+              style: GoogleFonts.manrope(
+                color: AppColors.textDim,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+              ),
             ),
-          ),
-          const SizedBox(height: 6),
+            const SizedBox(height: 6),
+          ],
           Container(
             key: TourKeys.quickCalendar,
             padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
             decoration: BoxDecoration(
               color: AppColors.surface2,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppColors.border),
+              border: Border.all(color: AppColors.borderSoft),
             ),
             child: _buildQuickDatePicker(afterSelect: afterSelect),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTariffStub() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppColors.primaryDeep.withOpacity(0.55),
+              AppColors.primarySoft,
+            ],
+          ),
+          border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Тариф · Демо',
+              style: GoogleFonts.manrope(
+                color: AppColors.text,
+                fontWeight: FontWeight.w800,
+                fontSize: 13.5,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Тестовый режим. Биллинг позже.',
+              style: GoogleFonts.manrope(
+                color: AppColors.textMuted,
+                fontSize: 11.5,
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: 10),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(999),
+              child: LinearProgressIndicator(
+                value: 0.35,
+                minHeight: 6,
+                backgroundColor: Colors.black.withOpacity(0.35),
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1163,293 +1287,277 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
     );
   }
 
+  Widget _footerCompactBtn({
+    Key? key,
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+    String? trailing,
+    Color? accent,
+    bool outlined = false,
+    Widget? badge,
+  }) {
+    final color = accent ?? AppColors.textMuted;
+    final child = Row(
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.manrope(
+              color: accent ?? AppColors.text,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+          ),
+        ),
+        if (trailing != null)
+          Text(
+            trailing,
+            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 10),
+          ),
+        if (badge != null) ...[const SizedBox(width: 4), badge],
+      ],
+    );
+    final stylePadding = const EdgeInsets.symmetric(horizontal: 8, vertical: 8);
+    if (outlined) {
+      return OutlinedButton(
+        key: key,
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: color,
+          side: BorderSide(color: (accent ?? AppColors.border).withOpacity(0.7)),
+          padding: stylePadding,
+          visualDensity: VisualDensity.compact,
+        ),
+        child: child,
+      );
+    }
+    return TextButton(
+      key: key,
+      onPressed: onPressed,
+      style: TextButton.styleFrom(
+        foregroundColor: color,
+        padding: stylePadding,
+        visualDensity: VisualDensity.compact,
+      ),
+      child: child,
+    );
+  }
+
   Widget _buildFooterActions({
     required bool showTraining,
     required bool showWipe,
     bool showMobileMode = false,
     VoidCallback? afterAction,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-          child: SizedBox(
-            width: double.infinity,
-            child: TextButton(
-              onPressed: () async {
-                afterAction?.call();
-                await _confirmLogout();
-              },
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.textMuted,
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                alignment: Alignment.centerLeft,
+    final bugsBadge = _openBugs > 0
+        ? Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: AppColors.danger,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _openBugs > 9 ? '9+' : '$_openBugs',
+              style: GoogleFonts.manrope(
+                color: Colors.white,
+                fontSize: 9.5,
+                fontWeight: FontWeight.w800,
               ),
-              child: Row(
-                children: [
-                  const Icon(Icons.logout, size: 18, color: AppColors.textDim),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Выйти',
-                      style: GoogleFonts.manrope(
-                        color: AppColors.textMuted,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
+            ),
+          )
+        : null;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Обучение + Обновить
+          Row(
+            children: [
+              if (showTraining)
+                Expanded(
+                  child: _footerCompactBtn(
+                    key: TourKeys.trainButton,
+                    icon: Icons.school_outlined,
+                    label: 'Обучение',
+                    accent: AppColors.primary,
+                    outlined: true,
+                    onPressed: () {
+                      afterAction?.call();
+                      _openTraining();
+                    },
                   ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        if (showTraining)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-            child: SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                key: TourKeys.trainButton,
-                onPressed: () {
-                  afterAction?.call();
-                  _openTraining();
-                },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  side: BorderSide(color: AppColors.primary.withOpacity(0.55)),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                  alignment: Alignment.centerLeft,
                 ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.school_outlined, size: 18, color: AppColors.primary),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Обучение',
-                        style: GoogleFonts.manrope(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-          child: PulseAnchor(
-            active: isPulseActive(_pulseUpdate),
-            borderRadius: BorderRadius.circular(AppTheme.radius),
-            child: SizedBox(
-            width: double.infinity,
-            child: OutlinedButton(
-              key: TourKeys.updateButton,
-              onPressed: () async {
-                afterAction?.call();
-                await runWithPulseHighlight(_pulseUpdate, () => UpdateDialog.open(context));
-              },
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.text,
-                side: BorderSide(color: AppColors.border.withOpacity(0.9)),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                alignment: Alignment.centerLeft,
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.system_update_alt, size: 18, color: AppColors.textMuted),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Обновить',
-                      style: GoogleFonts.manrope(
-                        color: AppColors.text,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
+              if (showTraining) const SizedBox(width: 6),
+              Expanded(
+                child: PulseAnchor(
+                  active: isPulseActive(_pulseUpdate),
+                  borderRadius: BorderRadius.circular(AppTheme.radius),
+                  child: _footerCompactBtn(
+                    key: TourKeys.updateButton,
+                    icon: Icons.system_update_alt,
+                    label: 'Обновить',
+                    trailing: AppVersion.label,
+                    outlined: true,
+                    onPressed: () async {
+                      afterAction?.call();
+                      await runWithPulseHighlight(_pulseUpdate, () => UpdateDialog.open(context));
+                    },
                   ),
-                  Text(
-                    AppVersion.label,
-                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
-                  ),
-                ],
-              ),
-            ),
-            ),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-          child: PulseAnchor(
-            active: isPulseActive(_pulseBackup),
-            borderRadius: BorderRadius.circular(AppTheme.radius),
-            child: SizedBox(
-              width: double.infinity,
-              child: TextButton(
-                onPressed: () async {
-                  afterAction?.call();
-                  await runWithPulseHighlight(_pulseBackup, () async {
-                    final path = await BackupHelper.forceBackupNow();
-                    await _refreshLastBackup();
-                    if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          path == null ? 'Не удалось создать бэкап' : 'Бэкап создан',
-                          style: GoogleFonts.manrope(),
-                        ),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  });
-                },
-                style: TextButton.styleFrom(
-                  alignment: Alignment.centerLeft,
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.cloud_done_outlined,
-                      size: 18,
-                      color: _lastBackupAt == null ? AppColors.danger : AppColors.textDim,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _lastBackupAt == null
-                            ? 'Бэкап: нет'
-                            : 'Бэкап: ${AppDateTime.format(_lastBackupAt)}',
-                        style: GoogleFonts.manrope(
-                          color: _lastBackupAt == null ? AppColors.danger : AppColors.textDim,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               ),
-            ),
+            ],
           ),
-        ),
-        Padding(
-          key: TourKeys.bugReport,
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-          child: Row(
+          const SizedBox(height: 4),
+          // Репорт + Сайт
+          Row(
             children: [
               Expanded(
-                child: TextButton.icon(
-                  onPressed: () async {
-                    afterAction?.call();
-                    final result = await showDialog<String>(
-                      context: context,
-                      builder: (context) => const BugReportDialog(attachDiagLog: true),
-                    );
-                    if (!mounted) return;
-                    if (result == 'sent' || result == 'local') {
-                      _refreshOpenBugs();
-                      final msg = result == 'sent'
-                          ? 'Отправлено на сервер'
-                          : 'Сохранено здесь; на сервер не ушло (проверьте связь)';
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(msg)),
+                child: KeyedSubtree(
+                  key: TourKeys.bugReport,
+                  child: _footerCompactBtn(
+                    icon: Icons.bug_report_outlined,
+                    label: 'Репорт',
+                    badge: bugsBadge,
+                    onPressed: () async {
+                      afterAction?.call();
+                      final result = await showDialog<String>(
+                        context: context,
+                        builder: (context) => const BugReportDialog(attachDiagLog: true),
                       );
-                    }
-                  },
-                  icon: const Icon(Icons.bug_report_outlined, size: 18, color: AppColors.textDim),
-                  label: Text(
-                    "Сообщить об ошибке",
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.manrope(
-                      color: AppColors.textDim,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                  style: TextButton.styleFrom(
-                    alignment: Alignment.centerLeft,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                      if (!mounted) return;
+                      if (result == 'sent' || result == 'local') {
+                        _refreshOpenBugs();
+                        final msg = result == 'sent'
+                            ? 'Отправлено на сервер'
+                            : 'Сохранено здесь; на сервер не ушло (проверьте связь)';
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(msg)),
+                        );
+                      }
+                    },
                   ),
                 ),
               ),
               Tooltip(
                 message: 'Ошибки и правки',
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    IconButton(
-                      onPressed: () async {
-                        afterAction?.call();
-                        await showDialog<void>(
-                          context: context,
-                          builder: (context) => const BugReportsListDialog(),
-                        );
-                        _refreshOpenBugs();
-                      },
-                      icon: const Icon(Icons.list_alt_outlined, size: 20, color: AppColors.textDim),
-                      visualDensity: VisualDensity.compact,
-                      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                    ),
-                    if (_openBugs > 0)
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                          decoration: BoxDecoration(
-                            color: AppColors.danger,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            _openBugs > 9 ? '9+' : '$_openBugs',
-                            style: GoogleFonts.manrope(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
+                child: IconButton(
+                  onPressed: () async {
+                    afterAction?.call();
+                    await showDialog<void>(
+                      context: context,
+                      builder: (context) => const BugReportsListDialog(),
+                    );
+                    _refreshOpenBugs();
+                  },
+                  icon: const Icon(Icons.list_alt_outlined, size: 18, color: AppColors.textDim),
+                  visualDensity: VisualDensity.compact,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  padding: EdgeInsets.zero,
+                ),
+              ),
+              Expanded(
+                child: _footerCompactBtn(
+                  icon: Icons.language_outlined,
+                  label: 'Сайт',
+                  onPressed: () async {
+                    afterAction?.call();
+                    final ok = await openWebsite();
+                    if (!mounted || ok) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Не удалось открыть $kWebsiteUrl', style: GoogleFonts.manrope()),
+                        behavior: SnackBarBehavior.floating,
                       ),
-                  ],
+                    );
+                  },
                 ),
               ),
             ],
           ),
-        ),
-        if (showWipe)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+          // Бэкап — одна строка
+          PulseAnchor(
+            active: isPulseActive(_pulseBackup),
+            borderRadius: BorderRadius.circular(AppTheme.radius),
             child: TextButton(
-              onPressed: () {
+              onPressed: () async {
                 afterAction?.call();
-                _confirmWipeDatabase();
+                await runWithPulseHighlight(_pulseBackup, () async {
+                  final path = await BackupHelper.forceBackupNow();
+                  await _refreshLastBackup();
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        path == null ? 'Не удалось создать бэкап' : 'Бэкап создан',
+                        style: GoogleFonts.manrope(),
+                      ),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                });
               },
               style: TextButton.styleFrom(
-                foregroundColor: AppColors.textDim,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 alignment: Alignment.centerLeft,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                visualDensity: VisualDensity.compact,
               ),
-              child: Text(
-                'Очистить БД…',
-                style: GoogleFonts.manrope(
-                  color: AppColors.textDim.withOpacity(0.75),
-                  fontWeight: FontWeight.w500,
-                  fontSize: 11,
-                ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.cloud_done_outlined,
+                    size: 15,
+                    color: _lastBackupAt == null ? AppColors.danger : AppColors.textDim,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _lastBackupAt == null
+                          ? 'Бэкап: нет'
+                          : 'Бэкап: ${AppDateTime.format(_lastBackupAt)}',
+                      style: GoogleFonts.manrope(
+                        color: _lastBackupAt == null ? AppColors.danger : AppColors.textDim,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        if (showMobileMode)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-            child: Align(
+          if (showWipe)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () {
+                  afterAction?.call();
+                  _confirmWipeDatabase();
+                },
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.textDim,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  visualDensity: VisualDensity.compact,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Очистить БД…',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textDim.withOpacity(0.75),
+                    fontWeight: FontWeight.w500,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ),
+          if (showMobileMode)
+            Align(
               alignment: Alignment.centerLeft,
               child: TextButton(
                 key: TourKeys.mobileModeButton,
@@ -1459,7 +1567,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 },
                 style: TextButton.styleFrom(
                   foregroundColor: AppColors.textDim,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   minimumSize: Size.zero,
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
@@ -1473,8 +1581,40 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 ),
               ),
             ),
+          const SizedBox(height: 4),
+          const Divider(height: 1, color: AppColors.borderSoft),
+          const SizedBox(height: 2),
+          // Выйти — всегда в самом низу
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () async {
+                afterAction?.call();
+                await _confirmLogout();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textMuted,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                alignment: Alignment.centerLeft,
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.logout, size: 17, color: AppColors.textDim),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Выйти',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textMuted,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -1490,14 +1630,13 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         children: [
           _buildBrandHeader(),
           _buildSearchTile(showShortcut: true),
-          _buildQuickDateBlock(),
-          const SizedBox(height: 12),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               children: _buildMenuList(),
             ),
           ),
+          _buildTariffStub(),
           _buildFooterActions(
             showTraining: true,
             showWipe: AuthController.instance.user?.isPlatformAdmin == true,
@@ -1508,13 +1647,13 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   }
 
   Widget _buildDrawer() {
-    // Один скролл: иначе календарь + футер съедают высоту и «МЕНЮ» сжимается в 0.
     void close() {
       if (Navigator.of(context).canPop()) Navigator.of(context).pop();
     }
 
     return Drawer(
       backgroundColor: AppColors.surface,
+      width: math.min(320, MediaQuery.sizeOf(context).width * 0.88),
       child: SafeArea(
         child: ListView(
           padding: EdgeInsets.zero,
@@ -1525,21 +1664,20 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
               afterTap: close,
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: _buildMenuList(afterSelect: close),
+                children: _buildMenuList(afterSelect: close, touchFriendly: true),
               ),
             ),
-            const SizedBox(height: 8),
-            _buildQuickDateBlock(afterSelect: close),
-            const SizedBox(height: 8),
+            _buildTariffStub(),
             _buildFooterActions(
               showTraining: true,
               showWipe: false,
               showMobileMode: !isStudioMaster(AuthController.instance.user),
               afterAction: close,
             ),
+            const SizedBox(height: 12),
           ],
         ),
       ),
@@ -1580,17 +1718,22 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
           backgroundColor: AppColors.surface,
           foregroundColor: AppColors.text,
           elevation: 0,
+          scrolledUnderElevation: 0,
+          toolbarHeight: 56,
+          titleSpacing: 0,
           title: Text(
             _currentTitle,
-            style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 18),
+            style: AppTheme.pageTitleFor(context, inAppBar: true),
           ),
           actions: [
             ConnStatusDot(onTap: () => showConnStatusSheet(context)),
             IconButton(
               tooltip: 'Поиск',
+              style: IconButton.styleFrom(minimumSize: const Size(48, 48)),
               onPressed: () => showDialog(context: context, builder: (_) => const SearchDialog()),
               icon: const Icon(Icons.search, color: AppColors.primary),
             ),
+            const SizedBox(width: 4),
           ],
         ),
         drawer: _buildDrawer(),

@@ -7,6 +7,7 @@ import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'order_details_dialog.dart';
 import 'responsive.dart';
+import 'tour_keys.dart';
 
 class CompletedOrdersScreen extends StatefulWidget {
   const CompletedOrdersScreen({super.key});
@@ -55,25 +56,33 @@ class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> with DbRe
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: TourKeys.completedArea,
       backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (!AppResponsive.isMobile(context))
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Завершённые", style: AppTheme.pageTitle),
-                  const Spacer(),
-                  Text(
-                    "${_orders.length}",
-                    style: GoogleFonts.manrope(
-                      color: AppColors.textDim,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
+                  Row(
+                    children: [
+                      Text("Завершённые", style: AppTheme.pageTitle),
+                      const Spacer(),
+                      Text(
+                        "${_orders.length}",
+                        style: GoogleFonts.manrope(
+                          color: AppColors.textDim,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 4),
+                  Text('Выданные заказы и архив', style: AppTheme.pageSubtitle),
                 ],
               ),
             ),
@@ -116,17 +125,7 @@ class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> with DbRe
                             child: Container(
                               margin: const EdgeInsets.only(bottom: 10),
                               padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                              decoration: BoxDecoration(
-                                color: AppColors.surface2.withOpacity(0.92),
-                                borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-                                border: Border(
-                                  left: BorderSide(
-                                    color: AppColors.success.withOpacity(0.8),
-                                    width: 3,
-                                  ),
-                                ),
-                              ),
-                              clipBehavior: Clip.antiAlias,
+                              decoration: AppTheme.listTileDecoration(accent: AppColors.success),
                               child: Column(
                                 children: [
                                   Row(

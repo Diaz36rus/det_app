@@ -23,15 +23,24 @@ export 'order_status.dart' show resolveInitialOrderStatus;
 // --- НАЧАЛО БЛОКА: КОНСТАНТЫ ---
 List<String> STATUSES = [
   "Предварительная запись", "Принят в работу", "Мойка", "Химчистка", "Полировка",
-  "Оклейка", "Интерьер", "Оборудование", "Подготовка к выдаче", "Выдан"
+  "Кузовные работы", "Оклейка", "Интерьер", "Оборудование", "Подготовка к выдаче", "Выдан"
 ];
 
-List<String> WORKSHOPS = ["Мойка", "Химчистка", "Полировка", "Оклейка", "Интерьер", "Оборудование"];
+List<String> WORKSHOPS = [
+  "Мойка",
+  "Химчистка",
+  "Полировка",
+  "Кузовные работы",
+  "Оклейка",
+  "Интерьер",
+  "Оборудование",
+];
 
 Map<String, List<String>> WORKSHOP_STATUSES = {
   "Мойка": ["Мойка"],
   "Химчистка": ["Химчистка"],
   "Полировка": ["Полировка"],
+  "Кузовные работы": ["Кузовные работы"],
   "Оклейка": ["Оклейка"],
   "Интерьер": ["Интерьер"],
   "Оборудование": ["Оборудование"]
@@ -42,6 +51,7 @@ Map<String, List<String>> WORKSHOP_ROLES = {
   "Мойка": ["Мойка", "Универсал"],
   "Химчистка": ["Химчистка", "Кузовные работы", "Универсал"],
   "Полировка": ["Полировка", "Кузовные работы", "Универсал"],
+  "Кузовные работы": ["Кузовные работы", "Универсал"],
   "Оклейка": ["Оклейка", "Кузовные работы", "Универсал"],
   "Интерьер": ["Интерьер", "Тюнинг/Интерьер", "Универсал"],
   "Оборудование": ["Оборудование", "Кузовные работы", "Универсал"],
@@ -103,6 +113,17 @@ String? workshopForService({String? category, String? name}) {
   }
 
   if (blob.contains('химчист')) return 'Химчистка';
+  // Кузовные / разборка-сборка / малярка (не «мойка кузова» / «полировка кузова»).
+  if (blob.contains('кузовн') ||
+      blob.contains('разбор') ||
+      blob.contains('сборк') ||
+      blob.contains('демонтаж') ||
+      blob.contains('окраск') ||
+      blob.contains('покраск') ||
+      blob.contains('маляр') ||
+      blob.contains('бампер') && (blob.contains('снят') || blob.contains('устан') || blob.contains('окраск') || blob.contains('покраск'))) {
+    return 'Кузовные работы';
+  }
   if (blob.contains('полир') || blob.contains('керамик') || blob.contains('силант') ||
       blob.contains('антидожд') || blob.contains('krytex')) {
     return 'Полировка';
@@ -150,6 +171,65 @@ bool isTintPackageLine({String? category, String? name}) {
 bool isZonePackageLine({String? category, String? name}) =>
     isWrapPackageLine(category: category, name: name) ||
     isTintPackageLine(category: category, name: name);
+
+/// Сжимает строку услуг для карточки доски:
+/// «Оклейка · Капот, Оклейка · Бампер» → «Оклейка · Капот, Бампер».
+String compactOrderServicesLine(String? raw) {
+  final text = (raw ?? '').trim();
+  if (text.isEmpty) return '';
+  final parts = text
+      .split(',')
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toList();
+  if (parts.isEmpty) return text;
+
+  final wrapZones = <String>[];
+  final tintZones = <String>[];
+  final other = <String>[];
+  var hasWrapHeader = false;
+  var hasTintHeader = false;
+
+  String zoneAfterPrefix(String name, String prefix) =>
+      name.substring(prefix.length).trim();
+
+  for (final p in parts) {
+    if (isWrapPackageHeader(p)) {
+      hasWrapHeader = true;
+      continue;
+    }
+    if (isTintPackageHeader(p)) {
+      hasTintHeader = true;
+      continue;
+    }
+    if (p.startsWith('Оклейка ·')) {
+      final z = zoneAfterPrefix(p, 'Оклейка ·');
+      if (z.isNotEmpty) wrapZones.add(z);
+      continue;
+    }
+    if (p.startsWith('Тонировка ·') || p.startsWith('Тонировка ')) {
+      final z = p.startsWith('Тонировка ·')
+          ? zoneAfterPrefix(p, 'Тонировка ·')
+          : p.substring('Тонировка '.length).trim();
+      if (z.isNotEmpty) tintZones.add(z);
+      continue;
+    }
+    other.add(p);
+  }
+
+  final out = <String>[...other];
+  if (wrapZones.isNotEmpty) {
+    out.add('Оклейка · ${wrapZones.join(', ')}');
+  } else if (hasWrapHeader) {
+    out.add('Оклейка');
+  }
+  if (tintZones.isNotEmpty) {
+    out.add('Тонировка · ${tintZones.join(', ')}');
+  } else if (hasTintHeader) {
+    out.add('Тонировка');
+  }
+  return out.join(', ');
+}
 
 /// Категория прайса → тип пакета.
 String? zonePackageKindForCategory(String? category) {
@@ -477,8 +557,8 @@ class DatabaseHelper {
       order_id INTEGER NOT NULL,
       workshop TEXT NOT NULL,
       amount REAL NOT NULL DEFAULT 0,
-      master_id INTEGER,
-      UNIQUE(order_id, workshop)
+      master_id INTEGER NOT NULL,
+      UNIQUE(order_id, workshop, master_id)
     )''');
     await db.execute('''CREATE TABLE bug_reports (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -503,6 +583,31 @@ class DatabaseHelper {
       message TEXT NOT NULL,
       stack TEXT DEFAULT '',
       created_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE app_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      body TEXT NOT NULL DEFAULT '',
+      order_id INTEGER,
+      created_at TEXT NOT NULL,
+      read_at TEXT
+    )''');
+    await db.execute('''CREATE TABLE outsourcers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      phone TEXT DEFAULT '',
+      note TEXT DEFAULT '',
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE item_outsource (
+      order_item_id INTEGER PRIMARY KEY,
+      outsourcer_id INTEGER NOT NULL,
+      cost REAL,
+      sent_at TEXT,
+      due_at TEXT,
+      note TEXT DEFAULT ''
     )''');
   }
 
@@ -864,6 +969,58 @@ class DatabaseHelper {
     if (oldVersion < 29) {
       await _ensureColumn(db, 'bug_reports', 'cloud_id', 'INTEGER');
       await _ensureColumn(db, 'bug_reports', 'sync_status', "TEXT DEFAULT 'pending'");
+    }
+    // --- Версия 30: ЗП нескольким мастерам на цех ---
+    if (oldVersion < 30) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS order_workshop_payroll_v30 (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        workshop TEXT NOT NULL,
+        amount REAL NOT NULL DEFAULT 0,
+        master_id INTEGER NOT NULL,
+        UNIQUE(order_id, workshop, master_id)
+      )''');
+      try {
+        await db.execute('''
+          INSERT OR IGNORE INTO order_workshop_payroll_v30 (order_id, workshop, amount, master_id)
+          SELECT order_id, workshop, amount, master_id
+          FROM order_workshop_payroll
+          WHERE master_id IS NOT NULL AND amount > 0
+        ''');
+      } catch (_) {}
+      await db.execute('DROP TABLE IF EXISTS order_workshop_payroll');
+      await db.execute('ALTER TABLE order_workshop_payroll_v30 RENAME TO order_workshop_payroll');
+    }
+    // --- Версия 31: inbox уведомлений ---
+    if (oldVersion < 31) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS app_notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '',
+        order_id INTEGER,
+        created_at TEXT NOT NULL,
+        read_at TEXT
+      )''');
+    }
+    // --- Версия 32: аутсорсеры + привязка к работе ---
+    if (oldVersion < 32) {
+      await db.execute('''CREATE TABLE IF NOT EXISTS outsourcers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        phone TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL
+      )''');
+      await db.execute('''CREATE TABLE IF NOT EXISTS item_outsource (
+        order_item_id INTEGER PRIMARY KEY,
+        outsourcer_id INTEGER NOT NULL,
+        cost REAL,
+        sent_at TEXT,
+        due_at TEXT,
+        note TEXT DEFAULT ''
+      )''');
     }
   }
 
@@ -1318,6 +1475,21 @@ class DatabaseHelper {
     return await db.insert('cars', {'client_id': clientId, 'make_model': makeModel, 'plate': plate, 'vin': vin, 'category': category});
   }
 
+  /// Уникальные `make_model` из базы — для автоподстановки «своих» марок/моделей.
+  Future<List<String>> distinctCarMakeModels() async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.distinctCarMakeModels();
+    }
+    final db = await database;
+    final rows = await db.rawQuery(
+      "SELECT DISTINCT make_model FROM cars WHERE make_model IS NOT NULL AND TRIM(make_model) != '' AND make_model != '—'",
+    );
+    return rows
+        .map((r) => r['make_model']?.toString().trim() ?? '')
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
   Future<void> updateCar(int carId, {String? makeModel, String? plate, String? vin, String? category}) async {
     if (CloudDbBridge.active) {
       await CloudDbBridge.instance.updateCar(carId, makeModel: makeModel, plate: plate, vin: vin, category: category);
@@ -1719,19 +1891,71 @@ class DatabaseHelper {
 
   // --- РАБОТЫ ЗАКАЗА (ORDER ITEMS) ---
   Future<List<Map<String, dynamic>>> getOrderItems(int orderId) async {
-    if (CloudDbBridge.active) return CloudDbBridge.instance.getOrderItems(orderId);
-    final db = await database;
-    await _reattachOrphanZoneLines(db, orderId);
-    final headers = await db.query(
-      'order_items',
-      columns: ['id'],
-      where: "order_id = ? AND parent_id IS NULL AND name IN ('Оклейка', 'Тонировка')",
-      whereArgs: [orderId],
-    );
-    for (final h in headers) {
-      await syncZonePackageHeaderDone((h['id'] as num).toInt());
+    List<Map<String, dynamic>> items;
+    if (CloudDbBridge.active) {
+      items = await CloudDbBridge.instance.getOrderItems(orderId);
+    } else {
+      final db = await database;
+      await _reattachOrphanZoneLines(db, orderId);
+      final headers = await db.query(
+        'order_items',
+        columns: ['id'],
+        where: "order_id = ? AND parent_id IS NULL AND name IN ('Оклейка', 'Тонировка')",
+        whereArgs: [orderId],
+      );
+      for (final h in headers) {
+        await syncZonePackageHeaderDone((h['id'] as num).toInt());
+      }
+      items = await db.query('order_items', where: 'order_id = ?', whereArgs: [orderId]);
     }
-    return await db.query('order_items', where: 'order_id = ?', whereArgs: [orderId]);
+    return _attachOutsourceToItems(items);
+  }
+
+  Future<List<Map<String, dynamic>>> _attachOutsourceToItems(
+    List<Map<String, dynamic>> items,
+  ) async {
+    if (items.isEmpty) return items;
+    final ids = items
+        .map((i) => (i['id'] as num?)?.toInt())
+        .whereType<int>()
+        .toList();
+    if (ids.isEmpty) return items;
+    final db = await database;
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final rows = await db.rawQuery('''
+      SELECT io.order_item_id, io.outsourcer_id, io.cost, io.sent_at, io.due_at, io.note,
+             o.name as outsourcer_name, o.phone as outsourcer_phone
+      FROM item_outsource io
+      LEFT JOIN outsourcers o ON o.id = io.outsourcer_id
+      WHERE io.order_item_id IN ($placeholders)
+    ''', ids);
+    final byItem = <int, Map<String, dynamic>>{};
+    for (final r in rows) {
+      final id = (r['order_item_id'] as num?)?.toInt();
+      if (id != null) byItem[id] = r;
+    }
+    return items.map((raw) {
+      final m = Map<String, dynamic>.from(raw);
+      final id = (m['id'] as num?)?.toInt();
+      final ox = id == null ? null : byItem[id];
+      if (ox == null) {
+        m['outsourcer_id'] = null;
+        m['outsourcer_name'] = null;
+        m['outsource_cost'] = null;
+        m['outsource_sent_at'] = null;
+        m['outsource_due_at'] = null;
+        m['outsource_note'] = null;
+        return m;
+      }
+      m['outsourcer_id'] = ox['outsourcer_id'];
+      m['outsourcer_name'] = ox['outsourcer_name'];
+      m['outsourcer_phone'] = ox['outsourcer_phone'];
+      m['outsource_cost'] = ox['cost'];
+      m['outsource_sent_at'] = ox['sent_at'];
+      m['outsource_due_at'] = ox['due_at'];
+      m['outsource_note'] = ox['note'];
+      return m;
+    }).toList();
   }
 
   /// Сиротские зоны тонировки/оклейки без parent_id → в пакет.
@@ -2136,10 +2360,14 @@ class DatabaseHelper {
   Future<void> updateOrderItemMasters(int itemId, List<int> masterIds) async {
     if (CloudDbBridge.active) {
       await CloudDbBridge.instance.updateOrderItemMasters(itemId, masterIds);
+      if (masterIds.isNotEmpty) await clearItemOutsource(itemId);
+      bumpDataRevision();
       return;
     }
     final db = await database;
     await db.update('order_items', {'master_ids': masterIds.join(',')}, where: 'id = ?', whereArgs: [itemId]);
+    if (masterIds.isNotEmpty) await clearItemOutsource(itemId);
+    bumpDataRevision();
   }
 
   /// Общее время пакета оклейки — на шапку и всех детей.
@@ -2171,6 +2399,7 @@ class DatabaseHelper {
   Future<void> updateWrapPackageMasters(int headerId, List<int> masterIds) async {
     if (CloudDbBridge.active) {
       await CloudDbBridge.instance.updateWrapPackageMasters(headerId, masterIds);
+      if (masterIds.isNotEmpty) await clearItemOutsource(headerId);
       bumpDataRevision();
       return;
     }
@@ -2178,6 +2407,8 @@ class DatabaseHelper {
     final csv = masterIds.join(',');
     await db.update('order_items', {'master_ids': csv}, where: 'id = ?', whereArgs: [headerId]);
     await db.update('order_items', {'master_ids': csv}, where: 'parent_id = ?', whereArgs: [headerId]);
+    if (masterIds.isNotEmpty) await clearItemOutsource(headerId);
+    bumpDataRevision();
   }
 
   /// Отметка выполнения пакета — шапка и все зоны (списание склада по зонам).
@@ -3931,8 +4162,8 @@ class DatabaseHelper {
       order_id INTEGER NOT NULL,
       workshop TEXT NOT NULL,
       amount REAL NOT NULL DEFAULT 0,
-      master_id INTEGER,
-      UNIQUE(order_id, workshop)
+      master_id INTEGER NOT NULL,
+      UNIQUE(order_id, workshop, master_id)
     )''');
     final rows = await db.rawQuery('''
       SELECT COALESCE(SUM(p.amount), 0) as total
@@ -3974,32 +4205,30 @@ class DatabaseHelper {
       order_id INTEGER NOT NULL,
       workshop TEXT NOT NULL,
       amount REAL NOT NULL DEFAULT 0,
-      master_id INTEGER,
-      UNIQUE(order_id, workshop)
+      master_id INTEGER NOT NULL,
+      UNIQUE(order_id, workshop, master_id)
     )''');
     return await db.query(
       'order_workshop_payroll',
       where: 'order_id = ?',
       whereArgs: [orderId],
-      orderBy: 'workshop ASC',
+      orderBy: 'workshop ASC, master_id ASC',
     );
   }
 
-  /// Upsert ЗП блока цеха. amount <= 0 удаляет запись.
-  Future<void> upsertOrderWorkshopPayroll({
+  /// Заменить все строки ЗП цеха: [lines] = [{master_id, amount}, ...].
+  Future<void> setOrderWorkshopPayroll({
     required int orderId,
     required String workshop,
-    required double amount,
-    int? masterId,
+    required List<Map<String, dynamic>> lines,
   }) async {
     final ws = workshop.trim();
     if (ws.isEmpty) return;
     if (CloudDbBridge.active) {
-      await CloudDbBridge.instance.upsertOrderWorkshopPayroll(
+      await CloudDbBridge.instance.setOrderWorkshopPayroll(
         orderId: orderId,
         workshop: ws,
-        amount: amount,
-        masterId: masterId,
+        lines: lines,
       );
       bumpDataRevision();
       return;
@@ -4010,38 +4239,35 @@ class DatabaseHelper {
       order_id INTEGER NOT NULL,
       workshop TEXT NOT NULL,
       amount REAL NOT NULL DEFAULT 0,
-      master_id INTEGER,
-      UNIQUE(order_id, workshop)
+      master_id INTEGER NOT NULL,
+      UNIQUE(order_id, workshop, master_id)
     )''');
-    if (amount <= 0) {
-      await db.delete(
-        'order_workshop_payroll',
-        where: 'order_id = ? AND workshop = ?',
-        whereArgs: [orderId, ws],
-      );
-      bumpDataRevision();
-      return;
+    final byMaster = <int, double>{};
+    for (final line in lines) {
+      final mid = (line['master_id'] as num?)?.toInt() ?? int.tryParse('${line['master_id']}');
+      if (mid == null) continue;
+      var amt = (line['amount'] as num?)?.toDouble() ??
+          double.tryParse('${line['amount']}'.replaceAll(',', '.')) ??
+          0;
+      if (amt < 0) amt = 0;
+      if (amt <= 0) {
+        byMaster.remove(mid);
+        continue;
+      }
+      byMaster[mid] = amt;
     }
-    final existing = await db.query(
+    await db.delete(
       'order_workshop_payroll',
       where: 'order_id = ? AND workshop = ?',
       whereArgs: [orderId, ws],
-      limit: 1,
     );
-    if (existing.isEmpty) {
+    for (final e in byMaster.entries) {
       await db.insert('order_workshop_payroll', {
         'order_id': orderId,
         'workshop': ws,
-        'amount': amount,
-        'master_id': masterId,
+        'amount': e.value,
+        'master_id': e.key,
       });
-    } else {
-      await db.update(
-        'order_workshop_payroll',
-        {'amount': amount, 'master_id': masterId},
-        where: 'id = ?',
-        whereArgs: [(existing.first['id'] as num).toInt()],
-      );
     }
     bumpDataRevision();
   }
@@ -5280,6 +5506,200 @@ class DatabaseHelper {
       "SELECT COUNT(*) as cnt FROM bug_reports WHERE status = 'open'",
     );
     return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+  }
+
+  // --- Inbox уведомлений (локально) ---
+
+  Future<int> insertNotification({
+    required String type,
+    required String title,
+    String body = '',
+    int? orderId,
+    bool markRead = false,
+  }) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String().substring(0, 19);
+    final id = await db.insert('app_notifications', {
+      'type': type,
+      'title': title,
+      'body': body,
+      'order_id': orderId,
+      'created_at': now,
+      'read_at': markRead ? now : null,
+    });
+    await _pruneNotifications(db);
+    return id;
+  }
+
+  Future<void> _pruneNotifications(Database db) async {
+    final cutoff = DateTime.now().subtract(const Duration(days: 30)).toIso8601String().substring(0, 19);
+    await db.delete('app_notifications', where: 'created_at < ?', whereArgs: [cutoff]);
+    final rows = await db.rawQuery('SELECT COUNT(*) as cnt FROM app_notifications');
+    final cnt = (rows.first['cnt'] as num?)?.toInt() ?? 0;
+    if (cnt <= 200) return;
+    await db.execute('''
+      DELETE FROM app_notifications WHERE id NOT IN (
+        SELECT id FROM app_notifications ORDER BY id DESC LIMIT 200
+      )
+    ''');
+  }
+
+  Future<List<Map<String, dynamic>>> listNotifications({int limit = 100}) async {
+    final db = await database;
+    return db.query(
+      'app_notifications',
+      orderBy: "CASE WHEN read_at IS NULL OR read_at = '' THEN 0 ELSE 1 END, id DESC",
+      limit: limit,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> listUnreadNotifications({int limit = 100}) async {
+    final db = await database;
+    return db.query(
+      'app_notifications',
+      where: "read_at IS NULL OR read_at = ''",
+      orderBy: 'id DESC',
+      limit: limit,
+    );
+  }
+
+  Future<int> countUnreadNotifications() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      "SELECT COUNT(*) as cnt FROM app_notifications WHERE read_at IS NULL OR read_at = ''",
+    );
+    return (rows.first['cnt'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<bool> hasUnreadNotification({
+    required String type,
+    required int orderId,
+    String? title,
+  }) async {
+    final db = await database;
+    if (title != null && title.isNotEmpty) {
+      final rows = await db.rawQuery(
+        '''
+        SELECT id FROM app_notifications
+        WHERE type = ? AND order_id = ? AND title = ?
+          AND (read_at IS NULL OR read_at = '')
+        LIMIT 1
+        ''',
+        [type, orderId, title],
+      );
+      return rows.isNotEmpty;
+    }
+    final rows = await db.rawQuery(
+      '''
+      SELECT id FROM app_notifications
+      WHERE type = ? AND order_id = ? AND (read_at IS NULL OR read_at = '')
+      LIMIT 1
+      ''',
+      [type, orderId],
+    );
+    return rows.isNotEmpty;
+  }
+
+  Future<void> markNotificationRead(int id) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String().substring(0, 19);
+    await db.update(
+      'app_notifications',
+      {'read_at': now},
+      where: "id = ? AND (read_at IS NULL OR read_at = '')",
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> markAllNotificationsRead() async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String().substring(0, 19);
+    await db.update(
+      'app_notifications',
+      {'read_at': now},
+      where: "read_at IS NULL OR read_at = ''",
+    );
+  }
+
+  // --- Аутсорсеры ---
+
+  Future<List<Map<String, dynamic>>> listOutsourcers({bool activeOnly = true}) async {
+    final db = await database;
+    return db.query(
+      'outsourcers',
+      where: activeOnly ? 'is_active = 1' : null,
+      orderBy: 'name COLLATE NOCASE ASC',
+    );
+  }
+
+  Future<Map<String, dynamic>?> getOutsourcer(int id) async {
+    final db = await database;
+    final rows = await db.query('outsourcers', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  Future<int> addOutsourcer({
+    required String name,
+    String phone = '',
+    String note = '',
+  }) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String().substring(0, 19);
+    return db.insert('outsourcers', {
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'note': note.trim(),
+      'is_active': 1,
+      'created_at': now,
+    });
+  }
+
+  Future<void> updateOutsourcer(
+    int id, {
+    String? name,
+    String? phone,
+    String? note,
+    bool? isActive,
+  }) async {
+    final db = await database;
+    final data = <String, dynamic>{};
+    if (name != null) data['name'] = name.trim();
+    if (phone != null) data['phone'] = phone.trim();
+    if (note != null) data['note'] = note.trim();
+    if (isActive != null) data['is_active'] = isActive ? 1 : 0;
+    if (data.isEmpty) return;
+    await db.update('outsourcers', data, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> clearItemOutsource(int orderItemId) async {
+    final db = await database;
+    await db.delete('item_outsource', where: 'order_item_id = ?', whereArgs: [orderItemId]);
+  }
+
+  /// Назначить аутсорс на работу (мастера снимаются).
+  Future<void> setItemOutsource({
+    required int orderItemId,
+    required int outsourcerId,
+    double? cost,
+    String? sentAt,
+    String? dueAt,
+    String note = '',
+  }) async {
+    await updateOrderItemMasters(orderItemId, const []);
+    final db = await database;
+    await db.insert(
+      'item_outsource',
+      {
+        'order_item_id': orderItemId,
+        'outsourcer_id': outsourcerId,
+        'cost': cost,
+        'sent_at': sentAt,
+        'due_at': dueAt,
+        'note': note.trim(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    bumpDataRevision();
   }
 
   Future<void> updateBugReport(

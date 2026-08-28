@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../app_theme.dart';
 import '../auth/auth_controller.dart';
+import '../car_make_model_fields.dart';
 import 'crm_api.dart';
 import 'crm_models.dart';
 
@@ -217,17 +218,16 @@ class _CreateCloudOrderDialogState extends State<_CreateCloudOrderDialog> {
   final _api = CrmApi();
   final _clientName = TextEditingController();
   final _phone = TextEditingController();
-  final _car = TextEditingController();
   final _plate = TextEditingController();
   final _work = TextEditingController(text: 'Мойка кузова');
   final _price = TextEditingController(text: '3000');
+  String _carMakeModel = '';
   bool _busy = false;
 
   @override
   void dispose() {
     _clientName.dispose();
     _phone.dispose();
-    _car.dispose();
     _plate.dispose();
     _work.dispose();
     _price.dispose();
@@ -237,7 +237,7 @@ class _CreateCloudOrderDialogState extends State<_CreateCloudOrderDialog> {
   Future<void> _submit() async {
     if (_busy) return;
     final name = _clientName.text.trim();
-    final make = _car.text.trim();
+    final make = _carMakeModel.trim();
     final work = _work.text.trim();
     final price = double.tryParse(_price.text.replaceAll(',', '.').trim()) ?? 0;
     if (name.isEmpty || make.isEmpty || work.isEmpty) {
@@ -297,10 +297,10 @@ class _CreateCloudOrderDialogState extends State<_CreateCloudOrderDialog> {
                 keyboardType: TextInputType.phone,
               ),
               const SizedBox(height: 10),
-              TextField(
-                controller: _car,
+              CarMakeModelFields(
                 enabled: !_busy,
-                decoration: const InputDecoration(labelText: 'Авто (марка/модель)'),
+                stacked: true,
+                onChanged: (v) => _carMakeModel = v,
               ),
               const SizedBox(height: 10),
               TextField(

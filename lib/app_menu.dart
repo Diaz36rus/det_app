@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Пункты главного меню. Индексы стабильны (не позиция в отфильтрованном списке).
 class AppMenuIds {
   AppMenuIds._();
@@ -18,10 +20,22 @@ class AppMenuIds {
   static const cloudOrders = 11;
   /// Облачная касса (C2).
   static const cloudCash = 12;
+  /// Настройки студии (профиль, филиалы, доступ…).
+  static const studio = 13;
+  /// Уведомления (inbox + долги).
+  static const notifications = 14;
   static const workshop = 100;
 
   /// На облегчённом телефоне (ПК + мобилка) эти экраны только на десктопе.
-  static const lightHidden = {stats, staff, inventory, services, preview};
+  static const lightHidden = {
+    stats,
+    staff,
+    inventory,
+    services,
+    preview,
+    studio,
+    notifications,
+  };
 
   /// Пункты меню без перехода (заглушка).
   static const disabled = {preview};
@@ -29,4 +43,9 @@ class AppMenuIds {
   static const settingKey = 'mobile_menu_mode';
   static const modeLight = 'light';
   static const modeFull = 'full';
+
+  /// Сигнал оболочке: режим мобильного меню изменили в настройках.
+  static final ValueNotifier<int> mobileMenuRevision = ValueNotifier(0);
+
+  static void notifyMobileMenuChanged() => mobileMenuRevision.value++;
 }

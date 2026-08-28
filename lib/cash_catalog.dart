@@ -176,6 +176,14 @@ const List<CashTemplate> kCashTemplates = [
     defaultDescription: 'Питание / вода / кофе для зала',
   ),
   CashTemplate(
+    key: 'refund',
+    label: 'Возврат',
+    type: 'Расход',
+    category: 'Прочее',
+    method: CashMethods.cash,
+    defaultDescription: 'Возврат клиенту',
+  ),
+  CashTemplate(
     key: 'collect',
     label: 'Инкассация',
     type: 'Расход',

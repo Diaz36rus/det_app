@@ -164,6 +164,21 @@ class AuthController extends ChangeNotifier {
   /// На будущее: заголовок Authorization для облачных запросов.
   String? get accessToken => _tokens?.accessToken;
 
+  /// Обновить профиль с /auth/me (после смены названия студии и т.п.).
+  Future<bool> refreshMe() async {
+    final token = _tokens?.accessToken;
+    if (token == null || token.isEmpty) return false;
+    try {
+      final me = await _api.me(token);
+      user = me;
+      await _store.save(_tokens!, me);
+      notifyListeners();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Deep link invite: дернуть слушателей (LoginScreen подхватит slug).
   void notifyInvitePending() => notifyListeners();
 }

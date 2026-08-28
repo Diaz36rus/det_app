@@ -7,6 +7,7 @@ import 'db_refresh_mixin.dart';
 import 'inventory_catalog.dart';
 import 'pulse_anchor.dart';
 import 'responsive.dart';
+import 'tour_keys.dart';
 import 'warehouse_category_gallery.dart';
 
 class WarehouseScreen extends StatefulWidget {
@@ -27,6 +28,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
   List<Map<String, dynamic>> _items = [];
   List<Map<String, dynamic>> _moves = [];
   bool _isLoading = true;
+  bool _loadBusy = false;
   final _searchController = TextEditingController();
   String _query = '';
   bool _lowOnly = false;
@@ -49,17 +51,29 @@ class _WarehouseScreenState extends State<WarehouseScreen>
   }
 
   Future<void> _load({bool showSpinner = true}) async {
+    if (_loadBusy) return;
+    _loadBusy = true;
     if (showSpinner && mounted) setState(() => _isLoading = true);
-    await DatabaseHelper().seedStandardInventoryIfNeeded();
-    await DatabaseHelper().applyInventoryUnitDefaultsIfNeeded();
-    final items = await DatabaseHelper().getInventory();
-    final moves = await DatabaseHelper().getInventoryMoves(limit: 200);
-    if (!mounted) return;
-    setState(() {
-      _items = items;
-      _moves = moves;
-      _isLoading = false;
-    });
+    try {
+      await DatabaseHelper().seedStandardInventoryIfNeeded();
+      await DatabaseHelper().applyInventoryUnitDefaultsIfNeeded();
+      final removed = await DatabaseHelper().dedupeInventoryIfNeeded();
+      final items = await DatabaseHelper().getInventory();
+      final moves = await DatabaseHelper().getInventoryMoves(limit: 200);
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _moves = moves;
+        _isLoading = false;
+      });
+      if (removed > 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Склад: убрано дублей — $removed')),
+        );
+      }
+    } finally {
+      _loadBusy = false;
+    }
   }
 
   bool _isLowStock(Map<String, dynamic> item) {
@@ -765,13 +779,9 @@ class _WarehouseScreenState extends State<WarehouseScreen>
       if (film && mpr > 0) '${_fmtQty(mpr)} м/рул.',
     ];
 
-    final titleColor = compact ? Colors.white : AppColors.text;
-    final subColor = low
-        ? (compact ? const Color(0xFFFCA5A5) : AppColors.danger)
-        : (compact ? Colors.white70 : AppColors.textMuted);
-    final bg = compact
-        ? (low ? Colors.red.withOpacity(0.18) : Colors.black.withOpacity(0.38))
-        : (low ? AppColors.danger.withOpacity(0.06) : AppColors.surface2.withOpacity(0.92));
+    final titleColor = AppColors.text;
+    final subColor = low ? AppColors.danger : AppColors.textMuted;
+    final bg = low ? AppColors.danger.withOpacity(0.08) : AppColors.surface2.withOpacity(0.92);
 
     Future<void> run(Future<void> Function() action) async {
       await action();
@@ -786,11 +796,8 @@ class _WarehouseScreenState extends State<WarehouseScreen>
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(compact ? 12 : AppTheme.radiusLg),
-          border: Border(
-            left: BorderSide(
-              color: (low ? AppColors.danger : AppColors.primary).withOpacity(compact ? 0.9 : 0.75),
-              width: 3,
-            ),
+          border: Border.all(
+            color: (low ? AppColors.danger : AppColors.primary).withOpacity(0.45),
           ),
         ),
         child: Padding(
@@ -840,7 +847,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
                         style: GoogleFonts.manrope(
                           fontWeight: FontWeight.w700,
                           fontSize: 12,
-                          color: compact ? Colors.white : null,
+                          color: null,
                         ),
                       ),
                     ),
@@ -858,7 +865,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
                     onPressed: () => run(() => _adjustDialog(item, income: false)),
                     icon: Icon(
                       Icons.remove_circle_outline,
-                      color: compact ? Colors.white70 : AppColors.textMuted,
+                      color: AppColors.textMuted,
                       size: 22,
                     ),
                   ),
@@ -867,7 +874,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
                     onPressed: () => run(() => _showItemEditor(item: item)),
                     icon: Icon(
                       Icons.edit_outlined,
-                      color: compact ? Colors.white54 : AppColors.textDim,
+                      color: AppColors.textDim,
                       size: 20,
                     ),
                   ),
@@ -978,12 +985,14 @@ class _WarehouseScreenState extends State<WarehouseScreen>
     final count = _tabs.index == 0 ? _items.length : _moves.length;
 
     return Scaffold(
+      key: TourKeys.warehouseArea,
       backgroundColor: Colors.transparent,
       floatingActionButton: _tabs.index == 0
           ? PulseAnchor(
               active: isPulseActive(_pulseAdd),
               borderRadius: BorderRadius.circular(AppTheme.radiusLg),
               child: FloatingActionButton.extended(
+                key: TourKeys.warehouseAdd,
                 onPressed: () => _showItemEditor(),
                 icon: const Icon(Icons.add),
                 label: Text('Добавить', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
@@ -994,19 +1003,26 @@ class _WarehouseScreenState extends State<WarehouseScreen>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: EdgeInsets.fromLTRB(pad, pad, pad, 8),
-            child: Row(
+            padding: EdgeInsets.fromLTRB(pad, pad, pad, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Склад', style: AppTheme.pageTitle),
-                const Spacer(),
-                Text(
-                  '$count',
-                  style: GoogleFonts.manrope(
-                    color: AppColors.textDim,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+                Row(
+                  children: [
+                    Text('Склад', style: AppTheme.pageTitle),
+                    const Spacer(),
+                    Text(
+                      '$count',
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 4),
+                Text('Остатки, плёнка и приходы', style: AppTheme.pageSubtitle),
               ],
             ),
           ),

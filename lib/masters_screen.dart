@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
 import 'database.dart';
+import 'outsourcers_panel.dart';
 import 'pulse_anchor.dart';
 import 'responsive.dart';
+import 'tour_keys.dart';
 
 class MastersScreen extends StatefulWidget {
   const MastersScreen({super.key});
@@ -255,15 +257,23 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
       runSpacing: 8,
       children: options.map((r) {
         final on = selected.contains(r);
+        final color = _roleColor(r);
         return FilterChip(
-          label: Text(r, style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w600)),
+          label: Text(
+            r,
+            style: GoogleFonts.manrope(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: on ? color : color.withOpacity(0.85),
+            ),
+          ),
           selected: on,
           onSelected: (val) => onToggle(r, val),
-          selectedColor: AppColors.primary.withOpacity(0.28),
-          checkmarkColor: AppColors.primary,
-          backgroundColor: AppColors.surface2,
-          side: BorderSide(color: on ? AppColors.primary.withOpacity(0.7) : AppColors.border),
-          labelStyle: GoogleFonts.manrope(color: AppColors.text),
+          selectedColor: color.withOpacity(0.28),
+          checkmarkColor: color,
+          backgroundColor: color.withOpacity(0.10),
+          side: BorderSide(color: color.withOpacity(on ? 0.75 : 0.4)),
+          showCheckmark: true,
         );
       }).toList(),
     );
@@ -380,104 +390,130 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
     );
   }
 
+  Color _roleColor(String role) {
+    return kOrderStatusColors[role] ?? AppColors.primary;
+  }
+
+  Color _masterAccent(List<String> roles) {
+    for (final r in roles) {
+      final c = kOrderStatusColors[r];
+      if (c != null) return c;
+    }
+    return AppColors.primary;
+  }
+
   Widget _buildMasterCard(Map<String, dynamic> m) {
     final roles = splitMasterRoles(m['role']?.toString());
     final masterId = (m['id'] as num).toInt();
+    final accent = _masterAccent(roles);
 
     return PulseAnchor(
       active: isPulseActive(masterId),
+      accent: accent,
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
           color: AppColors.surface2.withOpacity(0.92),
           borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-          border: Border(
-            left: BorderSide(color: AppColors.primary.withOpacity(0.8), width: 3),
-          ),
+          border: Border.all(color: accent.withOpacity(0.45)),
         ),
         clipBehavior: Clip.antiAlias,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    InkWell(
-                      onTap: () => _renameMaster(m),
-                      borderRadius: BorderRadius.circular(6),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Flexible(
-                              child: Text(
-                                m['name']?.toString() ?? "",
-                                style: GoogleFonts.manrope(
-                                  color: AppColors.text,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
+        child: Stack(
+          children: [
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 3,
+              child: ColoredBox(color: accent),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        InkWell(
+                          onTap: () => _renameMaster(m),
+                          borderRadius: BorderRadius.circular(6),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    m['name']?.toString() ?? "",
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.text,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(width: 6),
+                                const Icon(Icons.edit_outlined, size: 16, color: AppColors.textDim),
+                              ],
                             ),
-                            const SizedBox(width: 6),
-                            const Icon(Icons.edit_outlined, size: 16, color: AppColors.textDim),
-                          ],
+                          ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    if (roles.isEmpty)
-                      Text(
-                        "Роль не задана",
-                        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                      )
-                    else
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: roles
-                            .map(
-                              (r) => Container(
+                        const SizedBox(height: 8),
+                        if (roles.isEmpty)
+                          Text(
+                            "Роль не задана",
+                            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                          )
+                        else
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: roles.map((r) {
+                              final color = _roleColor(r);
+                              return Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: AppColors.surface,
+                                  color: color.withOpacity(0.16),
                                   borderRadius: BorderRadius.circular(AppTheme.radius),
-                                  border: Border.all(color: AppColors.border),
+                                  border: Border.all(color: color.withOpacity(0.45)),
                                 ),
                                 child: Text(
                                   r,
                                   style: GoogleFonts.manrope(
-                                    color: AppColors.textMuted,
+                                    color: color,
                                     fontSize: 12,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    const SizedBox(height: 8),
-                    TextButton.icon(
-                      onPressed: () => _editRolesDialog(m),
-                      icon: const Icon(Icons.badge_outlined, size: 16),
-                      label: Text(
-                        "Роли",
-                        style: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 13),
-                      ),
+                              );
+                            }).toList(),
+                          ),
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: () => _editRolesDialog(m),
+                          icon: Icon(Icons.badge_outlined, size: 16, color: accent),
+                          label: Text(
+                            "Роли",
+                            style: GoogleFonts.manrope(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                              color: accent,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  IconButton(
+                    tooltip: "Удалить",
+                    icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 22),
+                    onPressed: () => _confirmDelete(m),
+                  ),
+                ],
               ),
-              IconButton(
-                tooltip: "Удалить",
-                icon: const Icon(Icons.delete_outline, color: AppColors.danger, size: 22),
-                onPressed: () => _confirmDelete(m),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -487,15 +523,58 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
   Widget build(BuildContext context) {
     final mobile = AppResponsive.isMobile(context);
 
-    // Мобилка: один общий скролл (форма + список), без Expanded-ловушки.
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: KeyedSubtree(
+          key: TourKeys.staffArea,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, mobile ? 12 : 20, mobile ? 12 : 24, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Сотрудники', style: AppTheme.pageTitle),
+                    const SizedBox(height: 4),
+                    Text('Мастера цехов и подрядчики (аутсорс)', style: AppTheme.pageSubtitle),
+                    const SizedBox(height: 10),
+                    TabBar(
+                      labelStyle: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13.5),
+                      unselectedLabelStyle: GoogleFonts.manrope(fontWeight: FontWeight.w600, fontSize: 13.5),
+                      labelColor: AppColors.primary,
+                      unselectedLabelColor: AppColors.textDim,
+                      indicatorColor: AppColors.primary,
+                      tabs: const [
+                        Tab(text: 'Штат'),
+                        Tab(text: 'Аутсорс'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    _staffTab(mobile: mobile),
+                    const OutsourcersPanel(),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _staffTab({required bool mobile}) {
     if (mobile) {
       return ListView(
         padding: const EdgeInsets.only(bottom: 28),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-            child: Text("Сотрудники", style: AppTheme.pageTitle),
-          ),
           _buildToolbar(compactRoles: true),
           if (_isLoading)
             const Padding(
@@ -506,7 +585,7 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 24, 12, 24),
               child: Text(
-                "Пока нет сотрудников — добавьте первого выше",
+                'Пока нет сотрудников — добавьте первого выше',
                 textAlign: TextAlign.center,
                 style: GoogleFonts.manrope(color: AppColors.textMuted),
               ),
@@ -527,10 +606,6 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
-          child: Text("Сотрудники", style: AppTheme.pageTitle),
-        ),
         _buildToolbar(),
         Expanded(
           child: _isLoading
@@ -538,7 +613,7 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
               : _masters.isEmpty
                   ? Center(
                       child: Text(
-                        "Пока нет сотрудников",
+                        'Пока нет сотрудников',
                         style: GoogleFonts.manrope(color: AppColors.textMuted),
                       ),
                     )

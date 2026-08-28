@@ -4,6 +4,7 @@ import 'app_theme.dart';
 import 'database.dart';
 import 'pulse_anchor.dart';
 import 'responsive.dart';
+import 'tour_keys.dart';
 
 class ServicesScreen extends StatefulWidget {
   const ServicesScreen({super.key});
@@ -217,24 +218,32 @@ class _ServicesScreenState extends State<ServicesScreen> with PulseHighlightMixi
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: TourKeys.servicesArea,
       backgroundColor: Colors.transparent,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 24, 8),
-            child: Row(
+            padding: EdgeInsets.fromLTRB(AppResponsive.isMobile(context) ? 12 : 24, AppResponsive.isMobile(context) ? 12 : 20, AppResponsive.isMobile(context) ? 12 : 24, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Услуги", style: AppTheme.pageTitle),
-                const Spacer(),
-                Text(
-                  "${_services.length}",
-                  style: GoogleFonts.manrope(
-                    color: AppColors.textDim,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                  ),
+                Row(
+                  children: [
+                    Text("Услуги", style: AppTheme.pageTitle),
+                    const Spacer(),
+                    Text(
+                      "${_services.length}",
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
+                const SizedBox(height: 4),
+                Text('Прайс и рецепты работ', style: AppTheme.pageSubtitle),
               ],
             ),
           ),

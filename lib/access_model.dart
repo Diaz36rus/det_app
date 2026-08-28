@@ -52,11 +52,12 @@ AccessRank accessRankOf(AuthUser? user) {
   for (final r in user.roles) {
     if (JobTitles.fullAccess.contains(r)) return AccessRank.studioFull;
   }
-  // Права users.manage / company.manage тоже = полный доступ.
+  // Права управления студией / кассой = полный доступ (как на API).
   final perms = user.permissions.toSet();
   if (perms.contains('users.manage') ||
       perms.contains('company.manage') ||
-      perms.contains('roles.manage')) {
+      perms.contains('roles.manage') ||
+      perms.contains('cash.write')) {
     return AccessRank.studioFull;
   }
   return AccessRank.master;
@@ -67,7 +68,7 @@ bool canManageAssignments(AccessRank rank) =>
 
 bool canSeeConnectionExtras(AccessRank rank) => canManageAssignments(rank);
 
-/// Мастер студии (не владелец/админ).
+/// Мастер студии (не владелец/админ). Совпадает с логикой API `_is_studio_master`.
 bool isStudioMaster(AuthUser? user) =>
     accessRankOf(user) == AccessRank.master;
 
@@ -86,6 +87,8 @@ const Set<int> kMasterHiddenMenuIds = {
   AppMenuIds.staff,
   AppMenuIds.services,
   AppMenuIds.preview,
+  AppMenuIds.studio,
+  AppMenuIds.notifications,
 };
 
 /// PIN владельца приложения для необратимых действий (wipe и т.п.).

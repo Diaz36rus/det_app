@@ -85,6 +85,33 @@ class CompanyApi {
     return CompanyBranch.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
+  Future<CompanyProfile> getProfile({required String accessToken}) async {
+    final r = await http
+        .get(_u('/company/profile'), headers: _auth(accessToken))
+        .timeout(const Duration(seconds: 15));
+    if (r.statusCode != 200) {
+      throw AuthApiException(_err(r), statusCode: r.statusCode);
+    }
+    return CompanyProfile.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<CompanyProfile> updateProfile({
+    required String accessToken,
+    required String name,
+  }) async {
+    final r = await http
+        .patch(
+          _u('/company/profile'),
+          headers: _auth(accessToken),
+          body: jsonEncode({'name': name.trim()}),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (r.statusCode != 200) {
+      throw AuthApiException(_err(r), statusCode: r.statusCode);
+    }
+    return CompanyProfile.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
   Future<AuthUser> createUser({
     required String accessToken,
     required String email,
@@ -181,6 +208,27 @@ class CompanyBranch {
   factory CompanyBranch.fromJson(Map<String, dynamic> j) => CompanyBranch(
         id: (j['id'] as num?)?.toInt() ?? 0,
         name: j['name']?.toString() ?? '',
+        isActive: j['is_active'] != false,
+      );
+}
+
+class CompanyProfile {
+  final int id;
+  final String name;
+  final String slug;
+  final bool isActive;
+
+  const CompanyProfile({
+    required this.id,
+    required this.name,
+    required this.slug,
+    this.isActive = true,
+  });
+
+  factory CompanyProfile.fromJson(Map<String, dynamic> j) => CompanyProfile(
+        id: (j['id'] as num?)?.toInt() ?? 0,
+        name: j['name']?.toString() ?? '',
+        slug: j['slug']?.toString() ?? '',
         isActive: j['is_active'] != false,
       );
 }

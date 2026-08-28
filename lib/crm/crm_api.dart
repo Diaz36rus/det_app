@@ -394,6 +394,17 @@ class CrmApi {
     _ensure(r);
   }
 
+  /// Схлопывает дубли склада на сервере. Возвращает число удалённых позиций.
+  Future<int> dedupeInventory() async {
+    final r = await http
+        .post(_u('/crm/inventory/dedupe'), headers: _headers())
+        .timeout(const Duration(seconds: 60));
+    _ensure(r);
+    final j = jsonDecode(utf8.decode(r.bodyBytes));
+    if (j is Map && j['removed'] is num) return (j['removed'] as num).toInt();
+    return 0;
+  }
+
   Future<List<Map<String, dynamic>>> listInventoryMoves({int? itemId, int limit = 100}) async {
     final q = <String, String>{
       if (itemId != null) 'item_id': '$itemId',
@@ -581,6 +592,63 @@ class CrmApi {
     return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
         .map((e) => CrmOrderEvent.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> listOrderPayroll(int orderId) async {
+    final r = await http
+        .get(_u('/crm/orders/$orderId/payroll'), headers: _headers())
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> putOrderPayroll({
+    required int orderId,
+    required String workshop,
+    required List<Map<String, dynamic>> lines,
+  }) async {
+    final r = await http
+        .put(
+          _u('/crm/orders/$orderId/payroll'),
+          headers: _headers(),
+          body: jsonEncode({
+            'workshop': workshop,
+            'lines': lines
+                .map(
+                  (l) => {
+                    'master_id': l['master_id'],
+                    'amount': l['amount'] ?? 0,
+                  },
+                )
+                .toList(),
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    _ensure(r);
+    final decoded = jsonDecode(utf8.decode(r.bodyBytes));
+    if (decoded is List) return {'ok': true, 'rows': decoded};
+    return Map<String, dynamic>.from(decoded as Map);
+  }
+
+  Future<double> payrollAccrued({
+    required int masterId,
+    required String start,
+    required String end,
+  }) async {
+    final uri = _u('/crm/payroll/accrued').replace(
+      queryParameters: {
+        'master_id': '$masterId',
+        'start': start,
+        'end': end,
+      },
+    );
+    final r = await http.get(uri, headers: _headers()).timeout(const Duration(seconds: 20));
+    _ensure(r);
+    final j = jsonDecode(utf8.decode(r.bodyBytes));
+    if (j is Map && j['accrued'] is num) return (j['accrued'] as num).toDouble();
+    return 0;
   }
 
   Future<CrmOrderEvent> createOrderEvent(int orderId, String text) async {

@@ -76,34 +76,39 @@ Future<List<int>?> pickWorkshopMasters(
                       "${missingMastersMessage([workshop])}\nДобавьте сотрудников в разделе «Сотрудники».",
                       style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
                     )
-                  : ListView(
-                      shrinkWrap: true,
-                      children: filtered.map((m) {
-                        final mId = (m['id'] as num).toInt();
-                        final isSelected = currentIds.contains(mId);
-                        final role = m['role']?.toString() ?? "";
-                        final fits = masterRoleFitsWorkshop(role, workshop);
-                        return CheckboxListTile(
-                          title: Text(m['name'], style: GoogleFonts.manrope(color: AppColors.text)),
-                          subtitle: Text(
-                            fits ? role : "$role (не по цеху)",
-                            style: GoogleFonts.manrope(
-                              color: fits ? AppColors.textDim : AppColors.danger,
-                              fontSize: 12,
+                  : ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.sizeOf(context).height * 0.55,
+                      ),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: filtered.map((m) {
+                          final mId = (m['id'] as num).toInt();
+                          final isSelected = currentIds.contains(mId);
+                          final role = m['role']?.toString() ?? "";
+                          final fits = masterRoleFitsWorkshop(role, workshop);
+                          return CheckboxListTile(
+                            title: Text(m['name'], style: GoogleFonts.manrope(color: AppColors.text)),
+                            subtitle: Text(
+                              fits ? role : "$role (не по цеху)",
+                              style: GoogleFonts.manrope(
+                                color: fits ? AppColors.textDim : AppColors.danger,
+                                fontSize: 12,
+                              ),
                             ),
-                          ),
-                          value: isSelected,
-                          onChanged: (val) {
-                            setDialogState(() {
-                              if (val == true) {
-                                currentIds.add(mId);
-                              } else {
-                                currentIds.remove(mId);
-                              }
-                            });
-                          },
-                        );
-                      }).toList(),
+                            value: isSelected,
+                            onChanged: (val) {
+                              setDialogState(() {
+                                if (val == true) {
+                                  currentIds.add(mId);
+                                } else {
+                                  currentIds.remove(mId);
+                                }
+                              });
+                            },
+                          );
+                        }).toList(),
+                      ),
                     ),
             ),
             actions: [
@@ -166,34 +171,39 @@ Future<List<int>?> pickOrderStaff(
                       emptyHint,
                       style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.35),
                     )
-                  : ListView(
-                      shrinkWrap: true,
-                      children: [
-                        RadioListTile<int?>(
-                          value: null,
-                          groupValue: selected,
-                          title: Text(
-                            'Не назначен',
-                            style: GoogleFonts.manrope(color: AppColors.textDim),
-                          ),
-                          onChanged: (v) => setDialogState(() => selected = v),
-                        ),
-                        ...candidates.map((m) {
-                          final id = (m['id'] as num).toInt();
-                          final name = m['name']?.toString() ?? '';
-                          final role = m['role']?.toString() ?? '';
-                          return RadioListTile<int?>(
-                            value: id,
+                  : ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.sizeOf(context).height * 0.55,
+                      ),
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          RadioListTile<int?>(
+                            value: null,
                             groupValue: selected,
-                            title: Text(name, style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
-                            subtitle: Text(
-                              role,
-                              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                            title: Text(
+                              'Не назначен',
+                              style: GoogleFonts.manrope(color: AppColors.textDim),
                             ),
                             onChanged: (v) => setDialogState(() => selected = v),
-                          );
-                        }),
-                      ],
+                          ),
+                          ...candidates.map((m) {
+                            final id = (m['id'] as num).toInt();
+                            final name = m['name']?.toString() ?? '';
+                            final role = m['role']?.toString() ?? '';
+                            return RadioListTile<int?>(
+                              value: id,
+                              groupValue: selected,
+                              title: Text(name, style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+                              subtitle: Text(
+                                role,
+                                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                              ),
+                              onChanged: (v) => setDialogState(() => selected = v),
+                            );
+                          }),
+                        ],
+                      ),
                     ),
             ),
             actions: [

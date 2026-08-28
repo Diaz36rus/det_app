@@ -1,5 +1,26 @@
-# Пока DNS делегируется — слушаем порт 80 (и по IP, и по имени).
-# Позже заменим на блок api.det-app.ru { ... } с автоматическим HTTPS.
+# HTTP: DNS уже на IP, HTTPS включим отдельно.
 :80 {
-	reverse_proxy api:8000
+	@site host det-app.ru www.det-app.ru
+	handle @site {
+		# Same-origin proxy: сайт → API без CORS
+		handle_path /api/* {
+			reverse_proxy api:8000
+		}
+		handle {
+			root * /srv/website
+			encode gzip
+			try_files {path} /index.html
+			file_server
+		}
+	}
+
+	@api host api.det-app.ru
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# Прямой IP / health без Host — API как раньше
+	handle {
+		reverse_proxy api:8000
+	}
 }

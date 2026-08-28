@@ -106,6 +106,8 @@ def workshop_for(category: str, name: str) -> str:
     blob = f"{category} {name}".lower()
     if "химчист" in blob:
         return "Химчистка"
+    if any(x in blob for x in ("кузовн", "разбор", "сборк", "демонтаж", "окраск", "покраск", "маляр")):
+        return "Кузовные работы"
     if any(x in blob for x in ("полир", "керамик", "силант", "антидожд", "krytex")):
         return "Полировка"
     if any(x in blob for x in ("оклей", "пленк", "плёнк", "тонир")):

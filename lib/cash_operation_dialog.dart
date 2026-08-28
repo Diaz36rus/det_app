@@ -60,6 +60,8 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
   int? _inventoryId;
   int? _registerId;
   double? _payrollHint;
+  double? _payrollPaid;
+  double? _payrollDue;
   bool _saving = false;
   bool _loadingEdit = false;
   String? _error;
@@ -159,15 +161,24 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
 
   Future<void> _refreshPayrollHint() async {
     if (_masterId == null) {
-      setState(() => _payrollHint = null);
+      setState(() {
+        _payrollHint = null;
+        _payrollPaid = null;
+        _payrollDue = null;
+      });
       return;
     }
     final now = DateTime.now();
     final start = DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
     final end = DateFormat('yyyy-MM-dd').format(now);
-    final hint = await DatabaseHelper().suggestMasterPayroll(_masterId!, start, end);
+    final accrued = await DatabaseHelper().suggestMasterPayroll(_masterId!, start, end);
+    final paid = await DatabaseHelper().sumMasterPayrollPaid(_masterId!, start, end);
     if (!mounted) return;
-    setState(() => _payrollHint = hint);
+    setState(() {
+      _payrollHint = accrued;
+      _payrollPaid = paid;
+      _payrollDue = (accrued - paid).clamp(0, double.infinity);
+    });
   }
 
   void _applyTemplate(CashTemplate t) {
@@ -305,7 +316,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
     return AlertDialog(
       backgroundColor: AppColors.surface,
       title: Text(
-        _isEdit ? 'Изменить операцию' : 'Операция кассы',
+        _isEdit ? 'Изменить операцию' : 'Новый платёж',
         style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 18),
       ),
       content: SizedBox(
@@ -361,7 +372,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'Шаблон',
+                      'Быстрые действия',
                       style: GoogleFonts.manrope(
                         color: AppColors.textDim,
                         fontSize: 12,
@@ -469,21 +480,24 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                           _refreshPayrollHint();
                         },
                       ),
-                      if (_payrollHint != null && _payrollHint! > 0) ...[
+                      if (_payrollHint != null) ...[
                         const SizedBox(height: 6),
                         Text(
-                          'По работам за месяц ≈ ${NumberFormat('#,##0.##', 'ru_RU').format(_payrollHint)} ₽ — подсказка, не авто',
+                          'За месяц: начислено ${NumberFormat('#,##0.##', 'ru_RU').format(_payrollHint)} ₽'
+                          '${_payrollPaid != null ? ' · выплачено ${NumberFormat('#,##0.##', 'ru_RU').format(_payrollPaid)} ₽' : ''}'
+                          '${_payrollDue != null && _payrollDue! > 0 ? ' · к выплате ${NumberFormat('#,##0.##', 'ru_RU').format(_payrollDue)} ₽' : ''}',
                           style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
                         ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            onPressed: () {
-                              _amountCtrl.text = _payrollHint!.toStringAsFixed(0);
-                            },
-                            child: const Text('Подставить'),
+                        if (_payrollDue != null && _payrollDue! > 0)
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
+                              onPressed: () {
+                                _amountCtrl.text = _payrollDue!.toStringAsFixed(0);
+                              },
+                              child: const Text('Подставить к выплате'),
+                            ),
                           ),
-                        ),
                       ],
                     ],
                     if (_needsInventory) ...[

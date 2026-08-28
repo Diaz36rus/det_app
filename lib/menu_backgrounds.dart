@@ -61,8 +61,8 @@ class MenuBackgrounds {
                 fit: BoxFit.cover,
                 alignment: Alignment.center,
                 errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                // Заметнее атмосфера студии, но без спора с таблицами.
-                opacity: const AlwaysStoppedAnimation(0.42),
+                // Атмосфера студии сквозь стеклянные колонки доски.
+                opacity: const AlwaysStoppedAnimation(0.55),
               ),
             ),
           if (asset != null)
@@ -73,9 +73,9 @@ class MenuBackgrounds {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      AppColors.bg.withOpacity(0.28),
-                      AppColors.bg.withOpacity(0.52),
-                      AppColors.bg.withOpacity(0.78),
+                      AppColors.bg.withOpacity(0.22),
+                      AppColors.bg.withOpacity(0.40),
+                      AppColors.bg.withOpacity(0.62),
                     ],
                   ),
                 ),

@@ -8,6 +8,7 @@ import 'app_theme.dart';
 import 'database.dart';
 import 'order_details_dialog.dart';
 import 'tour_keys.dart';
+import 'app_tours_catalog.dart';
 
 /// Считает PopupRoute (диалоги) на корневом навигаторе.
 /// Нужен в [MaterialApp.navigatorObservers], чтобы обучение пряталось,
@@ -40,312 +41,6 @@ class TourNavBridge extends NavigatorObserver {
   }
 }
 
-class AppTourStep {
-  final String title;
-  final String body;
-  final GlobalKey? targetKey;
-  /// Индекс пункта меню HomeScreen (null = не переключать).
-  final int? menuIndex;
-  /// Перед шагом закрыть открытую карточку заказа (и подобные dialog).
-  final bool dismissOrderDetails;
-  /// Нужен хотя бы один заказ в БД (иначе шаг бессмыслен / ломает сценарий).
-  final bool requireOrders;
-
-  const AppTourStep({
-    required this.title,
-    required this.body,
-    this.targetKey,
-    this.menuIndex,
-    this.dismissOrderDetails = false,
-    this.requireOrders = false,
-  });
-}
-
-class AppTour {
-  final String id;
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final List<AppTourStep> steps;
-
-  const AppTour({
-    required this.id,
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.steps,
-  });
-}
-
-/// Каталог туров обучения.
-class AppTours {
-  static final List<AppTour> all = [
-    AppTour(
-      id: 'ui',
-      title: 'Знакомство с интерфейсом',
-      subtitle: 'Где что лежит — за 2 минуты',
-      icon: Icons.map_outlined,
-      steps: [
-        AppTourStep(
-          title: 'Давайте осмотримся',
-          body: 'Это короткая прогулка по приложению. Подсветка покажет, о чём речь — '
-              'туда можно нажимать и вводить данные. '
-              '«Пропустить» — только этот шаг, «Закончить» — выйти из обучения.',
-        ),
-        AppTourStep(
-          title: 'Глобальный поиск',
-          body: 'Это одна из сильных сторон Det App: один поиск по всему приложению. '
-              'Нажмите сюда и попробуйте: окно поиска откроется поверх обучения — '
-              'можно ввести имя, телефон, номер, VIN или заказ, посмотреть результат и закрыть. '
-              'Потом продолжайте тур кнопкой «Далее».',
-          targetKey: TourKeys.search,
-        ),
-        AppTourStep(
-          title: 'Рабочие зоны (цеха)',
-          body: 'Здесь мастер заходит «в свой цех»: мойка, полировка, оклейка и т.д. '
-              'Видит только свои задачи, без лишнего.',
-          targetKey: TourKeys.workshops,
-        ),
-        // В туре «интерфейс» не переключаем тяжёлые экраны — только подсветка меню.
-        AppTourStep(
-          title: 'Доска заказов',
-          body: 'Главный экран дня. Все машины в работе — по этапам, как на стене со стикерами. '
-              'Отсюда открывают любой заказ.',
-          targetKey: TourKeys.menuBoard,
-          menuIndex: 0,
-        ),
-        AppTourStep(
-          title: 'Новый заказ',
-          body: 'Сюда заходите, когда клиент приехал или записался. '
-              'Заполните данные, выберите услуги — и заказ появится на доске.',
-          targetKey: TourKeys.menuNewOrder,
-          menuIndex: 0,
-        ),
-        AppTourStep(
-          title: 'Календарь дня',
-          body: 'Здесь видно загрузку студии по времени. Есть две вкладки: '
-              '«Общая запись» — машина целиком: когда приехала и когда примерно отдаём. '
-              'Удобно смотреть день и ставить новую запись. '
-              '«Детальное время» — уже по работам и цехам: когда мойка, полировка, оклейка. '
-              'Нужно, чтобы не пересечь мастеров и понять реальную очередь.',
-          targetKey: TourKeys.menuCalendar,
-          menuIndex: 0,
-        ),
-        AppTourStep(
-          title: 'Клиенты и их история',
-          body: 'Телефонная книга студии: кто был, какие авто, какой класс. '
-              'Откройте клиента — увидите историю заказов: что уже делали раньше. '
-              'Так проще предложить повторный сервис и не спрашивать всё с нуля.',
-          targetKey: TourKeys.menuClients,
-          menuIndex: 0,
-        ),
-        AppTourStep(
-          title: 'Касса',
-          body: 'Все деньги: что приняли с клиентов и на что потратили. '
-              'Подробнее — в отдельном обучении «Касса и смена».',
-          targetKey: TourKeys.menuCash,
-          menuIndex: 0,
-        ),
-        AppTourStep(
-          title: 'Остальное меню',
-          body: 'На телефоне в режиме «ПК + телефон» меню укорочено: смена здесь, '
-              'а статистика, сотрудники, услуги и склад — на компьютере. '
-              'Если ПК нет — в меню выберите «Полный телефон». '
-              'Для первого дня достаточно доски, нового заказа и кассы.',
-          targetKey: TourKeys.menuCompleted,
-          menuIndex: 0,
-        ),
-        AppTourStep(
-          title: 'Быстрый выбор дня',
-          body: 'Нажмите дату здесь — сразу откроется календарь на этот день. '
-              'Удобно, не заходя в меню.',
-          targetKey: TourKeys.quickCalendar,
-          menuIndex: 0,
-        ),
-        AppTourStep(
-          title: 'Сообщить об ошибке',
-          body: 'Нашли сбой или странное поведение — нажмите «Сообщить об ошибке». '
-              'Кратко укажите: где случилось, что делали и в чём ошибка. Сообщение сохранится в базе. '
-              'Иконка списка справа — все ваши репорты: открытые, исправленные, с пометкой. '
-              'Красный значок — сколько ещё не закрыто. Так тестировщик и разработчик не теряют баги.',
-          targetKey: TourKeys.bugReport,
-          menuIndex: 0,
-        ),
-        AppTourStep(
-          title: 'Можно начинать работу',
-          body: 'Дальше лучше пройти «Создание заказа от и до» — это главный сценарий смены.',
-          targetKey: TourKeys.trainButton,
-          menuIndex: 0,
-        ),
-      ],
-    ),
-    AppTour(
-      id: 'order',
-      title: 'Создание заказа от и до',
-      subtitle: 'Как принять машину и не упустить детали',
-      icon: Icons.add_shopping_cart_outlined,
-      steps: [
-        AppTourStep(
-          title: 'Сценарий приёмщика',
-          body: 'Сейчас пройдём путь: клиент → когда забрать → что делаем → сохранить → '
-              'увидеть на доске → принять оплату.',
-          menuIndex: 1,
-        ),
-        AppTourStep(
-          title: 'Кто приехал',
-          body: 'Введите телефон с +7. Если человек уже был у вас — имя и машины подставятся сами. '
-              'Укажите авто, номер и класс — от класса зависят цены.',
-          targetKey: TourKeys.orderClient,
-          menuIndex: 1,
-        ),
-        AppTourStep(
-          title: 'Когда принять и когда отдать',
-          body: 'Поставьте дату и время приёма и примерной выдачи. '
-              'Так заказ попадёт в календарь, и клиенту проще назвать срок.',
-          targetKey: TourKeys.orderSchedule,
-          menuIndex: 1,
-        ),
-        AppTourStep(
-          title: 'Что делаем с машиной',
-          body: 'Нажмите картинку услуги (мойка, полировка…). '
-              'Отметьте нужные позиции — они появятся внизу в списке. '
-              'Для оклейки откроется пакет зон: отметьте детали и сумму пакета.',
-          targetKey: TourKeys.orderGallery,
-          menuIndex: 1,
-        ),
-        AppTourStep(
-          title: 'Проверьте список и сохраните',
-          body: 'Внизу — корзина и кнопка «Создать заказ» (она в подсветке — нажмите её). '
-              'Нужны телефон, имя, авто и хотя бы одна услуга — без услуг кнопка неактивна. '
-              'После сохранения можно сразу перейти на доску или в календарь.',
-          targetKey: TourKeys.orderCart,
-          menuIndex: 1,
-        ),
-        AppTourStep(
-          title: 'Заказ на доске',
-          body: 'Вот он среди других. Нажмите на карточку — откроется полная информация: '
-              'статус, работы, оплата.',
-          targetKey: TourKeys.kanbanArea,
-          menuIndex: 0,
-          requireOrders: true,
-        ),
-        AppTourStep(
-          title: 'Как принять деньги',
-          body: 'Откройте карточку заказа с доски. Внизу: сколько должен клиент и кнопка оплаты. '
-              'Выберите способ (нал / карта / перевод) и подтвердите.',
-          menuIndex: 0,
-          requireOrders: true,
-        ),
-        AppTourStep(
-          title: 'Деньги в кассе',
-          body: 'Зайдите в «Касса» — оплата уже должна быть видна. '
-              'Так вы всегда видите, сколько пришло за день.',
-          targetKey: TourKeys.menuCash,
-          menuIndex: 4,
-        ),
-      ],
-    ),
-    AppTour(
-      id: 'cash',
-      title: 'Касса и смена',
-      subtitle: 'Несколько касс, смена и журнал',
-      icon: Icons.account_balance_wallet_outlined,
-      steps: [
-        AppTourStep(
-          title: 'Зачем касса',
-          body: 'Здесь видно: сколько взяли с клиентов и сколько потратили '
-              '(химия, зарплата, аренда…). Не только «в голове» и не только в блокноте.',
-          menuIndex: 4,
-        ),
-        AppTourStep(
-          title: 'Цифры сверху',
-          body: 'Полоска сверху — итоги за день (или неделю/месяц). '
-              'Нал, карта, перевод, по счету, расходы. «Долги» — кто ещё не расплатился.',
-          targetKey: TourKeys.cashKpi,
-          menuIndex: 4,
-        ),
-        AppTourStep(
-          title: 'Несколько касс в смене',
-          body: 'Утром откройте смену и укажите остатки по кассам: Основная, Терминал, Переводы, счёт. '
-              'Можно добавить свою кассу. Вечером закройте и сверьте факт с ожиданием.',
-          targetKey: TourKeys.cashShift,
-          menuIndex: 4,
-        ),
-        AppTourStep(
-          title: 'Быстрые кнопки расходов и приходов',
-          body: 'Красные — потратили, зелёные — получили не из заказа (например, продали химию). '
-              'Нажали — почти всё уже заполнено, осталось вписать сумму и выбрать кассу.',
-          targetKey: TourKeys.cashTemplates,
-          menuIndex: 4,
-        ),
-        AppTourStep(
-          title: 'История операций',
-          body: 'Ниже — лента всего, что произошло. Можно оставить только оплаты или только расходы. '
-              'Нажали на оплату заказа — откроется сам заказ.',
-          targetKey: TourKeys.cashJournal,
-          menuIndex: 4,
-        ),
-        AppTourStep(
-          title: 'Попробуйте сами',
-          body: 'Откройте смену → сделайте один тестовый расход (например «Кофе / еда») → '
-              'закройте смену. Так привыкнете за одну минуту.',
-          menuIndex: 4,
-        ),
-      ],
-    ),
-    AppTour(
-      id: 'order_deep',
-      title: 'Карточка заказа подробно',
-      subtitle: 'Что делать с заказом, пока машина в работе',
-      icon: Icons.fact_check_outlined,
-      steps: [
-        AppTourStep(
-          title: 'Это «паспорт» заказа',
-          body: 'Сейчас открыт пример. Сюда заходят, чтобы двигать статус, назначать мастеров, '
-              'принимать оплату и писать заметки.',
-          targetKey: TourKeys.orderDetailsHeader,
-        ),
-        AppTourStep(
-          title: 'Список работ',
-          body: 'Слева — что заказано. Можно отметить «сделано», поставить время и выбрать мастера. '
-              'Для оклейки зоны могут быть собраны в один пакет.',
-          targetKey: TourKeys.orderDetailsWorks,
-        ),
-        AppTourStep(
-          title: 'Когда начать и когда закончить',
-          body: 'Здесь общее время по заказу и техмойка. Это помогает не забыть машину в графике.',
-          targetKey: TourKeys.orderDetailsSchedule,
-        ),
-        AppTourStep(
-          title: 'Переписка по заказу',
-          body: 'Можно оставить заметку для себя, для клиента или для цеха. '
-              'Справа — история: кто что написал и что менялось.',
-          targetKey: TourKeys.orderDetailsNotes,
-        ),
-        AppTourStep(
-          title: 'Оплата и документы',
-          body: 'Внизу — сколько должны и сколько уже внесли. Печать заказ-наряда — иконка принтера в шапке. '
-              'Когда всё готово — доводите статус до выдачи.',
-          targetKey: TourKeys.orderDetailsPayment,
-        ),
-        AppTourStep(
-          title: 'Экран для мастера',
-          body: 'Карточку закрыли. Откройте «Цеха»: мастер видит только свою зону, без всей админки.',
-          targetKey: TourKeys.workshops,
-          dismissOrderDetails: true,
-        ),
-      ],
-    ),
-  ];
-
-  static AppTour? byId(String id) {
-    for (final t in all) {
-      if (t.id == id) return t;
-    }
-    return null;
-  }
-}
-
 typedef TourNavigate = Future<void> Function(int menuIndex);
 
 /// Выбор тура + запуск.
@@ -361,36 +56,77 @@ class AppTourLauncher {
         title: Text('Обучение', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
         content: SizedBox(
           width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: Text(
-                  'Короткие сценарии по основным экранам — от меню до кассы и карточки заказа.',
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    'Справочник — что означает каждая кнопка. '
+                    'Сценарии — практика «сделаем вместе» (можно позже).',
+                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+                  ),
                 ),
-              ),
-              for (final t in AppTours.all)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'СПРАВОЧНИК',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textDim,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                for (final t in AppTours.guides)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    leading: Icon(t.icon, color: AppColors.primary),
+                    title: Text(t.title, style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14)),
+                    subtitle: Text(t.subtitle, style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12)),
+                    onTap: () => Navigator.pop(ctx, t.id),
+                  ),
+                const Divider(color: AppColors.border),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'СЦЕНАРИИ',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.textDim,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                for (final t in AppTours.scenarios)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    leading: Icon(t.icon, color: const Color(0xFFF59E0B)),
+                    title: Text(t.title, style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14)),
+                    subtitle: Text(t.subtitle, style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12)),
+                    onTap: () => Navigator.pop(ctx, t.id),
+                  ),
+                const Divider(color: AppColors.border),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
-                  leading: Icon(t.icon, color: AppColors.primary),
-                  title: Text(t.title, style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14)),
-                  subtitle: Text(t.subtitle, style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12)),
-                  onTap: () => Navigator.pop(ctx, t.id),
+                  dense: true,
+                  leading: const Icon(Icons.bolt_outlined, color: Color(0xFFF59E0B)),
+                  title: Text('Быстрый старт', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14)),
+                  subtitle: Text(
+                    'Меню → доска → карточка заказа',
+                    style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                  ),
+                  onTap: () => Navigator.pop(ctx, 'quick'),
                 ),
-              const Divider(color: AppColors.border),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.bolt_outlined, color: Color(0xFFF59E0B)),
-                title: Text('Быстрый старт', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14)),
-                subtitle: Text(
-                  'Интерфейс → затем создание заказа',
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                ),
-                onTap: () => Navigator.pop(ctx, 'quick'),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
         actions: [
@@ -401,14 +137,16 @@ class AppTourLauncher {
 
     if (choice == null || !context.mounted) return;
     if (choice == 'quick') {
-      final ui = AppTours.byId('ui');
-      final order = AppTours.byId('order');
-      if (ui != null) {
-        final ok = await runTour(context, ui, onNavigate: onNavigate);
-        if (!ok || !context.mounted) return;
-      }
-      if (order != null && context.mounted) {
-        await runTour(context, order, onNavigate: onNavigate);
+      for (final id in const ['guide_shell', 'guide_board', 'order_deep']) {
+        if (!context.mounted) return;
+        if (id == 'order_deep') {
+          await _startOrderDeepTour(context, onNavigate: onNavigate);
+          continue;
+        }
+        final tour = AppTours.byId(id);
+        if (tour == null) continue;
+        final ok = await runTour(context, tour, onNavigate: onNavigate);
+        if (!ok) return;
       }
       return;
     }
@@ -512,6 +250,22 @@ class AppTourLauncher {
     }
   }
 
+  static Future<void> _ensureTargetVisible(GlobalKey key) async {
+    final ctx = key.currentContext;
+    if (ctx == null) return;
+    try {
+      await Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.25,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+    } catch (_) {
+      // Цель не в Scrollable — ок.
+    }
+  }
+
   /// Показ шага через Overlay навигатора (не rootOverlay и не ModalRoute).
   /// Так диалоги (поиск, баг-репорт и т.д.), открытые во время шага, оказываются
   /// выше тура — с ними можно полноценно работать, затем закрыть и продолжить обучение.
@@ -579,11 +333,16 @@ class AppTourLauncher {
       }
       if (step.menuIndex != null) {
         await onNavigate(step.menuIndex!);
-        await Future<void>.delayed(const Duration(milliseconds: 380));
+        await Future<void>.delayed(const Duration(milliseconds: 280));
       }
       if (step.targetKey != null) {
-        await _waitForTourTarget(step.targetKey!, tries: 20);
+        await _waitForTourTarget(step.targetKey!, tries: 30);
+        await _ensureTargetVisible(step.targetKey!);
       }
+      if (!context.mounted) return false;
+
+      // Пауза, чтобы «хвост» клика с прошлого шага не нажал Далее/Пропустить.
+      await Future<void>.delayed(const Duration(milliseconds: 220));
       if (!context.mounted) return false;
 
       final action = await _presentStep(
@@ -663,6 +422,8 @@ class _TourOverlayState extends State<_TourOverlay>
   bool _refineScheduled = false;
   /// Глубина PopupRoute на момент показа шага (для order_deep уже может быть 1).
   late int _popupDepthAtOpen;
+  /// Блокируем кнопки сразу после появления — иначе клик с прошлого шага проскакивает.
+  bool _actionsArmed = false;
 
   bool get _pausedForDialog =>
       TourNavBridge.instance.popupDepth.value > _popupDepthAtOpen;
@@ -678,6 +439,9 @@ class _TourOverlayState extends State<_TourOverlay>
       duration: const Duration(milliseconds: 720),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateLayout(restartArrow: true));
+    Future<void>.delayed(const Duration(milliseconds: 380), () {
+      if (mounted) setState(() => _actionsArmed = true);
+    });
   }
 
   void _onPopupDepth() {
@@ -939,8 +703,9 @@ class _TourOverlayState extends State<_TourOverlay>
 
     // Overlay + pass-through в hole; зона карточки всегда кликабельна (даже над hole).
     final cardHit = cardRect.inflate(4);
+    final passHole = widget.step.allowTargetTap ? hole?.deflate(3) : null;
     return _HolePassThrough(
-      hole: hole?.deflate(3),
+      hole: passHole,
       card: cardHit,
       child: Stack(
         fit: StackFit.expand,
@@ -1031,14 +796,18 @@ class _TourOverlayState extends State<_TourOverlay>
                     Row(
                       children: [
                         TextButton(
-                          onPressed: () => widget.onAction(_TourAction.finish),
+                          onPressed: _actionsArmed
+                              ? () => widget.onAction(_TourAction.finish)
+                              : null,
                           child: Text(
                             'Закончить',
                             style: GoogleFonts.manrope(color: AppColors.textDim),
                           ),
                         ),
                         TextButton(
-                          onPressed: () => widget.onAction(_TourAction.skip),
+                          onPressed: _actionsArmed
+                              ? () => widget.onAction(_TourAction.skip)
+                              : null,
                           child: Text(
                             'Пропустить',
                             style: GoogleFonts.manrope(color: AppColors.textMuted),
@@ -1046,7 +815,9 @@ class _TourOverlayState extends State<_TourOverlay>
                         ),
                         const Spacer(),
                         ElevatedButton(
-                          onPressed: () => widget.onAction(_TourAction.next),
+                          onPressed: _actionsArmed
+                              ? () => widget.onAction(_TourAction.next)
+                              : null,
                           child: Text(
                             isLast ? 'Готово' : 'Далее',
                             style: GoogleFonts.manrope(fontWeight: FontWeight.w700),

@@ -32,6 +32,11 @@ class TourKeys {
   static final cashJournal = GlobalKey(debugLabel: 'tour_cash_journal');
 
   static final kanbanArea = GlobalKey(debugLabel: 'tour_kanban');
+  static final kanbanSearch = GlobalKey(debugLabel: 'tour_kanban_search');
+  static final kanbanStatusFilter = GlobalKey(debugLabel: 'tour_kanban_status');
+  static final kanbanDebtFilter = GlobalKey(debugLabel: 'tour_kanban_debt');
+  static final kanbanTodayFilter = GlobalKey(debugLabel: 'tour_kanban_today');
+  static final updateButton = GlobalKey(debugLabel: 'tour_update');
 
   /// Карточка заказа (OrderDetailsDialog).
   static final orderDetailsHeader = GlobalKey(debugLabel: 'tour_od_header');
@@ -39,6 +44,18 @@ class TourKeys {
   static final orderDetailsSchedule = GlobalKey(debugLabel: 'tour_od_schedule');
   static final orderDetailsNotes = GlobalKey(debugLabel: 'tour_od_notes');
   static final orderDetailsPayment = GlobalKey(debugLabel: 'tour_od_payment');
+
+  static final calendarArea = GlobalKey(debugLabel: 'tour_calendar');
+  static final calendarMode = GlobalKey(debugLabel: 'tour_calendar_mode');
+  static final clientsArea = GlobalKey(debugLabel: 'tour_clients');
+  static final warehouseArea = GlobalKey(debugLabel: 'tour_warehouse');
+  static final warehouseAdd = GlobalKey(debugLabel: 'tour_warehouse_add');
+  static final completedArea = GlobalKey(debugLabel: 'tour_completed');
+  static final statsArea = GlobalKey(debugLabel: 'tour_stats');
+  static final staffArea = GlobalKey(debugLabel: 'tour_staff');
+  static final servicesArea = GlobalKey(debugLabel: 'tour_services');
+  static final mobileModeButton = GlobalKey(debugLabel: 'tour_mobile_mode');
+  static final menuDrawerHint = GlobalKey(debugLabel: 'tour_drawer_hint');
 
   static GlobalKey? menuKeyForIndex(int id) {
     switch (id) {

@@ -73,6 +73,13 @@ class CompanyOut(BaseModel):
 
 class CompanyPatch(BaseModel):
     is_active: bool | None = None
+    name: str | None = Field(default=None, min_length=2, max_length=200)
+
+
+class CompanyProfilePatch(BaseModel):
+    """Правка профиля своей студии (владелец / с company.manage)."""
+
+    name: str | None = Field(default=None, min_length=2, max_length=200)
 
 
 class PlatformUserOut(BaseModel):

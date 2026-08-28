@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_toast.dart';
+import 'app_notifications.dart';
 import 'database.dart';
 import 'debt_reminder.dart';
 
@@ -23,7 +24,7 @@ class ReadyNotifyActions {
     final price = (order['price'] as num?)?.toDouble() ?? 0;
     final paid = (order['paid_amount'] as num?)?.toDouble() ?? 0;
     final debt = price - paid;
-    final text = DebtReminder.buildReadyText(
+    final text = await DebtReminder.buildReadyTextAsync(
       clientName: order['client_name']?.toString() ?? '',
       orderId: orderId,
       plate: order['plate']?.toString(),
@@ -52,6 +53,10 @@ class ReadyNotifyActions {
       await DatabaseHelper().saveOrderHandover(orderId, {'handover_notified': 1});
       await DatabaseHelper().addOrderEvent(orderId, 'WhatsApp: уведомление о готовности');
     }
+    await AppNotifications.postClientReadyWa(
+      orderId: orderId,
+      clientName: order['client_name']?.toString(),
+    );
     return true;
   }
 

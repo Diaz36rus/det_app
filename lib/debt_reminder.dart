@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import 'studio_prefs.dart';
+
 /// Тексты клиенту + копирование / попытка открыть WhatsApp.
 class DebtReminder {
   DebtReminder._();
@@ -25,13 +27,38 @@ class DebtReminder {
   }) {
     final who = clientName.trim().isEmpty ? 'Клиент' : clientName.trim();
     final carBit = _carBit(plate, car);
+    final debtStr = '${_money.format(debt)} ₽';
+    // Custom template loaded async elsewhere — sync path uses cached prefs via Future in share callers.
+    // Keep sync default; see [buildTextAsync] for studio templates.
     final buf = StringBuffer();
     buf.writeln('Здравствуйте, $who!');
     buf.writeln('Напоминаем о задолженности по заказу #$orderId');
     if (carBit.isNotEmpty) buf.writeln(carBit);
-    buf.writeln('Сумма: ${_money.format(debt)} ₽');
+    buf.writeln('Сумма: $debtStr');
     buf.write('Ждём вас в студии.');
     return buf.toString();
+  }
+
+  static Future<String> buildTextAsync({
+    required String clientName,
+    required int orderId,
+    required double debt,
+    String? plate,
+    String? car,
+  }) async {
+    final tpls = await StudioPrefs.loadMessageTemplates();
+    final custom = (tpls['debt'] ?? '').trim();
+    if (custom.isEmpty) {
+      return buildText(clientName: clientName, orderId: orderId, debt: debt, plate: plate, car: car);
+    }
+    final who = clientName.trim().isEmpty ? 'Клиент' : clientName.trim();
+    return StudioPrefs.applyTemplate(
+      custom,
+      name: who,
+      order: '#$orderId',
+      debt: '${_money.format(debt)} ₽',
+      car: _carBit(plate, car),
+    );
   }
 
   /// Сообщение «автомобиль готов к выдаче» (+ долг, если есть).
@@ -54,6 +81,34 @@ class DebtReminder {
     }
     buf.write('Ждём вас в студии!');
     return buf.toString();
+  }
+
+  static Future<String> buildReadyTextAsync({
+    required String clientName,
+    required int orderId,
+    String? plate,
+    String? car,
+    double debt = 0,
+  }) async {
+    final tpls = await StudioPrefs.loadMessageTemplates();
+    final custom = (tpls['ready'] ?? '').trim();
+    if (custom.isEmpty) {
+      return buildReadyText(
+        clientName: clientName,
+        orderId: orderId,
+        plate: plate,
+        car: car,
+        debt: debt,
+      );
+    }
+    final who = clientName.trim().isEmpty ? 'Клиент' : clientName.trim();
+    return StudioPrefs.applyTemplate(
+      custom,
+      name: who,
+      order: '#$orderId',
+      debt: debt > 0.01 ? '${_money.format(debt)} ₽' : '',
+      car: _carBit(plate, car),
+    );
   }
 
   static Future<void> copyText(String text) => Clipboard.setData(ClipboardData(text: text));

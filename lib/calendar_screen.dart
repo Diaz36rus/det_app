@@ -1,13 +1,17 @@
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'app_theme.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
+import 'open_url.dart';
 import 'order_details_dialog.dart';
 import 'responsive.dart';
+import 'studio_prefs.dart';
+import 'tour_keys.dart';
 
 class CalendarScreen extends StatefulWidget {
   final DateTime selectedDate;
@@ -44,15 +48,20 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   DateTime? _dragFullStart;
   DateTime? _dragFullEnd;
 
+  /// Правая панель: выбранная запись + месяц мини-календаря.
+  int? _selectedOrderId;
+  Map<String, dynamic>? _selectedOrder;
+  late DateTime _monthView;
+
   @override
   void onDatabaseChanged() => _loadData(showSpinner: false);
 
-  /// Высота одного 30-минутного слота.
-  final double _slotHeight = 36.0;
+  /// Высота одного 30-минутного слота (на телефоне чуть выше для тача).
+  double _slotHeight = 36.0;
   final int _slotMinutes = 30;
   final double _headerHeight = 40.0;
-  final int _startHour = 8;
-  final int _endHour = 22;
+  int _startHour = 8;
+  int _endHour = 22;
   /// Синхрон горизонтального скролла: заголовки ↔ сетка (детальное время).
   final ScrollController _hHeaderCtrl = ScrollController();
   final ScrollController _hBodyCtrl = ScrollController();
@@ -73,11 +82,20 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   @override
   void initState() {
     super.initState();
+    final d = widget.selectedDate;
+    _monthView = DateTime(d.year, d.month);
     _hHeaderCtrl.addListener(_syncHFromHeader);
     _hBodyCtrl.addListener(_syncHFromBody);
     // После первого кадра — иначе setState из initState/переключения тура может оборвать загрузку.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final hours = await StudioPrefs.loadCalendarHours();
+      if (!mounted) return;
+      setState(() {
+        _startHour = hours.$1;
+        _endHour = hours.$2;
+      });
+      _loadData();
     });
   }
 
@@ -113,8 +131,101 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
         widget.selectedDate.month == oldWidget.selectedDate.month &&
         widget.selectedDate.day == oldWidget.selectedDate.day;
     if (!sameDay) {
+      final d = widget.selectedDate;
+      if (_monthView.year != d.year || _monthView.month != d.month) {
+        _monthView = DateTime(d.year, d.month);
+      }
+      _selectedOrderId = null;
+      _selectedOrder = null;
       _loadData();
     }
+  }
+
+  Future<void> _selectOrder(int orderId) async {
+    setState(() {
+      _selectedOrderId = orderId;
+      _selectedOrder = null;
+    });
+    final full = await DatabaseHelper().getOrderById(orderId);
+    if (!mounted || _selectedOrderId != orderId) return;
+    setState(() => _selectedOrder = full);
+  }
+
+  void _clearSelectedOrder() {
+    setState(() {
+      _selectedOrderId = null;
+      _selectedOrder = null;
+    });
+  }
+
+  void _createNewEntry() {
+    final now = TimeOfDay.now();
+    final slot = TimeOfDay(hour: now.hour.clamp(_startHour, _endHour), minute: now.minute < 30 ? 0 : 30);
+    widget.onCreateAt?.call(_dateOnly(widget.selectedDate), slot);
+  }
+
+  Future<void> _deleteSelectedOrder() async {
+    final id = _selectedOrderId;
+    if (id == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Удалить заказ #$id?', style: GoogleFonts.manrope(color: AppColors.text)),
+        content: Text(
+          'Запись исчезнет с календаря и доски.',
+          style: GoogleFonts.manrope(color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await DatabaseHelper().deleteOrder(id);
+    _clearSelectedOrder();
+    _loadData(showSpinner: false);
+  }
+
+  String _fmtMoney(num v) {
+    final s = NumberFormat('#,###', 'ru_RU').format(v.round());
+    return '${s.replaceAll('\u00A0', ' ')} ₽';
+  }
+
+  String _fmtHm(DateTime? t) {
+    if (t == null) return '—';
+    return '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  ({int count, double plan, double fact, double loadPct, int clients}) _periodStats() {
+    final orders = _orders;
+    final names = <String>{};
+    var plan = 0.0;
+    var fact = 0.0;
+    var busyMin = 0;
+    for (final o in orders) {
+      plan += (o['price'] as num?)?.toDouble() ?? 0;
+      fact += (o['paid_amount'] as num?)?.toDouble() ?? 0;
+      final name = (o['client_name'] ?? '').toString().trim();
+      if (name.isNotEmpty) names.add(name);
+      final start = _tryParseDateTime(o['start_time']?.toString());
+      if (start == null) {
+        busyMin += 60;
+        continue;
+      }
+      var end = _tryParseDateTime(o['end_time']?.toString()) ?? start.add(const Duration(hours: 1));
+      if (!end.isAfter(start)) end = start.add(const Duration(minutes: 30));
+      busyMin += end.difference(start).inMinutes.clamp(30, 12 * 60);
+    }
+    final days = _weekMode ? 7 : 1;
+    final capacity = (_endHour - _startHour) * 60 * days;
+    final load = capacity <= 0 ? 0.0 : (busyMin / capacity * 100).clamp(0.0, 100.0);
+    return (count: orders.length, plan: plan, fact: fact, loadPct: load, clients: names.length);
   }
 
   DateTime _weekStart(DateTime d) {
@@ -466,7 +577,9 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
   }
 
   Widget _modeToggle({required bool mobile}) {
-    return Container(
+    return KeyedSubtree(
+      key: TourKeys.calendarMode,
+      child: Container(
       decoration: BoxDecoration(
         color: AppColors.bg.withOpacity(0.45),
         borderRadius: BorderRadius.circular(AppTheme.radius),
@@ -507,6 +620,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           ),
         ],
       ),
+    ),
     );
   }
 
@@ -517,13 +631,16 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     final detailColumns = WORKSHOPS;
 
     final mobile = AppResponsive.isMobile(context);
+    _slotHeight = mobile ? 42.0 : 36.0;
+    final hPad = AppResponsive.pagePadH(context);
 
     return Scaffold(
+      key: TourKeys.calendarArea,
       backgroundColor: Colors.transparent,
       body: Column(
         children: [
           Padding(
-            padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, mobile ? 12 : 20, mobile ? 12 : 24, 8),
+            padding: EdgeInsets.fromLTRB(hPad, mobile ? 8 : 20, hPad, 8),
             child: mobile
                 ? Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -552,217 +669,232 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                   ),
           ),
           Padding(
-            padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 6),
+            padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 6),
             child: _weekStrip(mobile: mobile),
           ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 0, mobile ? 12 : 24, 6),
-            child: Text(
-              _weekMode
-                  ? 'Неделя · пустой слот — новый заказ · удерживайте карточку для переноса'
-                  : 'Пустой слот — новый заказ · удерживайте карточку — перенос по времени',
-              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+          if (!mobile)
+            Padding(
+              padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 6),
+              child: Text(
+                _weekMode
+                    ? 'Неделя · пустой слот — новый заказ · удерживайте карточку для переноса'
+                    : 'Пустой слот — новый заказ · удерживайте карточку — перенос по времени',
+                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+              ),
             ),
-          ),
           Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-                : Padding(
-                    padding: EdgeInsets.fromLTRB(mobile ? 8 : 12, 8, mobile ? 12 : 16, 16),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final timeGutter = mobile ? 44.0 : 56.0;
-                        final bodyColW = (constraints.maxWidth - timeGutter).clamp(120.0, 4000.0);
-                        final weekDays = _weekDays(widget.selectedDate);
-                        const colGap = 10.0;
-                        // «Детальное время»: колонки цехов на всю ширину (не фиксированные 200px).
-                        final detailN = detailColumns.length;
-                        final minDetailCol = mobile ? 140.0 : 160.0;
-                        final detailFit =
-                            detailN > 0 ? (bodyColW - colGap * detailN) / detailN : minDetailCol;
-                        final detailColW = detailFit < minDetailCol ? minDetailCol : detailFit;
-                        // Неделя: дни тоже растягиваем, если влезают.
-                        final weekN = weekDays.length;
-                        final minWeekCol = mobile ? 110.0 : 130.0;
-                        final weekFit =
-                            weekN > 0 ? (bodyColW - colGap * weekN) / weekN : minWeekCol;
-                        final weekColW = weekFit < minWeekCol ? minWeekCol : weekFit;
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                      : Padding(
+                          padding: EdgeInsets.fromLTRB(mobile ? 6 : 12, 4, mobile ? 6 : 8, 8),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final timeGutter = mobile ? 40.0 : 56.0;
+                              final bodyColW = (constraints.maxWidth - timeGutter).clamp(120.0, 4000.0);
+                              final weekDays = _weekDays(widget.selectedDate);
+                              const colGap = 10.0;
+                              // «Детальное время»: колонки цехов на всю ширину (не фиксированные 200px).
+                              final detailN = detailColumns.length;
+                              final minDetailCol = mobile ? 150.0 : 160.0;
+                              final detailFit =
+                                  detailN > 0 ? (bodyColW - colGap * detailN) / detailN : minDetailCol;
+                              final detailColW = detailFit < minDetailCol ? minDetailCol : detailFit;
+                              // Неделя: дни тоже растягиваем, если влезают.
+                              final weekN = weekDays.length;
+                              final minWeekCol = mobile ? 120.0 : 130.0;
+                              final weekFit =
+                                  weekN > 0 ? (bodyColW - colGap * weekN) / weekN : minWeekCol;
+                              final weekColW = weekFit < minWeekCol ? minWeekCol : weekFit;
 
-                        Widget timeGutterCol() => SizedBox(
-                              width: timeGutter,
-                              child: Column(
-                                children: List.generate(_slotsCount, (i) {
-                                  final totalMin = _startHour * 60 + i * _slotMinutes;
-                                  final h = totalMin ~/ 60;
-                                  final m = totalMin % 60;
-                                  final isHour = m == 0;
-                                  return SizedBox(
-                                    height: _slotHeight,
-                                    child: Align(
-                                      alignment: Alignment.topRight,
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(top: 2, right: 4),
-                                        child: Text(
-                                          "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}",
-                                          style: GoogleFonts.manrope(
-                                            color: isHour ? AppColors.textMuted : AppColors.textDim,
-                                            fontSize: isHour ? 11 : 10,
-                                            fontWeight: isHour ? FontWeight.w700 : FontWeight.w500,
+                              Widget timeGutterCol() => SizedBox(
+                                    width: timeGutter,
+                                    child: Column(
+                                      children: List.generate(_slotsCount, (i) {
+                                        final totalMin = _startHour * 60 + i * _slotMinutes;
+                                        final h = totalMin ~/ 60;
+                                        final m = totalMin % 60;
+                                        final isHour = m == 0;
+                                        return SizedBox(
+                                          height: _slotHeight,
+                                          child: Align(
+                                            alignment: Alignment.topRight,
+                                            child: Padding(
+                                              padding: const EdgeInsets.only(top: 2, right: 4),
+                                              child: Text(
+                                                "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}",
+                                                style: GoogleFonts.manrope(
+                                                  color: isHour ? AppColors.textMuted : AppColors.textDim,
+                                                  fontSize: isHour ? 11 : 10,
+                                                  fontWeight: isHour ? FontWeight.w700 : FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                      ),
+                                        );
+                                      }),
                                     ),
                                   );
-                                }),
-                              ),
-                            );
 
-                        if (_weekMode) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              SizedBox(
-                                height: _headerHeight,
-                                child: Row(
+                              if (_weekMode) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
                                   children: [
-                                    SizedBox(width: timeGutter),
+                                    SizedBox(
+                                      height: _headerHeight,
+                                      child: Row(
+                                        children: [
+                                          SizedBox(width: timeGutter),
+                                          Expanded(
+                                            child: SingleChildScrollView(
+                                              controller: _hHeaderCtrl,
+                                              scrollDirection: Axis.horizontal,
+                                              child: Row(
+                                                children: weekDays.map((d) {
+                                                  final label = DateFormat('E d.MM', 'ru').format(d);
+                                                  return _buildColumnHeader(label, weekColW);
+                                                }).toList(),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                     Expanded(
                                       child: SingleChildScrollView(
-                                        controller: _hHeaderCtrl,
-                                        scrollDirection: Axis.horizontal,
                                         child: Row(
-                                          children: weekDays.map((d) {
-                                            final label = DateFormat('E d.MM', 'ru').format(d);
-                                            return _buildColumnHeader(label, weekColW);
-                                          }).toList(),
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            timeGutterCol(),
+                                            SizedBox(
+                                              width: bodyColW,
+                                              child: SingleChildScrollView(
+                                                controller: _hBodyCtrl,
+                                                scrollDirection: Axis.horizontal,
+                                                child: Row(
+                                                  children: weekDays.map((d) {
+                                                    final key = DateFormat('yyyy-MM-dd').format(d);
+                                                    return _buildColumnBody(
+                                                      DateFormat('E d.MM', 'ru').format(d),
+                                                      weekColW,
+                                                      gridHeight,
+                                                      true,
+                                                      viewDay: d,
+                                                      ordersOverride: _ordersByDay[key] ?? const [],
+                                                    );
+                                                  }).toList(),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
                                     ),
                                   ],
-                                ),
-                              ),
-                              Expanded(
-                                child: SingleChildScrollView(
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      timeGutterCol(),
-                                      SizedBox(
-                                        width: bodyColW,
-                                        child: SingleChildScrollView(
-                                          controller: _hBodyCtrl,
-                                          scrollDirection: Axis.horizontal,
-                                          child: Row(
-                                            children: weekDays.map((d) {
-                                              final key = DateFormat('yyyy-MM-dd').format(d);
-                                              return _buildColumnBody(
-                                                DateFormat('E d.MM', 'ru').format(d),
-                                                weekColW,
-                                                gridHeight,
-                                                true,
-                                                viewDay: d,
-                                                ordersOverride: _ordersByDay[key] ?? const [],
-                                              );
-                                            }).toList(),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          );
-                        }
+                                );
+                              }
 
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            SizedBox(
-                              height: _headerHeight,
-                              child: Row(
+                              return Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  SizedBox(width: timeGutter),
-                                  if (_showGeneral)
-                                    Expanded(
-                                      child: _buildColumnHeader('Общая запись', null),
-                                    )
-                                  else if (detailColW > minDetailCol + 0.5)
-                                    // Влезают на экран — растягиваем на всю ширину.
-                                    ...detailColumns.map(
-                                      (s) => Expanded(child: _buildColumnHeader(s, null)),
-                                    )
-                                  else
-                                    Expanded(
-                                      child: SingleChildScrollView(
-                                        controller: _hHeaderCtrl,
-                                        scrollDirection: Axis.horizontal,
-                                        child: Row(
-                                          children: detailColumns
-                                              .map((s) => _buildColumnHeader(s, detailColW))
-                                              .toList(),
-                                        ),
+                                  SizedBox(
+                                    height: _headerHeight,
+                                    child: Row(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        SizedBox(width: timeGutter),
+                                        if (_showGeneral)
+                                          Expanded(
+                                            child: _buildColumnHeader('Общая запись', null),
+                                          )
+                                        else if (detailColW > minDetailCol + 0.5)
+                                          // Влезают на экран — растягиваем на всю ширину.
+                                          ...detailColumns.map(
+                                            (s) => Expanded(child: _buildColumnHeader(s, null)),
+                                          )
+                                        else
+                                          Expanded(
+                                            child: SingleChildScrollView(
+                                              controller: _hHeaderCtrl,
+                                              scrollDirection: Axis.horizontal,
+                                              child: Row(
+                                                children: detailColumns
+                                                    .map((s) => _buildColumnHeader(s, detailColW))
+                                                    .toList(),
+                                              ),
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    child: SingleChildScrollView(
+                                      child: Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          timeGutterCol(),
+                                          if (_showGeneral)
+                                            Expanded(
+                                              child: _buildColumnBody(
+                                                'Общая запись',
+                                                null,
+                                                gridHeight,
+                                                true,
+                                              ),
+                                            )
+                                          else if (detailColW > minDetailCol + 0.5)
+                                            ...detailColumns.map(
+                                              (s) => Expanded(
+                                                child: _buildColumnBody(
+                                                  s,
+                                                  null,
+                                                  gridHeight,
+                                                  false,
+                                                ),
+                                              ),
+                                            )
+                                          else
+                                            Expanded(
+                                              child: SingleChildScrollView(
+                                                controller: _hBodyCtrl,
+                                                scrollDirection: Axis.horizontal,
+                                                child: Row(
+                                                  children: detailColumns
+                                                      .map(
+                                                        (s) => _buildColumnBody(
+                                                          s,
+                                                          detailColW,
+                                                          gridHeight,
+                                                          false,
+                                                        ),
+                                                      )
+                                                      .toList(),
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ),
+                                  ),
                                 ],
-                              ),
-                            ),
-                            Expanded(
-                              child: SingleChildScrollView(
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    timeGutterCol(),
-                                    if (_showGeneral)
-                                      Expanded(
-                                        child: _buildColumnBody(
-                                          'Общая запись',
-                                          null,
-                                          gridHeight,
-                                          true,
-                                        ),
-                                      )
-                                    else if (detailColW > minDetailCol + 0.5)
-                                      ...detailColumns.map(
-                                        (s) => Expanded(
-                                          child: _buildColumnBody(
-                                            s,
-                                            null,
-                                            gridHeight,
-                                            false,
-                                          ),
-                                        ),
-                                      )
-                                    else
-                                      Expanded(
-                                        child: SingleChildScrollView(
-                                          controller: _hBodyCtrl,
-                                          scrollDirection: Axis.horizontal,
-                                          child: Row(
-                                            children: detailColumns
-                                                .map(
-                                                  (s) => _buildColumnBody(
-                                                    s,
-                                                    detailColW,
-                                                    gridHeight,
-                                                    false,
-                                                  ),
-                                                )
-                                                .toList(),
-                                          ),
-                                        ),
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
+                              );
+                            },
+                          ),
+                        ),
+                ),
+                if (!mobile) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(0, 8, 16, 8),
+                    child: SizedBox(width: 300, child: _rightRail()),
                   ),
+                ],
+              ],
+            ),
           ),
+          _metricsBar(mobile: mobile),
         ],
       ),
     );
@@ -1315,6 +1447,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       }
 
       final dragging = _dragOrderId == orderId;
+      final selected = _selectedOrderId == orderId;
       if (dragging) top += _dragDy;
 
       final hasDebt = e['hasDebt'] == true;
@@ -1334,7 +1467,18 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
           elevation: dragging ? 10 : 0,
           borderRadius: BorderRadius.circular(12),
           child: GestureDetector(
-            onTap: dragging ? null : () => _openOrder(orderId),
+            onTap: dragging
+                ? null
+                : () {
+                    if (AppResponsive.isMobile(context)) {
+                      _openOrder(orderId);
+                    } else {
+                      _selectOrder(orderId);
+                    }
+                  },
+            onDoubleTap: dragging || AppResponsive.isMobile(context)
+                ? null
+                : () => _openOrder(orderId),
             onLongPressStart: !canDrag
                 ? null
                 : (details) {
@@ -1381,12 +1525,14 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
                   colors: [gradTop, gradBottom],
                 ),
                 border: Border.all(
-                  color: accent.withOpacity(dragging ? 0.95 : 0.55),
-                  width: dragging ? 1.5 : 1,
+                  color: selected
+                      ? Colors.white.withOpacity(0.92)
+                      : accent.withOpacity(dragging ? 0.95 : 0.55),
+                  width: selected ? 2 : (dragging ? 1.5 : 1),
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: accent.withOpacity(dragging ? 0.35 : 0.18),
+                    color: accent.withOpacity(dragging || selected ? 0.35 : 0.18),
                     blurRadius: dragging ? 16 : 10,
                     offset: const Offset(0, 3),
                   ),
@@ -1551,6 +1697,487 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       debugPrint('Calendar drag save: $e\n$st');
     }
     if (mounted) _loadData(showSpinner: false);
+  }
+
+  Widget _rightRail() {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface.withOpacity(0.72),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.borderSoft.withOpacity(0.7)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+            child: SizedBox(
+              height: 44,
+              child: FilledButton.icon(
+                onPressed: widget.onCreateAt == null ? null : _createNewEntry,
+                icon: const Icon(Icons.add_rounded, size: 20),
+                label: Text(
+                  'Новая запись',
+                  style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 14),
+                ),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primaryDeep,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: _miniMonth(),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: _entryDetailsCard(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniMonth() {
+    final first = DateTime(_monthView.year, _monthView.month, 1);
+    final daysInMonth = DateTime(_monthView.year, _monthView.month + 1, 0).day;
+    final lead = first.weekday - DateTime.monday; // 0..6
+    final selected = _dateOnly(widget.selectedDate);
+    final today = _dateOnly(DateTime.now());
+    final cells = lead + daysInMonth;
+    final rows = ((cells + 6) ~/ 7);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+      decoration: BoxDecoration(
+        color: AppColors.surface2.withOpacity(0.65),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderSoft.withOpacity(0.55)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                onPressed: () => setState(() {
+                  _monthView = DateTime(_monthView.year, _monthView.month - 1);
+                }),
+                icon: const Icon(Icons.chevron_left, color: AppColors.textMuted, size: 20),
+              ),
+              Expanded(
+                child: Text(
+                  DateFormat('LLLL yyyy', 'ru').format(_monthView),
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.manrope(
+                    color: AppColors.text,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13.5,
+                  ),
+                ),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                onPressed: () => setState(() {
+                  _monthView = DateTime(_monthView.year, _monthView.month + 1);
+                }),
+                icon: const Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
+                .map(
+                  (d) => Expanded(
+                    child: Text(
+                      d,
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 4),
+          for (var r = 0; r < rows; r++)
+            Row(
+              children: List.generate(7, (c) {
+                final idx = r * 7 + c;
+                final dayNum = idx - lead + 1;
+                if (dayNum < 1 || dayNum > daysInMonth) {
+                  return const Expanded(child: SizedBox(height: 30));
+                }
+                final date = DateTime(_monthView.year, _monthView.month, dayNum);
+                final isSelected = date == selected;
+                final isToday = date == today;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(1.5),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: widget.onDateChanged == null
+                            ? null
+                            : () => widget.onDateChanged!(_dateOnly(date)),
+                        child: Container(
+                          height: 28,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: isSelected ? AppColors.primaryDeep : Colors.transparent,
+                            border: isToday && !isSelected
+                                ? Border.all(color: AppColors.primary.withOpacity(0.7))
+                                : null,
+                          ),
+                          child: Text(
+                            '$dayNum',
+                            style: GoogleFonts.manrope(
+                              color: isSelected ? Colors.white : AppColors.text,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _entryDetailsCard() {
+    final o = _selectedOrder;
+    final loading = _selectedOrderId != null && o == null;
+
+    return SizedBox.expand(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+        decoration: BoxDecoration(
+          color: AppColors.surface2.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.borderSoft.withOpacity(0.55)),
+        ),
+        child: loading
+            ? const Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))
+            : o == null
+                ? Center(
+                    child: Text(
+                      'Выберите запись\nна сетке',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.manrope(
+                        color: AppColors.textDim,
+                        fontSize: 13,
+                        height: 1.35,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  )
+                : _entryDetailsBody(o),
+      ),
+    );
+  }
+
+  Widget _entryDetailsBody(Map<String, dynamic> o) {
+    final status = o['status']?.toString() ?? '';
+    final accent = kOrderStatusColors[status] ?? AppColors.primary;
+    final start = _tryParseDateTime(o['start_time']?.toString());
+    final end = _tryParseDateTime(o['end_time']?.toString());
+    final timeLine = '${_fmtHm(start)} – ${_fmtHm(end)}';
+    final car = (o['make_model'] ?? '').toString().trim();
+    final plate = (o['plate'] ?? '').toString().trim();
+    final client = (o['client_name'] ?? '').toString().trim();
+    final phone = (o['client_phone'] ?? '').toString().trim();
+    final master = (o['master_name'] ?? '').toString().trim();
+    final note = () {
+      final a = (o['client_notes'] ?? '').toString().trim();
+      if (a.isNotEmpty) return a;
+      return (o['client_visible_notes'] ?? '').toString().trim();
+    }();
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    final waDigits = digits.length == 11 && digits.startsWith('8')
+        ? '7${digits.substring(1)}'
+        : (digits.length == 10 ? '7$digits' : digits);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Детали записи',
+                style: GoogleFonts.manrope(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Закрыть',
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: _clearSelectedOrder,
+              icon: const Icon(Icons.close, size: 18, color: AppColors.textMuted),
+            ),
+          ],
+        ),
+        Text(
+          timeLine,
+          style: GoogleFonts.manrope(
+            color: AppColors.text,
+            fontWeight: FontWeight.w800,
+            fontSize: 15,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                status.isEmpty ? 'Без статуса' : status,
+                style: GoogleFonts.manrope(
+                  color: accent,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12.5,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (car.isNotEmpty)
+          Text(car, style: GoogleFonts.manrope(color: AppColors.text, fontWeight: FontWeight.w700, fontSize: 13.5)),
+        if (plate.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  plate,
+                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 12.5),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Скопировать номер',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: plate));
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Номер скопирован', style: GoogleFonts.manrope()),
+                      duration: const Duration(seconds: 1),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.copy_rounded, size: 15, color: AppColors.textDim),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 8),
+        Text(
+          client.isEmpty ? 'Клиент не указан' : client,
+          style: GoogleFonts.manrope(color: AppColors.text, fontWeight: FontWeight.w700, fontSize: 13),
+        ),
+        if (phone.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  phone,
+                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12.5),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Позвонить',
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                onPressed: () => openExternalUrl('tel:$phone'),
+                icon: const Icon(Icons.phone_outlined, size: 16, color: AppColors.primary),
+              ),
+              if (waDigits.length >= 11)
+                IconButton(
+                  tooltip: 'WhatsApp',
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                  onPressed: () => openExternalUrl('https://wa.me/$waDigits'),
+                  icon: const Icon(Icons.chat_bubble_outline, size: 16, color: Color(0xFF22C55E)),
+                ),
+            ],
+          ),
+        ],
+        if (master.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.person_outline, size: 16, color: AppColors.textDim),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  master,
+                  style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12.5, fontWeight: FontWeight.w600),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (note.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text('Заметки', style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          Expanded(
+            child: SingleChildScrollView(
+              child: Text(
+                note,
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12.5, height: 1.35),
+              ),
+            ),
+          ),
+        ] else
+          const Spacer(),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () {
+                  final id = (o['id'] as num?)?.toInt();
+                  if (id != null) _openOrder(id);
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.text,
+                  side: BorderSide(color: AppColors.border.withOpacity(0.8)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                child: Text('Редактировать', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: _deleteSelectedOrder,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.danger,
+                  side: BorderSide(color: AppColors.danger.withOpacity(0.55)),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                ),
+                child: Text('Удалить', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _metricsBar({required bool mobile}) {
+    final s = _periodStats();
+    final scope = _weekMode ? 'неделю' : 'день';
+    final items = <({String label, String value})>[
+      (label: 'Записей на $scope', value: '${s.count}'),
+      (label: 'Выручка (план)', value: _fmtMoney(s.plan)),
+      (label: 'Выручка (факт)', value: _fmtMoney(s.fact)),
+      (label: 'Загрузка', value: '${s.loadPct.round()}%'),
+      (label: 'Клиентов', value: '${s.clients}'),
+    ];
+
+    return Container(
+      margin: EdgeInsets.fromLTRB(mobile ? 10 : 16, 0, mobile ? 10 : 16, mobile ? 10 : 14),
+      padding: EdgeInsets.symmetric(horizontal: mobile ? 10 : 16, vertical: mobile ? 10 : 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withOpacity(0.75),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.borderSoft.withOpacity(0.65)),
+      ),
+      child: mobile
+          ? SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < items.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 18),
+                    _metricCell(items[i].label, items[i].value, compact: true),
+                  ],
+                ],
+              ),
+            )
+          : Row(
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0)
+                    Container(
+                      width: 1,
+                      height: 36,
+                      margin: const EdgeInsets.symmetric(horizontal: 8),
+                      color: AppColors.borderSoft.withOpacity(0.7),
+                    ),
+                  Expanded(child: _metricCell(items[i].label, items[i].value, compact: false)),
+                ],
+              ],
+            ),
+    );
+  }
+
+  Widget _metricCell(String label, String value, {required bool compact}) {
+    return Column(
+      crossAxisAlignment: compact ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.manrope(
+            color: AppColors.textDim,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: GoogleFonts.manrope(
+            color: AppColors.text,
+            fontSize: compact ? 16 : 18,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
   }
 
   double _measureTextWidth(String text, TextStyle style) {

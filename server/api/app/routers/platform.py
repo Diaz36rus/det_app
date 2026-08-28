@@ -109,6 +109,11 @@ def patch_company(
         raise HTTPException(status_code=404, detail="Компания не найдена")
     if body.is_active is not None:
         company.is_active = body.is_active
+    if body.name is not None:
+        name = body.name.strip()
+        if len(name) < 2:
+            raise HTTPException(status_code=400, detail="Слишком короткое название")
+        company.name = name
     db.commit()
     db.refresh(company)
     return company

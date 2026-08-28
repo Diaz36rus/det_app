@@ -10,6 +10,8 @@ from app.phone_util import phone_digits10
 from app.schemas import (
     BranchCreate,
     BranchOut,
+    CompanyOut,
+    CompanyProfilePatch,
     PermissionOut,
     RoleCreate,
     RoleOut,
@@ -27,6 +29,7 @@ KNOWN_WORKSHOPS = (
     "Мойка",
     "Химчистка",
     "Полировка",
+    "Кузовные работы",
     "Оклейка",
     "Интерьер",
     "Оборудование",
@@ -119,6 +122,40 @@ def list_permissions(
 @router.get("/workshops")
 def list_workshops(_: User = Depends(get_current_user)):
     return {"items": list(KNOWN_WORKSHOPS)}
+
+
+@router.get("/profile", response_model=CompanyOut)
+def get_profile(
+    company_id: int | None = Query(default=None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    cid = _resolve_company_id(user, db, company_id)
+    company = db.get(Company, cid)
+    if company is None:
+        raise HTTPException(status_code=404, detail="Студия не найдена")
+    return company
+
+
+@router.patch("/profile", response_model=CompanyOut)
+def patch_profile(
+    body: CompanyProfilePatch,
+    company_id: int | None = Query(default=None),
+    user: User = Depends(require_permissions("company.manage")),
+    db: Session = Depends(get_db),
+):
+    cid = _resolve_company_id(user, db, company_id)
+    company = db.get(Company, cid)
+    if company is None:
+        raise HTTPException(status_code=404, detail="Студия не найдена")
+    if body.name is not None:
+        name = body.name.strip()
+        if len(name) < 2:
+            raise HTTPException(status_code=400, detail="Слишком короткое название")
+        company.name = name
+    db.commit()
+    db.refresh(company)
+    return company
 
 
 @router.get("/branches", response_model=list[BranchOut])

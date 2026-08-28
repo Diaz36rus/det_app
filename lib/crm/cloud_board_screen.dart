@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../app_theme.dart';
+import '../car_make_model_fields.dart';
 import '../cash_cloud/cash_cloud_api.dart';
 import 'crm_api.dart';
 import 'crm_models.dart';
@@ -12,6 +13,10 @@ const kCloudStatuses = [
   'Мойка',
   'Химчистка',
   'Полировка',
+  'Кузовные работы',
+  'Оклейка',
+  'Интерьер',
+  'Оборудование',
   'Подготовка к выдаче',
   'Выдан',
 ];
@@ -200,8 +205,8 @@ class _CreateDialogState extends State<_CreateDialog> {
   final _api = CrmApi();
   final _client = TextEditingController();
   final _phone = TextEditingController();
-  final _car = TextEditingController();
   final _plate = TextEditingController();
+  String _carMakeModel = '';
   List<CrmService> _services = [];
   List<CrmMaster> _masters = [];
   CrmService? _svc;
@@ -228,7 +233,6 @@ class _CreateDialogState extends State<_CreateDialog> {
   void dispose() {
     _client.dispose();
     _phone.dispose();
-    _car.dispose();
     _plate.dispose();
     super.dispose();
   }
@@ -236,7 +240,7 @@ class _CreateDialogState extends State<_CreateDialog> {
   Future<void> _submit() async {
     if (_busy) return;
     final name = _client.text.trim();
-    final make = _car.text.trim();
+    final make = _carMakeModel.trim();
     if (name.isEmpty || make.isEmpty) return;
     setState(() => _busy = true);
     try {
@@ -277,7 +281,11 @@ class _CreateDialogState extends State<_CreateDialog> {
             children: [
               TextField(controller: _client, decoration: const InputDecoration(labelText: 'Клиент')),
               TextField(controller: _phone, decoration: const InputDecoration(labelText: 'Телефон')),
-              TextField(controller: _car, decoration: const InputDecoration(labelText: 'Авто')),
+              CarMakeModelFields(
+                stacked: true,
+                enabled: !_busy,
+                onChanged: (v) => _carMakeModel = v,
+              ),
               TextField(controller: _plate, decoration: const InputDecoration(labelText: 'Номер')),
               if (_services.isNotEmpty) ...[
                 const SizedBox(height: 8),

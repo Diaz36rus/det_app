@@ -3,7 +3,8 @@ Det App — онлайн-сервер (для новичка)
 
 ГЛАВНОЕ
 -------
-Сайт-визитка НЕ нужен.
+Сайт-визитка: http://det-app.ru (статика в server/website, Caddy).
+API: http://api.det-app.ru
 Нужны: 1) арендованный компьютер в интернете (VPS/VDS)
        2) домен (адрес вида xxx.ru)
        3) на сервере крутится API (мозг для приложения)
@@ -13,7 +14,9 @@ IP сервера Cali: 135.106.186.90
 Домен: det-app.ru — Active, делегирован.
 DNS A (@ и api) → 135.106.186.90
 Этап 1 ГОТОВ: docker compose Up (db/api/caddy)
-Проверка: http://api.det-app.ru/health → {"ok":true,"service":"det-app-api"}
+Проверка API: http://api.det-app.ru/health → {"ok":true,"service":"det-app-api"}
+Проверка сайта: http://det-app.ru/
+Деплой сайта: powershell -ExecutionPolicy Bypass -File tools\deploy_website.ps1
 Код на сервере: /opt/det-app
 
 Этап 2 (auth):

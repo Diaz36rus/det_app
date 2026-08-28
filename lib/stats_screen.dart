@@ -6,6 +6,7 @@ import 'app_theme.dart';
 import 'crm/cloud_db_bridge.dart';
 import 'database.dart';
 import 'responsive.dart';
+import 'tour_keys.dart';
 
 enum _StatsPeriod { today, week, month }
 
@@ -593,6 +594,7 @@ class _StatsScreenState extends State<StatsScreen> {
     );
 
     return Scaffold(
+      key: TourKeys.statsArea,
       backgroundColor: Colors.transparent,
       body: RefreshIndicator(
         color: AppColors.primary,
@@ -601,16 +603,23 @@ class _StatsScreenState extends State<StatsScreen> {
           padding: mobile ? const EdgeInsets.fromLTRB(12, 12, 12, 24) : AppTheme.pagePadding,
           children: [
             if (!mobile)
-              Row(
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(child: Text('Статистика', style: AppTheme.pageTitle)),
-                  if (_isLoading)
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
-                    ),
-                  _periodChips(),
+                  Row(
+                    children: [
+                      Expanded(child: Text('Статистика', style: AppTheme.pageTitle)),
+                      if (_isLoading)
+                        const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                        ),
+                      _periodChips(),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text('Выручка, услуги и загрузка за период', style: AppTheme.pageSubtitle),
                 ],
               )
             else ...[
@@ -620,6 +629,8 @@ class _StatsScreenState extends State<StatsScreen> {
                   _periodChips(),
                 ],
               ),
+              const SizedBox(height: 4),
+              Text('Выручка и загрузка', style: AppTheme.pageSubtitle),
             ],
             const SizedBox(height: 16),
             if (mobile)

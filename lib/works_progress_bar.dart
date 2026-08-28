@@ -91,7 +91,7 @@ class WorksProgressBar extends StatelessWidget {
                       gradient: LinearGradient(
                         colors: complete
                             ? const [Color(0xFF16A34A), AppColors.success]
-                            : const [Color(0xFF2563EB), AppColors.primary],
+                            : const [AppColors.primaryDeep, AppColors.primary],
                       ),
                     ),
                   ),

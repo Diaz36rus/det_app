@@ -10,27 +10,48 @@ import 'app_theme.dart';
 import 'app_toast.dart';
 import 'database.dart';
 import 'defect_parts.dart';
+import 'defect_photos_export.dart';
 
 class OrderDefectsSheet extends StatefulWidget {
   final int orderId;
   final String workshop;
+  final String clientName;
+  final String makeModel;
+  final String plate;
+  /// Сразу открыть камеру/галерею после показа (кнопки из окна заказа).
+  final ImageSource? initialSource;
 
   const OrderDefectsSheet({
     super.key,
     required this.orderId,
     this.workshop = '',
+    this.clientName = '',
+    this.makeModel = '',
+    this.plate = '',
+    this.initialSource,
   });
 
   static Future<bool?> open(
     BuildContext context, {
     required int orderId,
     String workshop = '',
+    String clientName = '',
+    String makeModel = '',
+    String plate = '',
+    ImageSource? initialSource,
   }) {
     return showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => OrderDefectsSheet(orderId: orderId, workshop: workshop),
+      builder: (_) => OrderDefectsSheet(
+        orderId: orderId,
+        workshop: workshop,
+        clientName: clientName,
+        makeModel: makeModel,
+        plate: plate,
+        initialSource: initialSource,
+      ),
     );
   }
 
@@ -51,6 +72,7 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
   String _partFilter = _allTab;
   bool _loading = true;
   bool _saving = false;
+  bool _exporting = false;
   bool _loadBusy = false;
   String _defectsFp = '';
   int _lastSeenRev = -1;
@@ -63,7 +85,14 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
     });
     _lastSeenRev = DatabaseHelper.dataRevision.value;
     DatabaseHelper.dataRevision.addListener(_onDataRevision);
-    _load();
+    _load().then((_) {
+      final src = widget.initialSource;
+      if (src != null && mounted) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_pick(src));
+        });
+      }
+    });
   }
 
   @override
@@ -209,6 +238,43 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
       if (mounted) showAppToast(context, 'Ошибка сохранения: $e');
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  int get _photoCount {
+    var n = _newPhotos.length;
+    for (final d in _defects) {
+      n += ((d['photos'] as List?) ?? const []).length;
+    }
+    return n;
+  }
+
+  Future<void> _exportAllToFolder() async {
+    if (_exporting) return;
+    if (_photoCount == 0) {
+      showAppToast(context, 'Нет фото для сохранения');
+      return;
+    }
+    setState(() => _exporting = true);
+    try {
+      final path = await DefectPhotosExport.writeAll(
+        defects: _defects,
+        clientName: widget.clientName,
+        makeModel: widget.makeModel,
+        plate: widget.plate,
+        draftPhotosB64: List<String>.from(_newPhotos),
+        draftDescription: _description.text,
+      );
+      if (!mounted) return;
+      if (path == null) {
+        showAppToast(context, 'Нет фото для сохранения');
+        return;
+      }
+      showAppToast(context, 'Сохранено: $path');
+    } catch (e) {
+      if (mounted) showAppToast(context, 'Не удалось сохранить папку: $e');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
     }
   }
 
@@ -620,6 +686,31 @@ class _OrderDefectsSheetState extends State<OrderDefectsSheet> {
                               separatorBuilder: (_, __) => const SizedBox(height: 8),
                               itemBuilder: (_, index) => _defectTile(visible[index]),
                             ),
+            ),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton.tonalIcon(
+                    onPressed: _exporting || _photoCount == 0 ? null : _exportAllToFolder,
+                    icon: Icon(
+                      _exporting ? Icons.hourglass_top_rounded : Icons.folder_special_rounded,
+                      size: 20,
+                    ),
+                    label: Text(
+                      _exporting
+                          ? 'Сохраняем папку…'
+                          : _photoCount == 0
+                              ? 'Нет фото для папки'
+                              : 'Сохранить все фото в папку ($_photoCount)',
+                      style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 14),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ],
         ),

@@ -21,6 +21,8 @@ class CashShiftPanel extends StatefulWidget {
   final VoidCallback onChanged;
   /// PulseAnchor: id кассы, которая сейчас «дышит» за диалогом (с экрана кассы).
   final int? pulsingRegisterId;
+  /// Только логика смены без UI (для шапки экрана «Касса»).
+  final bool headless;
 
   const CashShiftPanel({
     super.key,
@@ -31,13 +33,14 @@ class CashShiftPanel extends StatefulWidget {
     this.onSelectRegister,
     this.onOpenRegister,
     this.pulsingRegisterId,
+    this.headless = false,
   });
 
   @override
-  State<CashShiftPanel> createState() => _CashShiftPanelState();
+  State<CashShiftPanel> createState() => CashShiftPanelState();
 }
 
-class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin {
+class CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin {
   static const _pulsePanel = 'cash_shift_panel';
   static final _money = NumberFormat('#,##0.##', 'ru_RU');
 
@@ -48,6 +51,18 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
   ValueChanged<Map<String, dynamic>>? get onOpenRegister => widget.onOpenRegister;
   VoidCallback get onChanged => widget.onChanged;
   int? get pulsingRegisterId => widget.pulsingRegisterId;
+
+  Future<void> openShiftDialog() => _openShift(context);
+  Future<void> closeShiftDialog() => _closeShift(context);
+  Future<void> showZReportDialog() async {
+    if (shift != null) {
+      final shiftId = (shift!['id'] as num).toInt();
+      await ShiftZReportPdf.showPreview(context, shiftId: shiftId);
+    } else {
+      await _showLastZReport(context);
+    }
+  }
+  Future<void> collectionDialog() => _collection(context);
 
   Color _typeColor(String type) {
     switch (type) {
@@ -383,6 +398,8 @@ class _CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixi
 
   @override
   Widget build(BuildContext context) {
+    if (widget.headless) return const SizedBox.shrink();
+
     final open = shift != null;
     final openedAt = AppDateTime.format(shift?['opened_at']);
     final mobile = AppResponsive.isMobile(context);

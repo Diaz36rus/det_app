@@ -519,3 +519,17 @@ class BugReport(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class SiteLead(Base):
+    """Заявки с публичного сайта det-app.ru (закрытый тест)."""
+
+    __tablename__ = "site_leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    studio: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    contact: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="new", nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

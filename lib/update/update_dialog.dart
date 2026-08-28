@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../app_theme.dart';
 import '../app_version.dart';
+import '../open_url.dart';
 import '../responsive.dart';
 import 'update_channel.dart';
 import 'update_service.dart';
@@ -26,12 +27,13 @@ class UpdateDialog extends StatefulWidget {
           width: AppResponsive.dialogWidth(ctx, desktop: 420),
           child: Text(
             Platform.isAndroid
-                ? 'Скачается APK с ПК в вашей Wi‑Fi. Затем откроется установщик Android — '
+                ? 'Скачается APK. Затем откроется установщик Android — '
                     'подтвердите установку (Play Защита: «Все равно установить»).\n\n'
                     'Сохранённые в базе данные останутся.'
-                : 'Проверьте и сохраните незакрытые окна и заказы.\n\n'
-                    'При перезапуске приложение закроется: несохранённые правки в открытых '
-                    'карточках могут пропасть. Данные в базе останутся.',
+                : 'Сначала скачается пакет (прогресс на экране).\n'
+                    'Потом нажмите «Перезапустить» — приложение закроется, '
+                    'подменит файлы и откроется снова.\n\n'
+                    'Данные в базе останутся.',
             style: GoogleFonts.manrope(color: AppColors.textMuted, height: 1.4),
           ),
         ),
@@ -66,6 +68,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
   bool _ready = false;
   bool _apkOpened = false;
   double _progress = 0;
+  String _phase = '';
   UpdateCheckResult? _result;
   PreparedUpdate? _prepared;
   PreparedApkUpdate? _preparedApk;
@@ -85,7 +88,6 @@ class _UpdateDialogState extends State<UpdateDialog> {
 
   Future<void> _bootstrap() async {
     await AppVersion.ensureLoaded();
-    // load() сам поднимает старый LAN → облако (если не prefer_lan).
     final ch = await UpdateChannel.load();
     final url = (ch?.manifestUrl.trim().isNotEmpty == true)
         ? ch!.manifestUrl
@@ -95,7 +97,6 @@ class _UpdateDialogState extends State<UpdateDialog> {
   }
 
   Future<void> _check() async {
-    // Всегда берём URL из поля — иначе «Проверить» читает старый файл (часто :7878 → 401).
     final typed = _urlCtrl.text.trim();
     if (typed.isNotEmpty) {
       try {
@@ -119,6 +120,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
       _apkOpened = false;
       _prepared = null;
       _preparedApk = null;
+      _phase = '';
     });
     final r = await UpdateService.instance.check();
     if (!mounted) return;
@@ -145,13 +147,19 @@ class _UpdateDialogState extends State<UpdateDialog> {
       _prepared = null;
       _preparedApk = null;
       _progress = 0;
+      _phase = 'Старт…';
     });
     try {
       if (Platform.isAndroid) {
         final apk = await UpdateService.instance.prepareAndroidUpdate(
           m,
-          onProgress: (p) {
-            if (mounted) setState(() => _progress = p);
+          onProgress: (p, phase) {
+            if (mounted) {
+              setState(() {
+                _progress = p;
+                _phase = phase;
+              });
+            }
           },
         );
         await UpdateService.instance.openAndroidInstaller(apk);
@@ -161,21 +169,28 @@ class _UpdateDialogState extends State<UpdateDialog> {
           _ready = true;
           _apkOpened = true;
           _preparedApk = apk;
+          _phase = '';
         });
       } else {
         final prepared = await UpdateService.instance.prepareUpdate(
           m,
-          onProgress: (p) {
-            if (mounted) setState(() => _progress = p);
+          onProgress: (p, phase) {
+            if (mounted) {
+              setState(() {
+                _progress = p;
+                _phase = phase;
+              });
+            }
           },
         );
         if (!mounted) return;
         setState(() {
           _prepared = prepared;
           _progress = 1;
+          _applying = false;
+          _ready = true;
+          _phase = 'Пакет готов — нажмите «Перезапустить»';
         });
-        // Windows: сразу подмена файлов и автоперезапуск (без кнопки «Перезапустить»).
-        await UpdateService.instance.applyPreparedAndRestart(prepared);
       }
     } catch (e) {
       if (!mounted) return;
@@ -184,14 +199,25 @@ class _UpdateDialogState extends State<UpdateDialog> {
         _ready = false;
         _prepared = null;
         _preparedApk = null;
+        _phase = '';
       });
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: AppColors.surface,
           title: Text('Ошибка обновления', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
-          content: Text('$e', style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          content: SingleChildScrollView(
+            child: Text('$e', style: GoogleFonts.manrope(color: AppColors.textMuted)),
+          ),
           actions: [
+            if (_result?.manifest?.url.isNotEmpty == true && !Platform.isAndroid)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  openExternalUrl(_result!.manifest!.url);
+                },
+                child: const Text('Скачать zip в браузере'),
+              ),
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
           ],
         ),
@@ -202,10 +228,18 @@ class _UpdateDialogState extends State<UpdateDialog> {
   Future<void> _restart() async {
     final prepared = _prepared;
     if (prepared == null) return;
+    setState(() {
+      _applying = true;
+      _phase = 'Запуск установщика…';
+    });
     try {
       await UpdateService.instance.applyPreparedAndRestart(prepared);
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        _applying = false;
+        _phase = '';
+      });
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -213,6 +247,14 @@ class _UpdateDialogState extends State<UpdateDialog> {
           title: Text('Не удалось перезапустить', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
           content: Text('$e', style: GoogleFonts.manrope(color: AppColors.textMuted)),
           actions: [
+            if (prepared.manifest.url.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  openExternalUrl(prepared.manifest.url);
+                },
+                child: const Text('Скачать zip вручную'),
+              ),
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
           ],
         ),
@@ -228,6 +270,19 @@ class _UpdateDialogState extends State<UpdateDialog> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _openManualDownload() async {
+    final m = _result?.manifest;
+    if (m == null) return;
+    final url = Platform.isAndroid ? m.androidUrl : m.url;
+    if (url.isEmpty) return;
+    final ok = await openExternalUrl(url);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось открыть браузер.\n$url')),
+      );
     }
   }
 
@@ -277,22 +332,26 @@ class _UpdateDialogState extends State<UpdateDialog> {
               )
             else if (_applying) ...[
               Text(
-                'Скачивание… ${(_progress * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                _phase.isNotEmpty
+                    ? _phase
+                    : 'Скачивание… ${(_progress * 100).clamp(0, 100).toStringAsFixed(0)}%',
                 style: GoogleFonts.manrope(fontWeight: FontWeight.w600),
               ),
               const SizedBox(height: 8),
-              LinearProgressIndicator(value: _progress <= 0 ? null : _progress, color: AppColors.primary),
+              LinearProgressIndicator(
+                value: _progress <= 0 ? null : _progress.clamp(0.0, 1.0),
+                color: AppColors.primary,
+              ),
               const SizedBox(height: 8),
               Text(
                 Platform.isAndroid
                     ? 'После загрузки откроется установщик Android.'
-                    : 'После загрузки приложение перезапустится само…',
+                    : 'Дождитесь 100% — приложение само не закроется, пока не нажмёте «Перезапустить».',
                 style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
               ),
             ] else if (_ready && _apkOpened && _preparedApk != null) ...[
               _androidSuccessBlock(_preparedApk!),
             ] else if (_ready && _prepared != null) ...[
-              // Запасной UI, если автоперезапуск не сработал.
               _windowsSuccessBlock(_prepared!),
             ] else ...[
               _statusBlock(r),
@@ -311,11 +370,16 @@ class _UpdateDialogState extends State<UpdateDialog> {
             onPressed: _busy ? null : _check,
             child: const Text('Проверить'),
           ),
-        if (!_ready && r?.status == UpdateCheckStatus.available)
-          ElevatedButton(
-            onPressed: _applying ? null : _download,
-            child: Text(Platform.isAndroid ? 'Скачать APK' : 'Скачать и установить'),
+        if (!_ready && !_applying && r?.status == UpdateCheckStatus.available) ...[
+          TextButton(
+            onPressed: _openManualDownload,
+            child: Text(Platform.isAndroid ? 'APK в браузере' : 'Zip в браузере'),
           ),
+          ElevatedButton(
+            onPressed: _download,
+            child: Text(Platform.isAndroid ? 'Скачать APK' : 'Скачать'),
+          ),
+        ],
         if (_ready && _apkOpened) ...[
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -329,11 +393,15 @@ class _UpdateDialogState extends State<UpdateDialog> {
         ],
         if (_ready && _prepared != null) ...[
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: _applying ? null : () => Navigator.pop(context),
             child: const Text('Позже'),
           ),
+          TextButton(
+            onPressed: _applying ? null : () => openExternalUrl(_prepared!.manifest.url),
+            child: const Text('Zip вручную'),
+          ),
           ElevatedButton.icon(
-            onPressed: _restart,
+            onPressed: _applying ? null : _restart,
             icon: const Icon(Icons.restart_alt, size: 18),
             label: const Text('Перезапустить'),
           ),
@@ -403,7 +471,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Обновление успешно выполнено',
+                  'Скачано: ${m.version}+${m.build}',
                   style: GoogleFonts.manrope(
                     color: AppColors.success,
                     fontWeight: FontWeight.w800,
@@ -415,7 +483,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
           ),
           const SizedBox(height: 10),
           Text(
-            'Готово к установке: ${m.version}+${m.build}\n'
+            'Пакет на диске и проверен.\n'
             'Нажмите «Перезапустить» — приложение закроется, заменит файлы и откроется снова.',
             style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13, height: 1.4),
           ),

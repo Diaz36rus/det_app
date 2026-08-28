@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../app_theme.dart';
+import '../open_url.dart';
 import '../sync/sync_deep_link.dart';
 import 'auth_api.dart';
 import 'auth_controller.dart';
@@ -304,6 +305,27 @@ class _LoginScreenState extends State<LoginScreen> {
           'Меня пригласили — заявка в чужую студию (без роли, пока не назначат).',
           textAlign: TextAlign.center,
           style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.4),
+        ),
+        const SizedBox(height: 18),
+        TextButton(
+          onPressed: () async {
+            final ok = await openWebsite();
+            if (!context.mounted || ok) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Не удалось открыть $kWebsiteUrl', style: GoogleFonts.manrope()),
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          },
+          child: Text(
+            'Сайт · det-app.ru',
+            style: GoogleFonts.manrope(
+              color: AppColors.textMuted,
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
         ),
       ],
     );

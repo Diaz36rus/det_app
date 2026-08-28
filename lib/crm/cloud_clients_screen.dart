@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../app_theme.dart';
+import '../car_make_model_fields.dart';
 import 'crm_api.dart';
 import 'crm_models.dart';
 
@@ -70,8 +71,8 @@ class _CloudClientsScreenState extends State<CloudClientsScreen> {
   Future<void> _addClient() async {
     final name = TextEditingController();
     final phone = TextEditingController();
-    final car = TextEditingController();
     final plate = TextEditingController();
+    var makeModel = '';
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -84,7 +85,10 @@ class _CloudClientsScreenState extends State<CloudClientsScreen> {
             children: [
               TextField(controller: name, decoration: const InputDecoration(labelText: 'Имя')),
               TextField(controller: phone, decoration: const InputDecoration(labelText: 'Телефон')),
-              TextField(controller: car, decoration: const InputDecoration(labelText: 'Авто (необяз.)')),
+              CarMakeModelFields(
+                stacked: true,
+                onChanged: (v) => makeModel = v,
+              ),
               TextField(controller: plate, decoration: const InputDecoration(labelText: 'Номер')),
             ],
           ),
@@ -97,11 +101,10 @@ class _CloudClientsScreenState extends State<CloudClientsScreen> {
     );
     final n = name.text.trim();
     final p = phone.text.trim();
-    final make = car.text.trim();
+    final make = makeModel.trim();
     final pl = plate.text.trim();
     name.dispose();
     phone.dispose();
-    car.dispose();
     plate.dispose();
     if (ok != true || n.isEmpty) return;
     try {
@@ -152,7 +155,7 @@ class _CloudClientsScreenState extends State<CloudClientsScreen> {
   }
 
   Future<void> _addCar(CrmClient c) async {
-    final make = TextEditingController();
+    var makeModel = '';
     final plate = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
@@ -162,7 +165,10 @@ class _CloudClientsScreenState extends State<CloudClientsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: make, decoration: const InputDecoration(labelText: 'Марка / модель')),
+            CarMakeModelFields(
+              stacked: true,
+              onChanged: (v) => makeModel = v,
+            ),
             TextField(controller: plate, decoration: const InputDecoration(labelText: 'Номер')),
           ],
         ),
@@ -172,9 +178,8 @@ class _CloudClientsScreenState extends State<CloudClientsScreen> {
         ],
       ),
     );
-    final m = make.text.trim();
+    final m = makeModel.trim();
     final p = plate.text.trim();
-    make.dispose();
     plate.dispose();
     if (ok != true || m.isEmpty) return;
     try {

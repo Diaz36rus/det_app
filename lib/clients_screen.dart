@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
+import 'car_catalog.dart';
+import 'car_make_model_fields.dart';
 import 'crm/crm_api.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
@@ -11,6 +13,7 @@ import 'input_masks.dart';
 import 'order_details_dialog.dart';
 import 'pulse_anchor.dart';
 import 'responsive.dart';
+import 'tour_keys.dart';
 import 'vin_utils.dart';
 
 class ClientsScreen extends StatefulWidget {
@@ -34,9 +37,12 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
   final _searchController = TextEditingController();
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController(text: PhonePlus7Formatter.prefix);
-  final _carController = TextEditingController();
   final _plateController = TextEditingController();
   final _vinController = TextEditingController();
+  String _carMakeModel = '';
+  final _carFieldsKey = GlobalKey<CarMakeModelFieldsState>();
+  List<String> _extraMakes = const [];
+  List<String> _extraModels = const [];
   String _newCarCategory = '1';
 
   static const _vipAccent = Color(0xFFD4A017);
@@ -45,6 +51,28 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
   void initState() {
     super.initState();
     _loadClients("");
+    _loadCarCatalogExtras();
+  }
+
+  Future<void> _loadCarCatalogExtras() async {
+    final rows = await DatabaseHelper().distinctCarMakeModels();
+    if (!mounted) return;
+    final makes = <String>{};
+    final models = <String>{};
+    for (final row in rows) {
+      final parts = CarCatalog.split(row);
+      if (parts.make.isNotEmpty) makes.add(parts.make);
+      if (parts.model.isNotEmpty) models.add(parts.model);
+    }
+    setState(() {
+      _extraMakes = makes.toList()..sort();
+      _extraModels = models.toList()..sort();
+    });
+  }
+
+  void _setCarMakeModel(String value) {
+    _carMakeModel = value.trim();
+    _carFieldsKey.currentState?.setMakeModel(_carMakeModel);
   }
 
   @override
@@ -52,7 +80,6 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
     _searchController.dispose();
     _nameController.dispose();
     _phoneController.dispose();
-    _carController.dispose();
     _plateController.dispose();
     _vinController.dispose();
     super.dispose();
@@ -121,7 +148,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
       return;
     }
 
-    final make = _carController.text.trim();
+    final make = _carMakeModel.trim();
     final plate = PlateMaskFormatter.normalize(_plateController.text);
     final vin = VinUtils.normalize(_vinController.text);
 
@@ -136,7 +163,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
       }
       _nameController.clear();
       _phoneController.text = PhonePlus7Formatter.prefix;
-      _carController.clear();
+      _setCarMakeModel('');
       _plateController.clear();
       _vinController.clear();
       setState(() => _newCarCategory = '1');
@@ -157,7 +184,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
 
     _nameController.clear();
     _phoneController.text = PhonePlus7Formatter.prefix;
-    _carController.clear();
+    _setCarMakeModel('');
     _plateController.clear();
     _vinController.clear();
     setState(() => _newCarCategory = '1');
@@ -187,7 +214,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
     String vin = "",
     String category = "1",
   }) {
-    final makeCtrl = TextEditingController(text: make);
+    var makeModel = make;
     final plateCtrl = TextEditingController(text: PlateMaskFormatter.normalize(plate));
     final vinCtrl = TextEditingController(text: vin);
     var selectedCategory = ['1', '2', '3', '4'].contains(category) ? category : '1';
@@ -206,41 +233,50 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                   isEdit ? "Редактировать авто" : "Добавить авто",
                   style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
                 ),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextField(controller: makeCtrl, decoration: const InputDecoration(labelText: "Марка/Модель")),
-                    TextField(
-                      controller: plateCtrl,
-                      decoration: const InputDecoration(labelText: "Госномер", hintText: "A123BC777"),
-                      textCapitalization: TextCapitalization.characters,
-                      inputFormatters: [PlateMaskFormatter()],
-                    ),
-                    TextField(
-                      controller: vinCtrl,
-                      decoration: const InputDecoration(labelText: "VIN код"),
-                      textCapitalization: TextCapitalization.characters,
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      value: selectedCategory,
-                      decoration: const InputDecoration(labelText: "Класс авто", isDense: true),
-                      dropdownColor: AppColors.surface,
-                      items: ['1', '2', '3', '4']
-                          .map((v) => DropdownMenuItem(value: v, child: Text("$v класс")))
-                          .toList(),
-                      onChanged: (val) {
-                        if (val == null) return;
-                        setDialogState(() => selectedCategory = val);
-                      },
-                    ),
-                  ],
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CarMakeModelFields(
+                        initialMakeModel: makeModel,
+                        stacked: true,
+                        extraMakes: _extraMakes,
+                        extraModels: _extraModels,
+                        onChanged: (v) => makeModel = v,
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: plateCtrl,
+                        decoration: const InputDecoration(labelText: "Госномер", hintText: "A123BC777"),
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [PlateMaskFormatter()],
+                      ),
+                      TextField(
+                        controller: vinCtrl,
+                        decoration: const InputDecoration(labelText: "VIN код"),
+                        textCapitalization: TextCapitalization.characters,
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        value: selectedCategory,
+                        decoration: const InputDecoration(labelText: "Класс авто", isDense: true),
+                        dropdownColor: AppColors.surface,
+                        items: ['1', '2', '3', '4']
+                            .map((v) => DropdownMenuItem(value: v, child: Text("$v класс")))
+                            .toList(),
+                        onChanged: (val) {
+                          if (val == null) return;
+                          setDialogState(() => selectedCategory = val);
+                        },
+                      ),
+                    ],
+                  ),
                 ),
                 actions: [
                   TextButton(onPressed: () => Navigator.pop(context), child: const Text("Отмена")),
                   ElevatedButton(
                     onPressed: () async {
-                      if (makeCtrl.text.isEmpty) return;
+                      if (makeModel.trim().isEmpty) return;
                       final vinWarning = VinUtils.validate(vinCtrl.text);
                       if (vinWarning != null) {
                         showAppToast(context, vinWarning);
@@ -254,7 +290,6 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                         excludeClientId: isEdit ? null : clientId,
                         excludeCarId: carId,
                       );
-                      // При добавлении/смене номера — чужой plate/VIN нельзя молча завести.
                       if (identity != null &&
                           (identity.kind == 'plate' || identity.kind == 'vin') &&
                           identity.carId != carId) {
@@ -273,7 +308,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                       if (isEdit) {
                         await DatabaseHelper().updateCar(
                           carId,
-                          makeModel: makeCtrl.text,
+                          makeModel: makeModel.trim(),
                           plate: plateNorm,
                           vin: vinNorm,
                           category: selectedCategory,
@@ -281,7 +316,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                       } else {
                         await DatabaseHelper().addCar(
                           clientId,
-                          makeCtrl.text,
+                          makeModel.trim(),
                           plateNorm,
                           vin: vinNorm,
                           category: selectedCategory,
@@ -289,6 +324,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                       }
                       if (context.mounted) Navigator.pop(context);
                       _loadClients(_searchController.text);
+                      _loadCarCatalogExtras();
                     },
                     child: Text(isEdit ? "Сохранить" : "Добавить"),
                   ),
@@ -297,7 +333,10 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
             },
           );
         },
-      ),
+      ).whenComplete(() {
+        plateCtrl.dispose();
+        vinCtrl.dispose();
+      }),
     );
   }
 
@@ -521,10 +560,16 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                 inputFormatters: [PhonePlus7Formatter()],
               ),
               const SizedBox(height: 10),
-              TextField(
-                controller: _carController,
-                decoration: const InputDecoration(labelText: "Авто (марка/модель)", isDense: true),
-                textCapitalization: TextCapitalization.words,
+              CarMakeModelFields(
+                key: _carFieldsKey,
+                initialMakeModel: _carMakeModel,
+                stacked: true,
+                extraMakes: _extraMakes,
+                extraModels: _extraModels,
+                onChanged: (v) {
+                  if (_carMakeModel == v) return;
+                  _carMakeModel = v;
+                },
               ),
               const SizedBox(height: 10),
               TextField(
@@ -581,10 +626,15 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: TextField(
-                    controller: _carController,
-                    decoration: const InputDecoration(labelText: "Авто (марка/модель)", isDense: true),
-                    textCapitalization: TextCapitalization.words,
+                  child: CarMakeModelFields(
+                    key: _carFieldsKey,
+                    initialMakeModel: _carMakeModel,
+                    extraMakes: _extraMakes,
+                    extraModels: _extraModels,
+                    onChanged: (v) {
+                      if (_carMakeModel == v) return;
+                      _carMakeModel = v;
+                    },
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -745,13 +795,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
       accent: accent,
       child: Container(
       margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: AppColors.surface2.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border(
-          left: BorderSide(color: accent.withOpacity(0.85), width: 3),
-        ),
-      ),
+      decoration: AppTheme.listTileDecoration(accent: accent),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -894,6 +938,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
   Widget build(BuildContext context) {
     final mobile = AppResponsive.isMobile(context);
     return Scaffold(
+      key: TourKeys.clientsArea,
       backgroundColor: Colors.transparent,
       resizeToAvoidBottomInset: true,
       body: Column(
@@ -901,17 +946,20 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
         children: [
           if (!mobile)
             Padding(
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
               child: Row(
                 children: [
-                  Text("Клиенты", style: AppTheme.pageTitle),
-                  const Spacer(),
-                  Text(
-                    "${_clients.length}",
-                    style: GoogleFonts.manrope(
-                      color: AppColors.textDim,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Клиенты", style: AppTheme.pageTitle),
+                        const SizedBox(height: 4),
+                        Text(
+                          'База клиентов и автомобилей · ${_clients.length}',
+                          style: AppTheme.pageSubtitle,
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -919,7 +967,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
             ),
           _buildToolbar(),
           if (!_isLoading && _clients.isNotEmpty) _buildSortBar(),
-          const Divider(height: 1),
+          const SizedBox(height: 4),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
