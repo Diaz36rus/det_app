@@ -1,7 +1,9 @@
 import 'dart:convert';
 
+import '../app_theme.dart';
 import '../cash_cloud/cash_cloud_api.dart';
 import '../cash_cloud/cash_cloud_models.dart';
+import '../branch_scope.dart';
 import '../order_status.dart';
 import '../price_list_data.dart';
 import 'cloud_mode.dart';
@@ -23,7 +25,24 @@ class CloudDbBridge {
   List<CrmService> _services = [];
   List<CrmInventoryItem> _inventory = [];
 
+  DateTime? _ordersFetchedAt;
+  DateTime? _clientsFetchedAt;
+  DateTime? _carsFetchedAt;
+  static const _cacheTtl = Duration(seconds: 25);
+
   static bool get active => CloudMode.enabled;
+
+  void invalidateCache() {
+    _orders.clear();
+    _clients.clear();
+    _cars.clear();
+    _masters = [];
+    _services = [];
+    _inventory = [];
+    _ordersFetchedAt = null;
+    _clientsFetchedAt = null;
+    _carsFetchedAt = null;
+  }
 
   Future<void> refreshAll() async {
     final results = await Future.wait([
@@ -49,33 +68,40 @@ class CloudDbBridge {
     _cars
       ..clear()
       ..addEntries(cars.map((c) => MapEntry(c.id, c)));
+    final now = DateTime.now();
+    _ordersFetchedAt = now;
+    _clientsFetchedAt = now;
+    _carsFetchedAt = now;
   }
 
-  Future<void> _ensureOrders() async {
-    if (_orders.isEmpty) {
-      final list = await _crm.listOrders();
-      _orders
-        ..clear()
-        ..addEntries(list.map((o) => MapEntry(o.id, o)));
-    }
+  bool _fresh(DateTime? at) =>
+      at != null && DateTime.now().difference(at) < _cacheTtl;
+
+  Future<void> _ensureOrders({bool force = false}) async {
+    if (!force && _orders.isNotEmpty && _fresh(_ordersFetchedAt)) return;
+    final list = await _crm.listOrders();
+    _orders
+      ..clear()
+      ..addEntries(list.map((o) => MapEntry(o.id, o)));
+    _ordersFetchedAt = DateTime.now();
   }
 
-  Future<void> _ensureClients() async {
-    if (_clients.isEmpty) {
-      final list = await _crm.listClients();
-      _clients
-        ..clear()
-        ..addEntries(list.map((c) => MapEntry(c.id, c)));
-    }
+  Future<void> _ensureClients({bool force = false}) async {
+    if (!force && _clients.isNotEmpty && _fresh(_clientsFetchedAt)) return;
+    final list = await _crm.listClients();
+    _clients
+      ..clear()
+      ..addEntries(list.map((c) => MapEntry(c.id, c)));
+    _clientsFetchedAt = DateTime.now();
   }
 
-  Future<void> _ensureCars() async {
-    if (_cars.isEmpty) {
-      final list = await _crm.listCars();
-      _cars
-        ..clear()
-        ..addEntries(list.map((c) => MapEntry(c.id, c)));
-    }
+  Future<void> _ensureCars({bool force = false}) async {
+    if (!force && _cars.isNotEmpty && _fresh(_carsFetchedAt)) return;
+    final list = await _crm.listCars();
+    _cars
+      ..clear()
+      ..addEntries(list.map((c) => MapEntry(c.id, c)));
+    _carsFetchedAt = DateTime.now();
   }
 
   (String make, String plate) _splitCar(String? label) {
@@ -106,8 +132,39 @@ class CloudDbBridge {
     }
     final worksTotal = o.items.length;
     final worksDone = o.items.where((i) => i.isDone).length;
+
+    // Мастера по цехам (для карточки доски): один цех → одна строка с именами.
+    final byWs = <String, List<String>>{};
+    final seenInWs = <String, Set<int>>{};
+    for (final it in o.items) {
+      final ws = it.workshop.trim();
+      if (ws.isEmpty) continue;
+      final ids = <int>[];
+      for (final part in it.masterIds.split(',')) {
+        final id = int.tryParse(part.trim());
+        if (id != null) ids.add(id);
+      }
+      if (ids.isEmpty) continue;
+      final seen = seenInWs.putIfAbsent(ws, () => <int>{});
+      final names = byWs.putIfAbsent(ws, () => <String>[]);
+      for (final id in ids) {
+        if (!seen.add(id)) continue;
+        final m = _masters.where((e) => e.id == id).toList();
+        if (m.isEmpty) continue;
+        names.add(m.first.name);
+      }
+    }
+    final workshopMasters = [
+      for (final ws in kOrderStatusColors.keys)
+        if (byWs[ws]?.isNotEmpty == true) {'workshop': ws, 'names': byWs[ws]!},
+      for (final e in byWs.entries)
+        if (!kOrderStatusColors.containsKey(e.key) && e.value.isNotEmpty)
+          {'workshop': e.key, 'names': e.value},
+    ];
+
     return {
       'id': o.id,
+      'branch_id': o.branchId,
       'client_id': o.clientId,
       'car_id': o.carId,
       'status': o.status,
@@ -123,6 +180,7 @@ class CloudDbBridge {
       'is_vip': client?.isVip == true ? 1 : 0,
       'make_model': make,
       'plate': plate,
+      'year': car?.year ?? 0,
       'vin': car?.vin ?? '',
       'category': car?.category ?? '1',
       'master_name': masterName,
@@ -134,6 +192,7 @@ class CloudDbBridge {
         final m = _masters.where((e) => e.id == rid).toList();
         return m.isEmpty ? '' : m.first.name;
       }(),
+      'workshop_masters': workshopMasters,
       'works_total': worksTotal,
       'works_done': worksDone,
       'is_completed': o.status == 'Выдан' ? 1 : 0,
@@ -378,13 +437,28 @@ class CloudDbBridge {
             'plate': c.plate,
             'vin': c.vin,
             'category': c.category,
+            'year': c.year,
           },
         )
         .toList();
   }
 
-  Future<int> addCar(int clientId, String makeModel, String plate, {String vin = '', String category = '1'}) async {
-    final car = await _crm.createCar(clientId: clientId, makeModel: makeModel, plate: plate);
+  Future<int> addCar(
+    int clientId,
+    String makeModel,
+    String plate, {
+    String vin = '',
+    String category = '1',
+    int year = 0,
+  }) async {
+    final car = await _crm.createCar(
+      clientId: clientId,
+      makeModel: makeModel,
+      plate: plate,
+      vin: vin,
+      category: category,
+      year: year,
+    );
     _cars[car.id] = car;
     return car.id;
   }
@@ -490,11 +564,14 @@ class CloudDbBridge {
         .where((s) => s.isActive)
         .map((s) {
           final t = treeByName[s.name];
-          final p1 = (t?['p1'] as num?)?.toDouble() ?? s.price;
-          final p2 = (t?['p2'] as num?)?.toDouble() ?? s.price;
-          final p3 = (t?['p3'] as num?)?.toDouble() ?? s.price;
-          final p4 = (t?['p4'] as num?)?.toDouble() ?? s.price;
-          final fp = (t?['fp'] as num?)?.toDouble() ?? 0;
+          // Облако — источник правды; шаблон только если на сервере нули.
+          final p1 = s.price > 0 ? s.price : ((t?['p1'] as num?)?.toDouble() ?? 0.0);
+          final p2 = s.price2 > 0 ? s.price2 : ((t?['p2'] as num?)?.toDouble() ?? 0.0);
+          final p3 = s.price3 > 0 ? s.price3 : ((t?['p3'] as num?)?.toDouble() ?? 0.0);
+          final p4 = s.price4 > 0 ? s.price4 : ((t?['p4'] as num?)?.toDouble() ?? 0.0);
+          final fp = s.fixedPrice > 0
+              ? s.fixedPrice
+              : ((t?['fp'] as num?)?.toDouble() ?? 0.0);
           return {
             'id': s.id,
             'name': s.name,
@@ -517,6 +594,75 @@ class CloudDbBridge {
     _services = _services.where((e) => e.id != id).toList();
   }
 
+  Future<int> addService({
+    required String name,
+    String category = 'Прочее',
+    String workshop = '',
+    double price1 = 0,
+    double price2 = 0,
+    double price3 = 0,
+    double price4 = 0,
+    double fixedPrice = 0,
+  }) async {
+    try {
+      final s = await _crm.createService(
+        name: name,
+        category: category,
+        price: price1,
+        price2: price2,
+        price3: price3,
+        price4: price4,
+        fixedPrice: fixedPrice,
+        workshop: workshop,
+      );
+      _services = await _crm.listServices();
+      return s.id;
+    } catch (e) {
+      final msg = '$e';
+      if (msg.contains('already') || msg.contains('unique') || msg.contains('существует') || msg.contains('409')) {
+        throw StateError('Услуга с таким названием уже есть');
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> updateServiceMeta(
+    int id, {
+    String? name,
+    String? category,
+    String? workshop,
+  }) async {
+    final match = _services.where((e) => e.id == id);
+    final oldName = match.isEmpty ? '' : match.first.name;
+    final body = <String, dynamic>{};
+    if (name != null) body['name'] = name;
+    if (category != null) body['category'] = category;
+    if (workshop != null) body['workshop'] = workshop;
+    if (body.isEmpty) return;
+    try {
+      await _crm.patchService(id, body);
+    } catch (e) {
+      final msg = '$e';
+      if (msg.contains('already') || msg.contains('unique') || msg.contains('существует') || msg.contains('409')) {
+        throw StateError('Услуга с таким названием уже есть');
+      }
+      rethrow;
+    }
+    final newName = name?.trim();
+    if (newName != null && newName.isNotEmpty && oldName.isNotEmpty && newName != oldName) {
+      final recipes = await _crm.listRecipes(oldName);
+      for (final r in recipes) {
+        final invId = (r['inventory_id'] as num?)?.toInt();
+        final qty = (r['qty'] as num?)?.toDouble() ?? 0;
+        final rid = (r['id'] as num?)?.toInt();
+        if (invId == null) continue;
+        await _crm.upsertRecipe(serviceName: newName, inventoryId: invId, qty: qty);
+        if (rid != null) await _crm.deleteRecipe(rid);
+      }
+    }
+    _services = await _crm.listServices();
+  }
+
   Future<void> updateServicePrice(String name, String field, double price) async {
     final s = _services.where((e) => e.name == name).toList();
     if (s.isEmpty) {
@@ -525,7 +671,15 @@ class CloudDbBridge {
     final match = _services.where((e) => e.name == name);
     if (match.isEmpty) return;
     final svc = match.first;
-    await _crm.patchService(svc.id, {'price': price});
+    final apiField = switch (field) {
+      'price1' || 'price' => 'price',
+      'price2' => 'price2',
+      'price3' => 'price3',
+      'price4' => 'price4',
+      'fixed_price' => 'fixed_price',
+      _ => 'price',
+    };
+    await _crm.patchService(svc.id, {apiField: price});
     _services = await _crm.listServices();
   }
 
@@ -807,13 +961,17 @@ class CloudDbBridge {
   }
 
   Future<Map<String, dynamic>?> getCurrentShift() async {
-    final s = await _cash.currentShift();
+    final s = await _cash.currentShift(branchId: BranchScope.instance.selectedId);
     if (s == null || !s.isOpen) return null;
     return s.toLocalMap();
   }
 
   Future<List<Map<String, dynamic>>> getCashJournal(String start, String end) async {
-    final journal = await _cash.journal(from: start, to: end);
+    final journal = await _cash.journal(
+      from: start,
+      to: end,
+      branchId: BranchScope.instance.selectedId,
+    );
     return journal.map(_journalToMap).toList();
   }
 
@@ -1034,6 +1192,7 @@ class CloudDbBridge {
         'client_name': o.clientName ?? client?.name ?? '',
         'make_model': car?.makeModel ?? '',
         'plate': car?.plate ?? '',
+        'year': car?.year ?? 0,
       });
     }
     out.sort((a, b) => (a['start_time']?.toString() ?? '').compareTo(b['start_time']?.toString() ?? ''));
@@ -1073,6 +1232,7 @@ class CloudDbBridge {
           'client_name': o.clientName ?? client?.name ?? '',
           'make_model': car?.makeModel ?? '',
           'plate': car?.plate ?? '',
+          'year': car?.year ?? 0,
         });
       }
     }
@@ -1668,6 +1828,7 @@ class CloudDbBridge {
           'plate': c.plate,
           'vin': c.vin,
           'category': c.category,
+          'year': c.year,
         };
       }
     }
@@ -1687,6 +1848,7 @@ class CloudDbBridge {
           'plate': c.plate,
           'vin': c.vin,
           'category': c.category,
+          'year': c.year,
         };
       }
     }
@@ -1705,12 +1867,14 @@ class CloudDbBridge {
     String? plate,
     String? vin,
     String? category,
+    int? year,
   }) async {
     final body = <String, dynamic>{};
     if (makeModel != null) body['make_model'] = makeModel;
     if (plate != null) body['plate'] = plate;
     if (vin != null) body['vin'] = vin;
     if (category != null) body['category'] = category;
+    if (year != null) body['year'] = year;
     if (body.isEmpty) return;
     final car = await _crm.patchCar(carId, body);
     _cars[car.id] = car;
@@ -2088,20 +2252,32 @@ class CloudDbBridge {
   }) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) throw ArgumentError.value(name, 'name', 'Название плёнки не может быть пустым');
+    final key = trimmed.toLowerCase();
     final existing = await listWrapFilms();
     for (final f in existing) {
-      if ((f['name']?.toString() ?? '').trim().toLowerCase() == trimmed.toLowerCase()) {
+      if ((f['name']?.toString() ?? '').trim().toLowerCase() == key) {
         return (f['id'] as num).toInt();
       }
     }
-    // В облаке film id == inventory id (listWrapFilms).
-    return addInventoryItem(
-      trimmed,
-      0,
-      unit,
-      category: category,
-      metersPerRoll: metersPerRoll,
-    );
+    try {
+      // В облаке film id == inventory id (listWrapFilms).
+      return await addInventoryItem(
+        trimmed,
+        0,
+        unit,
+        category: category,
+        metersPerRoll: metersPerRoll,
+      );
+    } catch (e) {
+      // Уже есть на складе / UNIQUE — вернуть существующую.
+      final again = await listWrapFilms();
+      for (final f in again) {
+        if ((f['name']?.toString() ?? '').trim().toLowerCase() == key) {
+          return (f['id'] as num).toInt();
+        }
+      }
+      rethrow;
+    }
   }
 
   Future<List<Map<String, dynamic>>> getOrderWrapFilms(int orderId) async {
@@ -2221,6 +2397,7 @@ class CloudDbBridge {
         'debt': debt,
         'make_model': car?.makeModel ?? '',
         'plate': car?.plate ?? '',
+        'year': car?.year ?? 0,
       });
     }
     out.sort((a, b) => (b['id'] as int).compareTo(a['id'] as int));
@@ -2369,7 +2546,11 @@ class CloudDbBridge {
   }
 
   Future<Map<String, dynamic>> getCompanyStats({String? masterDay, int days = 30}) async {
-    return _crm.getStats(masterDay: masterDay, days: days);
+    return _crm.getStats(
+      masterDay: masterDay,
+      days: days,
+      branchId: BranchScope.instance.selectedId,
+    );
   }
 
   Future<double> getRevenueToday() async {

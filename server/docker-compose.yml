@@ -27,7 +27,7 @@ services:
       PLATFORM_ADMIN_PHONE: ${PLATFORM_ADMIN_PHONE:-}
       OWNER_DESTRUCTIVE_PIN: ${OWNER_DESTRUCTIVE_PIN:-9294}
       RELEASES_DIR: /data/releases
-      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://api.det-app.ru}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://api.det-app.ru}
       RELEASE_UPLOAD_TOKEN: ${RELEASE_UPLOAD_TOKEN}
     volumes:
       - releases_data:/data/releases
@@ -49,8 +49,28 @@ services:
     depends_on:
       - api
 
+  db-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_USER: detapp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: detapp
+      BACKUP_DIR: /backups
+      RETENTION: "14"
+    volumes:
+      - ./backup/backup.sh:/backup.sh:ro
+      - ./backup/loop.sh:/loop.sh:ro
+      - pg_backups:/backups
+    entrypoint: ["/bin/sh", "/loop.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   pgdata:
   caddy_data:
   caddy_config:
   releases_data:
+  pg_backups:

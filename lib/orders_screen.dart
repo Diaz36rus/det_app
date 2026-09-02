@@ -43,11 +43,12 @@ class _OrdersScreenState extends State<OrdersScreen> {
   final _nameController = TextEditingController();
   final _plateController = TextEditingController();
   final _vinController = TextEditingController();
+  final _yearController = TextEditingController();
   final _priceController = TextEditingController(text: "0");
   String _carMakeModel = '';
   final _carFieldsKey = GlobalKey<CarMakeModelFieldsState>();
   List<String> _extraMakes = const [];
-  List<String> _extraModels = const [];
+  Map<String, List<String>> _extraModelsByMake = const {};
   String _selectedCarCategory = "1";
   List<Map<String, dynamic>> _services = [];
   late DateTime _selectedDate;
@@ -172,16 +173,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Future<void> _loadCarCatalogExtras() async {
     final rows = await DatabaseHelper().distinctCarMakeModels();
     if (!mounted) return;
-    final makes = <String>{};
-    final models = <String>{};
-    for (final row in rows) {
-      final parts = CarCatalog.split(row);
-      if (parts.make.isNotEmpty) makes.add(parts.make);
-      if (parts.model.isNotEmpty) models.add(parts.model);
-    }
+    final extras = CarCatalog.extrasFromMakeModels(rows);
     setState(() {
-      _extraMakes = makes.toList()..sort();
-      _extraModels = models.toList()..sort();
+      _extraMakes = extras.makes;
+      _extraModelsByMake = extras.modelsByMake;
     });
   }
 
@@ -198,6 +193,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
     _nameController.dispose();
     _plateController.dispose();
     _vinController.dispose();
+    _yearController.dispose();
     _priceController.dispose();
     super.dispose();
   }
@@ -319,6 +315,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         _setCarMakeModel('');
         _plateController.clear();
         _vinController.clear();
+        _yearController.clear();
         _selectedCarCategory = "1";
         _selectedClientCarId = null;
       });
@@ -432,6 +429,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
     if (!okSlot || !mounted) return;
 
     final vin = VinUtils.normalize(_vinController.text);
+    final year = _parseCarYear(_yearController.text);
+    if (_yearController.text.trim().isNotEmpty && year == 0) {
+      if (mounted) {
+        showAppToast(context, 'Год авто: укажите число от 1980 до ${DateTime.now().year + 1}');
+      }
+      return;
+    }
     final identity = await findIdentityMatch(phone: phone, plate: plate, vin: vin);
     int clientId;
     int? carId = _selectedClientCarId;
@@ -476,6 +480,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
           plate,
           vin: vin,
           category: _selectedCarCategory,
+          year: year,
         );
       }
     } else {
@@ -485,6 +490,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         plate: plate,
         vin: vin,
         category: _selectedCarCategory,
+        year: year,
       );
     }
     final resolvedCarId = carId;
@@ -548,6 +554,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       _setCarMakeModel('');
       _plateController.clear();
       _vinController.clear();
+      _yearController.clear();
       _vinWarning = null;
       _priceController.text = "0";
       _cart.clear();
@@ -765,7 +772,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         initialMakeModel: _carMakeModel,
         stacked: stacked,
         extraMakes: _extraMakes,
-        extraModels: _extraModels,
+        extraModelsByMake: _extraModelsByMake,
         makeFieldKey: const ValueKey('order_client_make'),
         modelFieldKey: const ValueKey('order_client_model'),
         onChanged: (v) {
@@ -815,15 +822,38 @@ class _OrdersScreenState extends State<OrdersScreen> {
         },
       );
 
+  Widget _yearField() => TextField(
+        key: const ValueKey('order_client_year'),
+        controller: _yearController,
+        decoration: const InputDecoration(
+          labelText: "Год",
+          hintText: "необязательно",
+          isDense: true,
+        ),
+        keyboardType: TextInputType.number,
+        textInputAction: TextInputAction.next,
+      );
+
+  int _parseCarYear(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return 0;
+    final y = int.tryParse(t) ?? 0;
+    final maxY = DateTime.now().year + 1;
+    if (y < 1980 || y > maxY) return 0;
+    return y;
+  }
+
   Widget _clientCarsDropdown() => DropdownButtonFormField<int>(
         value: _selectedClientCarId,
         decoration: const InputDecoration(labelText: "Авто клиента", isDense: true),
         dropdownColor: AppColors.surface2,
         items: _clientCars.map((car) {
+          final y = (car['year'] as num?)?.toInt() ?? 0;
+          final yearBit = y > 0 ? ' · $y' : '';
           return DropdownMenuItem<int>(
             value: car['id'] as int,
             child: Text(
-              "${car['make_model']} | ${car['plate']}${((car['vin'] ?? '') as String).isNotEmpty ? ' | VIN ${car['vin']}' : ''}",
+              "${car['make_model']} | ${car['plate']}$yearBit${((car['vin'] ?? '') as String).isNotEmpty ? ' | VIN ${car['vin']}' : ''}",
               style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
               overflow: TextOverflow.ellipsis,
             ),
@@ -832,11 +862,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
         onChanged: (val) {
           if (val == null) return;
           var selectedCar = _clientCars.firstWhere((c) => c['id'] == val);
+          final y = (selectedCar['year'] as num?)?.toInt() ?? 0;
           setState(() {
             _selectedClientCarId = val;
             _setCarMakeModel(selectedCar['make_model']?.toString() ?? "");
             _plateController.text = PlateMaskFormatter.normalize(selectedCar['plate']?.toString() ?? "");
             _vinController.text = selectedCar['vin']?.toString() ?? "";
+            _yearController.text = y > 0 ? '$y' : '';
             _selectedCarCategory = selectedCar['category'] ?? "1";
           });
         },
@@ -887,7 +919,10 @@ class _OrdersScreenState extends State<OrdersScreen> {
                             ),
                           ),
                           Text(
-                            '$_selectedCarCategory кл.',
+                            [
+                              '$_selectedCarCategory кл.',
+                              if (_yearController.text.trim().isNotEmpty) _yearController.text.trim(),
+                            ].join(' · '),
                             style: GoogleFonts.manrope(
                               color: AppColors.textMuted,
                               fontSize: 12,
@@ -957,7 +992,13 @@ class _OrdersScreenState extends State<OrdersScreen> {
             if (mobile) ...[
               _vinField(),
               const SizedBox(height: 10),
-              _classField(),
+              Row(
+                children: [
+                  Expanded(child: _classField()),
+                  const SizedBox(width: 10),
+                  Expanded(child: _yearField()),
+                ],
+              ),
             ] else
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -965,6 +1006,8 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   Expanded(child: _vinField()),
                   const SizedBox(width: 10),
                   Expanded(child: _classField()),
+                  const SizedBox(width: 10),
+                  Expanded(child: _yearField()),
                 ],
               ),
             if (_plateHistory.isNotEmpty) ...[

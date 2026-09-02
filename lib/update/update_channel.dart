@@ -13,10 +13,10 @@ class UpdateChannel {
   static const fileName = 'update_channel.json';
 
   /// Облачный канал по умолчанию (Selectel / api.det-app.ru).
-  static const cloudManifestUrl = 'http://api.det-app.ru/updates/latest.json';
+  static const cloudManifestUrl = 'https://api.det-app.ru/updates/latest.json';
 
   /// Постоянная ссылка на актуальный APK (сервер редиректит/отдаёт последний билд).
-  static const cloudApkUrl = 'http://api.det-app.ru/updates/android';
+  static const cloudApkUrl = 'https://api.det-app.ru/updates/android';
 
   /// Корень portable: `…/DetApp-portable` (родитель папки `app`). Только desktop.
   static String? portableRoot() {

@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../app_version.dart';
 import '../patch_notes.dart';
+import 'install_source.dart';
 import 'update_channel.dart';
 import 'update_manifest.dart';
 
@@ -20,12 +21,15 @@ class UpdateCheckResult {
   final UpdateManifest? manifest;
   final String? message;
   final String? channelUrl;
+  /// Android из RuStore/Play: обновлять через магазин, не облачным APK.
+  final bool storeUpdateOnly;
 
   const UpdateCheckResult({
     required this.status,
     this.manifest,
     this.message,
     this.channelUrl,
+    this.storeUpdateOnly = false,
   });
 }
 
@@ -73,7 +77,7 @@ class UpdateService {
       return const UpdateCheckResult(
         status: UpdateCheckStatus.noChannel,
         message: 'Не задан канал обновлений.\n'
-            'По умолчанию: http://api.det-app.ru/updates/latest.json',
+            'По умолчанию: https://api.det-app.ru/updates/latest.json',
       );
     }
 
@@ -133,6 +137,20 @@ class UpdateService {
           message: 'Установлена последняя версия: ${AppVersion.label}',
         );
       }
+
+      if (Platform.isAndroid && await InstallSource.isFromAppStore()) {
+        return UpdateCheckResult(
+          status: UpdateCheckStatus.available,
+          manifest: manifest,
+          channelUrl: manifestUrl,
+          storeUpdateOnly: true,
+          message:
+              'Доступна сборка ${manifest.build}.\n'
+              'Приложение установлено из магазина — обновите через RuStore '
+              '(облачный APK отключён, чтобы не сломать подпись).',
+        );
+      }
+
       return UpdateCheckResult(
         status: UpdateCheckStatus.available,
         manifest: manifest,

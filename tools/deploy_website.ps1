@@ -72,6 +72,6 @@ if ($LASTEXITCODE -ne 0) { throw 'remote install failed' }
 Write-Host '==> check site' -ForegroundColor Cyan
 curl.exe -sI -H "Host: det-app.ru" "http://$HostName/" | Select-Object -First 8
 Write-Host ''
-curl.exe -sI "http://api.det-app.ru/health" | Select-Object -First 6
+curl.exe -sI "https://api.det-app.ru/health" | Select-Object -First 6
 Write-Host ''
-Write-Host 'Done. Open http://det-app.ru' -ForegroundColor Green
+Write-Host 'Done. Open https://det-app.ru' -ForegroundColor Green

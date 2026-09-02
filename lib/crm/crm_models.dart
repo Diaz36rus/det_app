@@ -30,6 +30,7 @@ class CrmCar {
   final String plate;
   final String vin;
   final String category;
+  final int year;
 
   const CrmCar({
     required this.id,
@@ -39,6 +40,7 @@ class CrmCar {
     required this.plate,
     required this.vin,
     required this.category,
+    this.year = 0,
   });
 
   factory CrmCar.fromJson(Map<String, dynamic> j) => CrmCar(
@@ -49,9 +51,14 @@ class CrmCar {
         plate: j['plate']?.toString() ?? '',
         vin: j['vin']?.toString() ?? '',
         category: j['category']?.toString() ?? '1',
+        year: (j['year'] as num?)?.toInt() ?? 0,
       );
 
-  String get label => '$makeModel ${plate.isEmpty ? '' : plate}'.trim();
+  String get label {
+    final base = '$makeModel ${plate.isEmpty ? '' : plate}'.trim();
+    if (year > 0) return '$base · $year';
+    return base;
+  }
 }
 
 class CrmOrderItem {
@@ -266,6 +273,10 @@ class CrmService {
   final String name;
   final String category;
   final double price;
+  final double price2;
+  final double price3;
+  final double price4;
+  final double fixedPrice;
   final String workshop;
   final bool isActive;
   const CrmService({
@@ -273,14 +284,39 @@ class CrmService {
     required this.name,
     required this.category,
     required this.price,
+    this.price2 = 0,
+    this.price3 = 0,
+    this.price4 = 0,
+    this.fixedPrice = 0,
     required this.workshop,
     required this.isActive,
   });
+
+  double priceForClass(String? category) {
+    if (fixedPrice > 0) return fixedPrice;
+    final c = (category ?? '1').trim();
+    final key = c.isEmpty ? '1' : c[0];
+    switch (key) {
+      case '2':
+        return price2 > 0 ? price2 : price;
+      case '3':
+        return price3 > 0 ? price3 : price;
+      case '4':
+        return price4 > 0 ? price4 : price;
+      default:
+        return price;
+    }
+  }
+
   factory CrmService.fromJson(Map<String, dynamic> j) => CrmService(
         id: (j['id'] as num).toInt(),
         name: j['name']?.toString() ?? '',
         category: j['category']?.toString() ?? '',
         price: (j['price'] as num?)?.toDouble() ?? 0,
+        price2: (j['price2'] as num?)?.toDouble() ?? 0,
+        price3: (j['price3'] as num?)?.toDouble() ?? 0,
+        price4: (j['price4'] as num?)?.toDouble() ?? 0,
+        fixedPrice: (j['fixed_price'] as num?)?.toDouble() ?? 0,
         workshop: j['workshop']?.toString() ?? '',
         isActive: j['is_active'] != false,
       );

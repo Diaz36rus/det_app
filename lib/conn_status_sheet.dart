@@ -459,10 +459,10 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
                             ),
                           _SoftExpansion(
                             icon: Icons.wifi_tethering_rounded,
-                            title: 'Офлайн · Wi‑Fi',
+                            title: 'Аварийный · без интернета',
                             subtitle: sync.isHosting
-                                ? 'Локальный хост ещё запущен'
-                                : 'Аварийный режим без интернета',
+                                ? 'Локальный LAN-хост (лучше выключить при облаке)'
+                                : 'Только если облако недоступно',
                             accent: sync.isHosting ? const Color(0xFFE8A838) : null,
                             child: _buildLanBody(
                               context,
@@ -996,6 +996,20 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
   String? _error;
   int? _expandedId;
 
+  String _normCompanyName(String name) =>
+      name.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  List<String> get _duplicateNameKeys {
+    final counts = <String, int>{};
+    for (final c in _companies) {
+      final k = _normCompanyName(c.name);
+      if (k.isEmpty) continue;
+      counts[k] = (counts[k] ?? 0) + 1;
+    }
+    return counts.entries.where((e) => e.value > 1).map((e) => e.key).toList()
+      ..sort();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1303,11 +1317,33 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
               'Пока нет студий. Создайте первую — с основным филиалом и владельцем.',
               style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
             )
-          else
+          else ...[
+            if (_duplicateNameKeys.isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8A838).withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE8A838).withOpacity(0.45)),
+                ),
+                child: Text(
+                  'Похожие названия студий: ${_duplicateNameKeys.join(', ')}. '
+                  'Проверьте дубли (slug разный — это разные компании).',
+                  style: GoogleFonts.manrope(
+                    color: AppColors.textMuted,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ],
             ..._companies.map((c) {
               final open = _expandedId == c.id;
               final branches = _branches[c.id];
               final users = _users[c.id];
+              final dup = _duplicateNameKeys.contains(_normCompanyName(c.name));
               return Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Material(
@@ -1333,9 +1369,9 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      c.name,
+                                      dup ? '${c.name} · дубль?' : c.name,
                                       style: GoogleFonts.manrope(
-                                        color: AppColors.text,
+                                        color: dup ? const Color(0xFFE8A838) : AppColors.text,
                                         fontWeight: FontWeight.w700,
                                         fontSize: 13,
                                       ),
@@ -1548,6 +1584,7 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                 ),
               );
             }),
+          ],
         ],
       ),
     );

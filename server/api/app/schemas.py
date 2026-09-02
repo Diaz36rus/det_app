@@ -221,6 +221,7 @@ class CrmCarCreate(BaseModel):
     plate: str = Field(default="", max_length=32)
     vin: str = Field(default="", max_length=64)
     category: str = Field(default="1", max_length=8)
+    year: int = Field(default=0, ge=0, le=2100)
 
 
 class CrmCarUpdate(BaseModel):
@@ -228,6 +229,7 @@ class CrmCarUpdate(BaseModel):
     plate: str | None = Field(default=None, max_length=32)
     vin: str | None = Field(default=None, max_length=64)
     category: str | None = Field(default=None, max_length=8)
+    year: int | None = Field(default=None, ge=0, le=2100)
 
 
 class CrmCarOut(BaseModel):
@@ -238,6 +240,7 @@ class CrmCarOut(BaseModel):
     plate: str
     vin: str
     category: str
+    year: int = 0
 
     model_config = {"from_attributes": True}
 

@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Полный прайс Det App (зеркало Flutter SERVICES_TREE + wrap_catalog).
 
-cloud `price` = fixed_price если > 0, иначе цена 1 класса (p1).
-Цены по классам 2–4 пока не в модели API — добавим позже при продажах.
+`price` = класс 1 (или fixed, если задан).
+`price2…4` / `fixed_price` — классы авто и фикс.
 """
 from __future__ import annotations
 
@@ -132,16 +132,36 @@ def workshop_for(category: str, name: str) -> str:
 
 
 def cloud_price(p1: float, p2: float, p3: float, p4: float, fp: float) -> float:
+    """Базовая цена для legacy-поля price (= класс 1 или fixed)."""
     if fp and fp > 0:
         return float(fp)
-    for p in (p1, p2, p3, p4):
-        if p and p > 0:
-            return float(p)
-    return 0.0
+    return float(p1 or 0)
+
+
+def price_for_class(
+    *,
+    price: float,
+    price2: float = 0,
+    price3: float = 0,
+    price4: float = 0,
+    fixed_price: float = 0,
+    car_category: str | int | None = "1",
+) -> float:
+    if fixed_price and fixed_price > 0:
+        return float(fixed_price)
+    raw = str(car_category or "1").strip()
+    cat = raw[:1] if raw else "1"
+    mapping = {
+        "1": price,
+        "2": price2 if price2 > 0 else price,
+        "3": price3 if price3 > 0 else price,
+        "4": price4 if price4 > 0 else price,
+    }
+    return float(mapping.get(cat, price) or 0)
 
 
 def iter_price_catalog() -> list[dict]:
-    """Список услуг для seed / sync: name, category, price, workshop."""
+    """Список услуг для seed / sync: name, category, price(1–4), fixed, workshop."""
     out: list[dict] = []
     for cat, name, p1, p2, p3, p4, fp in _CORE:
         out.append(
@@ -149,6 +169,10 @@ def iter_price_catalog() -> list[dict]:
                 "category": cat,
                 "name": name,
                 "price": cloud_price(p1, p2, p3, p4, fp),
+                "price2": float(p2 or 0),
+                "price3": float(p3 or 0),
+                "price4": float(p4 or 0),
+                "fixed_price": float(fp or 0),
                 "workshop": workshop_for(cat, name),
             }
         )
@@ -159,6 +183,10 @@ def iter_price_catalog() -> list[dict]:
                 "category": cat,
                 "name": name,
                 "price": 0.0,
+                "price2": 0.0,
+                "price3": 0.0,
+                "price4": 0.0,
+                "fixed_price": 0.0,
                 "workshop": "Оклейка",
             }
         )

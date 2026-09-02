@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -18,6 +19,7 @@ import 'backup_helper.dart';
 import 'database.dart';
 import 'owner_pin.dart';
 import 'responsive.dart';
+import 'showcase_seed.dart';
 import 'studio_access_dialogs.dart';
 import 'studio_prefs.dart';
 import 'sync/sync_qr.dart';
@@ -37,6 +39,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
   String? _openId;
   bool _loadingCloud = false;
   String? _cloudError;
+  bool _showcaseBusy = false;
 
   String? _studioName;
   List<CompanyBranch> _branches = const [];
@@ -574,6 +577,17 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
                   hint: _lastBackup == null ? 'нет' : AppDateTime.format(_lastBackup),
                   body: _backupBody(),
                 ),
+                if (kDebugMode) ...[
+                  const SizedBox(height: 12),
+                  _section(
+                    id: 'showcase',
+                    icon: Icons.photo_library_outlined,
+                    title: 'Витрина для скринов',
+                    subtitle: 'Фейковые заказы без реальных данных',
+                    hint: 'debug',
+                    body: _showcaseBody(),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 _section(
                   id: 'danger',
@@ -1299,6 +1313,48 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
           onPressed: _backupNow,
           icon: const Icon(Icons.backup_outlined, size: 18),
           label: Text('Сделать бэкап сейчас', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+        ),
+      ],
+    );
+  }
+
+  Widget _showcaseBody() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Добавит выдуманных клиентов, заказы на доску, пару движений по кассе и склад. '
+          'Для боевой студии лучше не жать.',
+          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12.5, height: 1.35),
+        ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          onPressed: _showcaseBusy
+              ? null
+              : () async {
+                  setState(() => _showcaseBusy = true);
+                  try {
+                    final msg = await ShowcaseSeed.resetAndFill();
+                    if (!mounted) return;
+                    showAppToast(context, msg);
+                  } catch (e) {
+                    if (!mounted) return;
+                    showAppToast(context, 'Не вышло: $e');
+                  } finally {
+                    if (mounted) setState(() => _showcaseBusy = false);
+                  }
+                },
+          icon: _showcaseBusy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : const Icon(Icons.auto_awesome_outlined, size: 18),
+          label: Text(
+            _showcaseBusy ? 'Подождите…' : 'Сбросить и заполнить',
+            style: GoogleFonts.manrope(fontWeight: FontWeight.w700),
+          ),
         ),
       ],
     );

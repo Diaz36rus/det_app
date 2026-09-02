@@ -15,7 +15,7 @@
 [CmdletBinding()]
 param(
   [Parameter(Mandatory = $true)][string]$Token,
-  [string]$ApiBase = 'http://api.det-app.ru',
+  [string]$ApiBase = 'https://api.det-app.ru',
   [switch]$Build,
   [switch]$BuildApk,
   [string]$Notes = ''
@@ -80,6 +80,16 @@ if ($meta.PSObject.Properties.Name -contains 'apk_name' -and $meta.apk_name) {
     '-F', "android_apk=@$ApkSrc;type=application/vnd.android.package-archive",
     '-F', "android_sha256=$($meta.android_sha256)",
     '-F', "android_size=$($meta.android_size)"
+  )
+}
+
+if ($meta.PSObject.Properties.Name -contains 'setup_name' -and $meta.setup_name) {
+  $SetupSrc = Join-Path $DistRoot ([string]$meta.setup_name)
+  if (-not (Test-Path -LiteralPath $SetupSrc)) { throw "missing setup $SetupSrc" }
+  $curlArgs += @(
+    '-F', "windows_setup=@$SetupSrc;type=application/vnd.microsoft.portable-executable",
+    '-F', "setup_sha256=$($meta.setup_sha256)",
+    '-F', "setup_size=$($meta.setup_size)"
   )
 }
 

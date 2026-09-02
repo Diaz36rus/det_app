@@ -3,6 +3,8 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'app_theme.dart';
+import 'branch_filter_bar.dart';
+import 'branch_scope.dart';
 import 'crm/cloud_db_bridge.dart';
 import 'database.dart';
 import 'responsive.dart';
@@ -66,7 +68,19 @@ class _StatsScreenState extends State<StatsScreen> {
     super.initState();
     final now = DateTime.now();
     _masterDayDate = DateTime(now.year, now.month, now.day);
+    BranchScope.instance.addListener(_onBranch);
+    BranchScope.instance.ensureLoaded();
     _loadStats();
+  }
+
+  void _onBranch() {
+    if (mounted) _loadStats();
+  }
+
+  @override
+  void dispose() {
+    BranchScope.instance.removeListener(_onBranch);
+    super.dispose();
   }
 
   Future<void> _loadStats() async {
@@ -395,6 +409,7 @@ class _StatsScreenState extends State<StatsScreen> {
             ..._masterDay.map((m) {
               final n = (m['orders_count'] as num?)?.toInt() ?? 0;
               final rev = (m['revenue'] as num?)?.toDouble() ?? 0;
+              final zp = (m['payroll'] as num?)?.toDouble() ?? 0;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -417,14 +432,27 @@ class _StatsScreenState extends State<StatsScreen> {
                         fontSize: 12,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     SizedBox(
-                      width: 88,
+                      width: 78,
                       child: Text(
                         rev > 0 ? '${_money.format(rev)} ₽' : '—',
                         textAlign: TextAlign.right,
                         style: GoogleFonts.manrope(
                           color: rev > 0 ? AppColors.text : AppColors.textDim,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 86,
+                      child: Text(
+                        zp > 0 ? 'ЗП ${_money.format(zp)}' : 'ЗП —',
+                        textAlign: TextAlign.right,
+                        style: GoogleFonts.manrope(
+                          color: zp > 0 ? AppColors.primary : AppColors.textDim,
                           fontWeight: FontWeight.w700,
                           fontSize: 12,
                         ),
@@ -620,6 +648,7 @@ class _StatsScreenState extends State<StatsScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text('Выручка, услуги и загрузка за период', style: AppTheme.pageSubtitle),
+                  const BranchFilterBar(compact: true),
                 ],
               )
             else ...[
@@ -629,6 +658,7 @@ class _StatsScreenState extends State<StatsScreen> {
                   _periodChips(),
                 ],
               ),
+              const BranchFilterBar(compact: true),
               const SizedBox(height: 4),
               Text('Выручка и загрузка', style: AppTheme.pageSubtitle),
             ],

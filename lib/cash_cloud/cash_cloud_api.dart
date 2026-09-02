@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../auth/auth_api.dart';
-import '../auth/auth_controller.dart';
+import '../auth/authed_http.dart';
 import 'cash_cloud_models.dart';
 
 class CashCloudException implements Exception {
@@ -22,19 +22,9 @@ class CashCloudApi {
 
   Uri _u(String path) => Uri.parse('$baseUrl$path');
 
-  Map<String, String> _headers() {
-    final token = AuthController.instance.accessToken;
-    if (token == null || token.isEmpty) {
-      throw CashCloudException('Нет сессии — войдите снова', statusCode: 401);
-    }
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
-  }
 
   Future<List<CloudCashRegister>> listRegisters() async {
-    final r = await http.get(_u('/cash/registers'), headers: _headers()).timeout(const Duration(seconds: 15));
+    final r = await authedGet(_u('/cash/registers'), timeout: const Duration(seconds: 15));
     _ensure(r);
     final list = jsonDecode(utf8.decode(r.bodyBytes)) as List;
     return list.map((e) => CloudCashRegister.fromJson(e as Map<String, dynamic>)).toList();
@@ -45,17 +35,11 @@ class CashCloudApi {
     required String moneyType,
     int sortOrder = 100,
   }) async {
-    final r = await http
-        .post(
-          _u('/cash/registers'),
-          headers: _headers(),
-          body: jsonEncode({
+    final r = await authedPost(_u('/cash/registers'), body: jsonEncode({
             'name': name,
             'money_type': moneyType,
             'sort_order': sortOrder,
-          }),
-        )
-        .timeout(const Duration(seconds: 15));
+          }), timeout: const Duration(seconds: 15));
     _ensure(r);
     return CloudCashRegister.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
@@ -73,16 +57,17 @@ class CashCloudApi {
       if (isActive != null) 'is_active': isActive,
       if (sortOrder != null) 'sort_order': sortOrder,
     };
-    final r = await http
-        .patch(_u('/cash/registers/$registerId'), headers: _headers(), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedPatch(_u('/cash/registers/$registerId'), body: jsonEncode(body), timeout: const Duration(seconds: 15));
     _ensure(r);
     return CloudCashRegister.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
-  Future<CloudCashShift?> currentShift() async {
-    final r =
-        await http.get(_u('/cash/shifts/current'), headers: _headers()).timeout(const Duration(seconds: 15));
+  Future<CloudCashShift?> currentShift({int? branchId}) async {
+    final q = <String, String>{
+      if (branchId != null) 'branch_id': '$branchId',
+    };
+    final uri = _u('/cash/shifts/current').replace(queryParameters: q.isEmpty ? null : q);
+    final r = await authedGet(uri, timeout: const Duration(seconds: 15));
     if (r.statusCode == 204 || r.bodyBytes.isEmpty || r.body.trim() == 'null') {
       return null;
     }
@@ -93,14 +78,14 @@ class CashCloudApi {
   }
 
   Future<CloudCashShift> getShift(int shiftId) async {
-    final r = await http.get(_u('/cash/shifts/$shiftId'), headers: _headers()).timeout(const Duration(seconds: 15));
+    final r = await authedGet(_u('/cash/shifts/$shiftId'), timeout: const Duration(seconds: 15));
     _ensure(r);
     return CloudCashShift.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
   Future<List<CloudCashShift>> listShifts({int limit = 20}) async {
     final uri = _u('/cash/shifts').replace(queryParameters: {'limit': '$limit'});
-    final r = await http.get(uri, headers: _headers()).timeout(const Duration(seconds: 15));
+    final r = await authedGet(uri, timeout: const Duration(seconds: 15));
     _ensure(r);
     final list = jsonDecode(utf8.decode(r.bodyBytes)) as List;
     return list.map((e) => CloudCashShift.fromJson(e as Map<String, dynamic>)).toList();
@@ -111,9 +96,7 @@ class CashCloudApi {
       'note': note,
       'openings': {for (final e in (openings ?? {}).entries) '${e.key}': e.value},
     };
-    final r = await http
-        .post(_u('/cash/shifts/open'), headers: _headers(), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedPost(_u('/cash/shifts/open'), body: jsonEncode(body), timeout: const Duration(seconds: 15));
     _ensure(r);
     return CloudCashShift.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
@@ -123,21 +106,25 @@ class CashCloudApi {
       'note': note,
       'facts': {for (final e in (facts ?? {}).entries) '${e.key}': e.value},
     };
-    final r = await http
-        .post(_u('/cash/shifts/$shiftId/close'), headers: _headers(), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedPost(_u('/cash/shifts/$shiftId/close'), body: jsonEncode(body), timeout: const Duration(seconds: 15));
     _ensure(r);
     return CloudCashShift.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
-  Future<List<CloudCashJournalEntry>> journal({String? from, String? to, int? shiftId}) async {
+  Future<List<CloudCashJournalEntry>> journal({
+    String? from,
+    String? to,
+    int? shiftId,
+    int? branchId,
+  }) async {
     final q = <String, String>{
       if (from != null && from.isNotEmpty) 'from': from.length >= 10 ? from.substring(0, 10) : from,
       if (to != null && to.isNotEmpty) 'to': to.length >= 10 ? to.substring(0, 10) : to,
       if (shiftId != null) 'shift_id': '$shiftId',
+      if (branchId != null) 'branch_id': '$branchId',
     };
     final uri = _u('/cash/journal').replace(queryParameters: q.isEmpty ? null : q);
-    final r = await http.get(uri, headers: _headers()).timeout(const Duration(seconds: 15));
+    final r = await authedGet(uri, timeout: const Duration(seconds: 15));
     _ensure(r);
     final list = jsonDecode(utf8.decode(r.bodyBytes)) as List;
     return list.map((e) => CloudCashJournalEntry.fromJson(e as Map<String, dynamic>)).toList();
@@ -158,11 +145,7 @@ class CashCloudApi {
     int? orderId,
     String templateKey = '',
   }) async {
-    final r = await http
-        .post(
-          _u('/cash/flows'),
-          headers: _headers(),
-          body: jsonEncode({
+    final r = await authedPost(_u('/cash/flows'), body: jsonEncode({
             'type': type,
             'amount': amount,
             'method': method,
@@ -176,15 +159,13 @@ class CashCloudApi {
             if (masterId != null) 'master_id': masterId,
             if (inventoryId != null) 'inventory_id': inventoryId,
             if (orderId != null) 'order_id': orderId,
-          }),
-        )
-        .timeout(const Duration(seconds: 15));
+          }), timeout: const Duration(seconds: 15));
     _ensure(r);
     return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
   }
 
   Future<Map<String, dynamic>> getFlow(int flowId) async {
-    final r = await http.get(_u('/cash/flows/$flowId'), headers: _headers()).timeout(const Duration(seconds: 15));
+    final r = await authedGet(_u('/cash/flows/$flowId'), timeout: const Duration(seconds: 15));
     _ensure(r);
     return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
   }
@@ -205,11 +186,7 @@ class CashCloudApi {
     int? orderId,
     String templateKey = '',
   }) async {
-    final r = await http
-        .patch(
-          _u('/cash/flows/$flowId'),
-          headers: _headers(),
-          body: jsonEncode({
+    final r = await authedPatch(_u('/cash/flows/$flowId'), body: jsonEncode({
             'type': type,
             'amount': amount,
             'method': method,
@@ -223,17 +200,13 @@ class CashCloudApi {
             'inventory_id': inventoryId,
             'order_id': orderId,
             if (registerId != null) 'register_id': registerId,
-          }),
-        )
-        .timeout(const Duration(seconds: 15));
+          }), timeout: const Duration(seconds: 15));
     _ensure(r);
     return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
   }
 
   Future<void> deleteFlow(int flowId) async {
-    final r = await http
-        .delete(_u('/cash/flows/$flowId'), headers: _headers())
-        .timeout(const Duration(seconds: 15));
+    final r = await authedDelete(_u('/cash/flows/$flowId'), timeout: const Duration(seconds: 15));
     _ensure(r);
   }
 
@@ -243,18 +216,12 @@ class CashCloudApi {
     String method = 'Наличные',
     int? registerId,
   }) async {
-    final r = await http
-        .post(
-          _u('/cash/payments'),
-          headers: _headers(),
-          body: jsonEncode({
+    final r = await authedPost(_u('/cash/payments'), body: jsonEncode({
             'order_id': orderId,
             'amount': amount,
             'method': method,
             if (registerId != null) 'register_id': registerId,
-          }),
-        )
-        .timeout(const Duration(seconds: 15));
+          }), timeout: const Duration(seconds: 15));
     _ensure(r);
   }
 
@@ -269,9 +236,7 @@ class CashCloudApi {
       if (method != null) 'method': method,
       if (registerId != null) 'register_id': registerId,
     };
-    final r = await http
-        .patch(_u('/cash/payments/$paymentId'), headers: _headers(), body: jsonEncode(body))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedPatch(_u('/cash/payments/$paymentId'), body: jsonEncode(body), timeout: const Duration(seconds: 15));
     _ensure(r);
     return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
   }
@@ -282,7 +247,7 @@ class CashCloudApi {
       if (includeVoided) 'include_voided': 'true',
     };
     final uri = _u('/cash/payments').replace(queryParameters: q.isEmpty ? null : q);
-    final r = await http.get(uri, headers: _headers()).timeout(const Duration(seconds: 15));
+    final r = await authedGet(uri, timeout: const Duration(seconds: 15));
     _ensure(r);
     return (jsonDecode(utf8.decode(r.bodyBytes)) as List)
         .map((e) => Map<String, dynamic>.from(e as Map))
@@ -290,9 +255,7 @@ class CashCloudApi {
   }
 
   Future<Map<String, dynamic>> voidPayment(int paymentId) async {
-    final r = await http
-        .delete(_u('/cash/payments/$paymentId'), headers: _headers())
-        .timeout(const Duration(seconds: 15));
+    final r = await authedDelete(_u('/cash/payments/$paymentId'), timeout: const Duration(seconds: 15));
     _ensure(r);
     return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
   }

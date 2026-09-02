@@ -1,26 +1,21 @@
-# HTTP: DNS уже на IP, HTTPS включим отдельно.
-:80 {
-	@site host det-app.ru www.det-app.ru
-	handle @site {
-		# Same-origin proxy: сайт → API без CORS
-		handle_path /api/* {
-			reverse_proxy api:8000
-		}
-		handle {
-			root * /srv/website
-			encode gzip
-			try_files {path} /index.html
-			file_server
-		}
-	}
+# HTTPS via Let's Encrypt (Caddy automatic). Ports 80+443 must be open.
+# www.det-app.ru не включаем — нет DNS A-записи (NXDOMAIN).
+{
+	email admin@det-app.ru
+}
 
-	@api host api.det-app.ru
-	handle @api {
+det-app.ru {
+	handle_path /api/* {
 		reverse_proxy api:8000
 	}
-
-	# Прямой IP / health без Host — API как раньше
 	handle {
-		reverse_proxy api:8000
+		root * /srv/website
+		encode gzip
+		try_files {path} /index.html
+		file_server
 	}
+}
+
+api.det-app.ru {
+	reverse_proxy api:8000
 }

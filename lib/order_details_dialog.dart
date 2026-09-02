@@ -12,6 +12,7 @@ import 'app_notifications.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'auth/auth_controller.dart';
+import 'car_label.dart';
 import 'cash_catalog.dart';
 import 'crm/cloud_db_bridge.dart';
 import 'database.dart';
@@ -212,6 +213,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   int _lastLiveRev = -1;
   bool _liveRefreshBusy = false;
   bool _handoverExpanded = true;
+  /// Max event id, помеченный прочитанным для бейджа ленты (локально на устройстве).
+  int _feedSeenId = 0;
 
   @override
   void initState() {
@@ -320,6 +323,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     try {
       _masters = await DatabaseHelper().getAllMastersFull();
       _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
+      await _loadFeedSeen();
       _selectedMasterId = widget.order['master_id'];
       _selectedReceptionistId = (widget.order['receptionist_id'] as num?)?.toInt();
       // Мастер цеха, ошибочно записанный в master_id — не админ заказа.
@@ -580,7 +584,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     return TapRegion(
       groupId: _workCommentTapGroup,
       child: Tooltip(
-        message: open ? 'Скрыть сообщение цеху' : 'Сообщение цеху',
+        message: open
+            ? (_isWorkshopMode ? 'Скрыть комментарий' : 'Скрыть сообщение цеху')
+            : (_isWorkshopMode ? 'Комментарий в ленту' : 'Сообщение цеху'),
         child: Material(
           color: Colors.transparent,
           child: InkWell(
@@ -2167,6 +2173,16 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       'start_time': _orderStartTime ?? widget.order['start_time'],
       'end_time': _orderEndTime ?? widget.order['end_time'],
     };
+    final payroll = <Map<String, dynamic>>[];
+    _payrollByWorkshop.forEach((ws, lines) {
+      for (final line in lines) {
+        payroll.add({
+          'workshop': ws,
+          'master_id': line['master_id'],
+          'amount': line['amount'],
+        });
+      }
+    });
     if (!mounted) return;
     try {
       await WorkOrderPdf.showPreview(
@@ -2174,6 +2190,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         order: orderForPdf,
         items: _selectedWorks,
         masters: _masters,
+        payroll: payroll,
       );
     } catch (e) {
       if (!mounted) return;
@@ -3112,27 +3129,32 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     );
   }
 
-  /// Коммент под работой → БД + сразу в ленту («для цеха»).
-  /// Возвращает true, если событие попало в ленту.
+  /// Коммент под работой → лента.
+  /// Из цеха: «От цеха …» (свой комментарий). Из карточки заказа: «Для цеха …».
   Future<bool> _saveWorkComment(int itemId, String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return false;
 
     final idx = _selectedWorks.indexWhere((w) => (w['id'] as num?)?.toInt() == itemId);
     final w = idx >= 0 ? _selectedWorks[idx] : null;
-    var ws = w?['workshop']?.toString() ?? '';
-    if (ws.isEmpty) {
-      ws = workshopForService(name: w?['name']?.toString()) ?? 'Цех';
-    }
     final workName = w?['name']?.toString() ?? '';
     final body = workName.isEmpty ? trimmed : '$trimmed · $workName';
 
+    final String eventText;
+    if (_isWorkshopMode) {
+      final fromWs = widget.workshop!.trim();
+      eventText = "От цеха «$fromWs»: $body";
+    } else {
+      var ws = w?['workshop']?.toString() ?? '';
+      if (ws.isEmpty) {
+        ws = workshopForService(name: w?['name']?.toString()) ?? 'Цех';
+      }
+      eventText = "Для цеха «$ws»: $body";
+    }
+
     // Только лента: в order_items.comment / заказ-наряд цеховой чат не пишем.
     try {
-      await DatabaseHelper().addOrderEvent(
-        widget.order['id'],
-        "Для цеха «$ws»: $body",
-      );
+      await DatabaseHelper().addOrderEvent(widget.order['id'], eventText);
       _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
       if (mounted) {
         setState(() {
@@ -3180,9 +3202,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       dropdownColor: AppColors.surface,
       items: _clientCars.map((car) {
         final vin = (car['vin'] ?? '').toString();
-        final label = vin.isEmpty
-            ? "${car['make_model']} | ${car['plate']}"
-            : "${car['make_model']} | ${car['plate']} | VIN $vin";
+        final base = formatCarMakePlate(Map<String, dynamic>.from(car), sep: ' | ');
+        final label = vin.isEmpty ? base : "$base | VIN $vin";
         return DropdownMenuItem<int>(
           value: car['id'] as int,
           child: Text(label, overflow: TextOverflow.ellipsis),
@@ -3197,7 +3218,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         final selectedCar = _clientCars.firstWhere((c) => c['id'] == val);
         await DatabaseHelper().addOrderEvent(
           widget.order['id'],
-          "Изменено авто на: ${selectedCar['make_model']} | ${selectedCar['plate']}",
+          "Изменено авто на: ${formatCarMakePlate(Map<String, dynamic>.from(selectedCar), sep: ' | ')}",
         );
         _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
         if (mounted) setState(() {});
@@ -3604,6 +3625,12 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               icon: Icon(Icons.delete_outline_rounded, color: AppColors.danger.withOpacity(0.9)),
             ),
           ],
+          IconButton(
+            tooltip: 'Дефекты',
+            onPressed: () => _openDefectsSheet(),
+            icon: const Icon(Icons.report_problem_outlined, color: AppColors.danger),
+          ),
+          _feedIconButton(),
           IconButton(
             tooltip: 'Закрыть',
             onPressed: _closeDialog,
@@ -4970,57 +4997,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         ),
         const SizedBox(height: 10),
         Expanded(
-          flex: 3,
           child: _owPanel(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Лента',
-                  style: GoogleFonts.manrope(
-                    color: AppColors.text,
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: _buildPinnedTimelineBody(
-                    composer: TextField(
-                      controller: _commentController,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _addCommentToTimeline(),
-                      style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
-                      decoration: InputDecoration(
-                        hintText: 'Комментарий…',
-                        hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                        isDense: true,
-                        filled: true,
-                        fillColor: AppColors.bg.withOpacity(0.45),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide.none,
-                        ),
-                        suffixIcon: IconButton(
-                          tooltip: 'Отправить',
-                          icon: const Icon(Icons.send_rounded, size: 16, color: AppColors.primary),
-                          onPressed: _addCommentToTimeline,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        _owPanel(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
               Text(
                 'Файлы',
                 style: GoogleFonts.manrope(
@@ -5095,6 +5076,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               ),
             ],
           ),
+        ),
         ),
       ],
     );
@@ -5180,6 +5162,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 },
                 icon: const Icon(Icons.report_problem_outlined, color: AppColors.danger),
               ),
+              _feedIconButton(),
               IconButton(
                 tooltip: 'Закрыть',
                 onPressed: _closeDialog,
@@ -6280,30 +6263,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   }
 
   Widget _buildNotesColumn({bool fill = true}) {
-    final timeline = Container(
-      height: fill ? null : 280,
-      decoration: AppTheme.panelDecoration,
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-      child: _buildPinnedTimelineBody(
-        composer: TextField(
-          controller: _commentController,
-          textInputAction: TextInputAction.send,
-          onSubmitted: (_) => _addCommentToTimeline(),
-          style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: 'Комментарий в ленту (Enter)...',
-            hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
-            isDense: true,
-            suffixIcon: IconButton(
-              tooltip: "Отправить",
-              icon: const Icon(Icons.send, size: 18, color: AppColors.primary),
-              onPressed: _addCommentToTimeline,
-            ),
-          ),
-        ),
-      ),
-    );
-
     return Column(
       mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
       children: [
@@ -6377,8 +6336,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             ],
           ),
         ),
-        const SizedBox(height: 12),
-        if (fill) Expanded(child: timeline) else timeline,
       ],
     );
   }
@@ -6938,6 +6895,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             onPressed: () => _openDefectsSheet(),
             icon: const Icon(Icons.report_problem_outlined, color: AppColors.danger),
           ),
+          _feedIconButton(),
           IconButton(
             tooltip: "Закрыть",
             onPressed: _closeDialog,
@@ -7151,87 +7109,192 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     return out;
   }
 
-  Widget _buildWorkshopInbox() {
-    final items = _workshopInboxEvents();
-    if (items.isEmpty) return const SizedBox.shrink();
-    final accent = _workshopColors[widget.workshop] ?? AppColors.primary;
+  /// События для бейджа непрочитанных.
+  List<Map<String, dynamic>> _feedBadgeEvents() {
+    if (_isWorkshopMode) return _workshopInboxEvents();
+    final out = <Map<String, dynamic>>[];
+    for (final ev in _events) {
+      final raw = ev['event_text']?.toString() ?? '';
+      if (_isFromClientEvent(raw)) {
+        out.add(ev);
+        continue;
+      }
+      final parsed = _parseTimelineEvent(raw);
+      if (parsed.direction == 'forShop') out.add(ev);
+    }
+    return out;
+  }
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        decoration: BoxDecoration(
-          color: accent.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(AppTheme.radius),
-          border: Border.all(color: accent.withOpacity(0.45)),
+  String get _feedSeenKey {
+    final oid = widget.order['id'];
+    if (_isWorkshopMode) {
+      final ws = widget.workshop ?? '';
+      return 'ws_feed_seen_${oid}_$ws';
+    }
+    return 'order_feed_seen_$oid';
+  }
+
+  Future<void> _loadFeedSeen() async {
+    final raw = await DatabaseHelper().getAppSetting(_feedSeenKey);
+    if (raw == null) {
+      var maxId = 0;
+      for (final ev in _feedBadgeEvents()) {
+        final id = (ev['id'] as num?)?.toInt() ?? 0;
+        if (id > maxId) maxId = id;
+      }
+      _feedSeenId = maxId;
+      if (maxId > 0) {
+        await DatabaseHelper().setAppSetting(_feedSeenKey, '$maxId');
+      }
+      return;
+    }
+    _feedSeenId = int.tryParse(raw) ?? 0;
+  }
+
+  int get _feedUnreadCount {
+    var n = 0;
+    for (final ev in _feedBadgeEvents()) {
+      final id = (ev['id'] as num?)?.toInt() ?? 0;
+      if (id > _feedSeenId) n++;
+    }
+    return n;
+  }
+
+  Future<void> _markFeedSeen() async {
+    var maxId = _feedSeenId;
+    for (final ev in _feedBadgeEvents()) {
+      final id = (ev['id'] as num?)?.toInt() ?? 0;
+      if (id > maxId) maxId = id;
+    }
+    if (maxId == _feedSeenId) return;
+    _feedSeenId = maxId;
+    await DatabaseHelper().setAppSetting(_feedSeenKey, '$maxId');
+    if (mounted) setState(() {});
+  }
+
+  Widget _feedIconButton({bool largeTap = false}) {
+    return IconButton(
+      tooltip: 'Лента',
+      style: largeTap ? IconButton.styleFrom(minimumSize: const Size(44, 44)) : null,
+      onPressed: _openOrderFeedSheet,
+      icon: Badge(
+        isLabelVisible: _feedUnreadCount > 0,
+        backgroundColor: AppColors.danger,
+        label: Text(
+          _feedUnreadCount > 9 ? '9+' : '$_feedUnreadCount',
+          style: GoogleFonts.manrope(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.w800,
+          ),
         ),
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.mark_chat_unread_outlined, size: 18, color: accent),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    "Вам написали · ${items.length}",
-                    style: GoogleFonts.manrope(
-                      color: accent,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 140),
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: items.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (context, i) {
-                  final ev = items[i];
-                  final parsed = _parseTimelineEvent(ev['event_text']?.toString() ?? '');
-                  final time = _formatEventTime(ev['created_at']);
-                  return Container(
-                    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface.withOpacity(0.72),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: accent.withOpacity(0.25)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          parsed.body,
-                          style: GoogleFonts.manrope(
-                            color: AppColors.text,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            height: 1.3,
-                          ),
-                        ),
-                        if (time.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          Text(
-                            time,
-                            style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11),
-                          ),
-                        ],
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
+        child: const Icon(Icons.forum_outlined, color: AppColors.primary),
       ),
     );
+  }
+
+  Future<void> _openOrderFeedSheet() async {
+    await _markFeedSeen();
+    if (!mounted) return;
+    final workshop = _isWorkshopMode;
+    final title = workshop ? 'Лента · ${widget.workshop ?? ''}' : 'Лента событий';
+    final hint = workshop ? 'Комментарий от цеха (Enter)…' : 'Комментарий в ленту (Enter)…';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            final h = MediaQuery.sizeOf(ctx).height;
+            Future<void> send() async {
+              if (workshop) {
+                await _addWorkshopMasterComment();
+              } else {
+                await _addCommentToTimeline();
+              }
+              await _markFeedSeen();
+              setModal(() {});
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
+              child: Container(
+                height: h * 0.92,
+                decoration: const BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                ),
+                child: SafeArea(
+                  top: false,
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 8, 4, 4),
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 8),
+                            const Icon(Icons.forum_outlined, color: AppColors.primary, size: 22),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                title,
+                                style: GoogleFonts.manrope(
+                                  color: AppColors.text,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Закрыть',
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: const Icon(Icons.close, color: AppColors.textMuted),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+                          child: _buildPinnedTimelineBody(
+                            composer: TextField(
+                              controller: _commentController,
+                              textInputAction: TextInputAction.send,
+                              onSubmitted: (_) => send(),
+                              style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
+                              decoration: InputDecoration(
+                                hintText: hint,
+                                hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+                                isDense: true,
+                                filled: true,
+                                fillColor: AppColors.bg.withOpacity(0.45),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide.none,
+                                ),
+                                suffixIcon: IconButton(
+                                  tooltip: 'Отправить',
+                                  icon: const Icon(Icons.send, size: 18, color: AppColors.primary),
+                                  onPressed: send,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    if (mounted) await _markFeedSeen();
   }
 
   Widget _workshopInner() {
@@ -7241,7 +7304,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         _buildWorkshopHeader(),
         const Divider(height: 1),
         Expanded(
-          child: Padding(
+          // Один скролл на весь контент (мастера + плёнки + работы) —
+          // иначе Expanded-список работ обрезается раскрытой панелью плёнок.
+          child: SingleChildScrollView(
             padding: EdgeInsets.fromLTRB(_isMobileLayout ? 12 : 20, 14, _isMobileLayout ? 12 : 20, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -7256,7 +7321,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                   ),
                   const SizedBox(height: 10),
                 ],
-                _buildWorkshopInbox(),
                 Text("Работы", style: AppTheme.sectionTitle),
                 const SizedBox(height: 4),
                 Text(
@@ -7264,42 +7328,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                   style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
                 ),
                 const SizedBox(height: 10),
-                Expanded(
-                  flex: 3,
-                  child: _buildWorkshopWorksList(),
-                ),
-                const SizedBox(height: 14),
-                Text("Лента событий", style: AppTheme.sectionTitle),
-                const SizedBox(height: 8),
-                Expanded(
-                  flex: 2,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.surface2,
-                      borderRadius: BorderRadius.circular(AppTheme.radius),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-                    child: _buildPinnedTimelineBody(
-                      composer: TextField(
-                        controller: _commentController,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _addWorkshopMasterComment(),
-                        style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
-                        decoration: InputDecoration(
-                          hintText: "Комментарий от цеха (Enter)…",
-                          hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
-                          isDense: true,
-                          suffixIcon: IconButton(
-                            tooltip: "Отправить",
-                            icon: const Icon(Icons.send, size: 18, color: AppColors.primary),
-                            onPressed: _addWorkshopMasterComment,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+                _buildWorkshopWorksList(shrinkWrap: true),
               ],
             ),
           ),
@@ -7418,6 +7447,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             onPressed: () => _openDefectsSheet(),
             icon: const Icon(Icons.report_problem_outlined, color: AppColors.danger),
           ),
+          _feedIconButton(largeTap: true),
           IconButton(
             style: IconButton.styleFrom(minimumSize: const Size(44, 44)),
             onPressed: _closeDialog,
@@ -7490,7 +7520,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               _mobileAccordion(
                 key: TourKeys.orderDetailsNotes,
                 title: "Заметки",
-                subtitle: "Диалог и лента",
+                subtitle: "Диалог с клиентом",
                 child: _buildNotesColumn(fill: false),
               ),
               if (!_opsRestricted)

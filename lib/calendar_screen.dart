@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'app_theme.dart';
+import 'car_label.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'open_url.dart';
@@ -1034,9 +1035,11 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
       final model = row['make_model']?.toString() ?? "";
       final plate = row['plate']?.toString() ?? "";
       if (model.isEmpty && plate.isEmpty) return "";
-      if (plate.isEmpty) return model;
-      if (model.isEmpty) return plate;
-      return "$model · $plate";
+      return formatCarMakePlate({
+        'make_model': model,
+        'plate': plate,
+        'year': row['year'],
+      });
     }
 
     bool hasDebt(Map<String, dynamic> row) {
@@ -1903,7 +1906,7 @@ class _CalendarScreenState extends State<CalendarScreen> with DbRefreshMixin {
     final start = _tryParseDateTime(o['start_time']?.toString());
     final end = _tryParseDateTime(o['end_time']?.toString());
     final timeLine = '${_fmtHm(start)} – ${_fmtHm(end)}';
-    final car = (o['make_model'] ?? '').toString().trim();
+    final car = '${(o['make_model'] ?? '').toString().trim()}${carYearBit(o['year'])}';
     final plate = (o['plate'] ?? '').toString().trim();
     final client = (o['client_name'] ?? '').toString().trim();
     final phone = (o['client_phone'] ?? '').toString().trim();

@@ -6,6 +6,7 @@ import 'app_notifications.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'auth/auth_controller.dart';
+import 'car_label.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'issue_guard.dart';
@@ -55,7 +56,11 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
     await DatabaseHelper().addOrderEvent(orderId, 'Цех «$workshop»: готово');
     if (!mounted) return;
     final client = order['client_name']?.toString() ?? '';
-    final car = "${order['make_model'] ?? ''} · ${order['plate'] ?? ''}".trim();
+    final car = formatCarMakePlate({
+      'make_model': order['make_model'] ?? '',
+      'plate': order['plate'] ?? '',
+      'year': order['year'],
+    });
     showAppToast(context, "$client\n$car\nЦех «$workshop»: готово");
     await AppNotifications.postWorkshopDone(
       orderId: orderId,
@@ -115,7 +120,11 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
 
     if (mounted) {
       final client = order['client_name']?.toString() ?? '';
-      final car = "${order['make_model'] ?? ''} · ${order['plate'] ?? ''}".trim();
+      final car = formatCarMakePlate({
+      'make_model': order['make_model'] ?? '',
+      'plate': order['plate'] ?? '',
+      'year': order['year'],
+    });
       showAppToast(context, "$client\n$car\nЦех «$workshop» → $newStatus");
     }
 
@@ -263,7 +272,7 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      "${o['make_model'] ?? ''}",
+                      "${o['make_model'] ?? ''}${carYearBit(o['year'])}",
                       style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
                       overflow: TextOverflow.ellipsis,
                     ),

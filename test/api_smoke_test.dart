@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 
 /// Дымовая проверка облака (нужен интернет). Не трогает локальную БД.
 void main() {
-  const base = 'http://api.det-app.ru';
+  const base = 'https://api.det-app.ru';
 
   Future<String> apiVersion() async {
     final r = await http.get(Uri.parse('$base/health')).timeout(const Duration(seconds: 12));

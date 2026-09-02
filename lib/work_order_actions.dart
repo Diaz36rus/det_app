@@ -23,6 +23,7 @@ class WorkOrderActions {
     }
     final items = await DatabaseHelper().getOrderItems(orderId);
     final masters = await DatabaseHelper().getAllMastersFull();
+    final payroll = await DatabaseHelper().getOrderWorkshopPayroll(orderId);
     if (!context.mounted) return;
     try {
       await WorkOrderPdf.showPreview(
@@ -30,6 +31,7 @@ class WorkOrderActions {
         order: order,
         items: items,
         masters: masters,
+        payroll: payroll,
       );
     } catch (e) {
       if (!context.mounted) return;

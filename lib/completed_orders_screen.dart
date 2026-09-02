@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'app_datetime.dart';
 import 'app_theme.dart';
+import 'car_label.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'order_details_dialog.dart';
@@ -145,7 +146,11 @@ class _CompletedOrdersScreenState extends State<CompletedOrdersScreen> with DbRe
                                             ),
                                             const SizedBox(height: 4),
                                             Text(
-                                              "${o['make_model'] ?? ''} · ${o['plate'] ?? ''}",
+                                              formatCarMakePlate({
+                                                'make_model': o['make_model'] ?? '',
+                                                'plate': o['plate'] ?? '',
+                                                'year': o['year'],
+                                              }),
                                               style: GoogleFonts.manrope(
                                                 color: AppColors.textMuted,
                                                 fontSize: 13,

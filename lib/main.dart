@@ -20,6 +20,7 @@ import 'auth/auth_controller.dart';
 import 'auth/auth_gate.dart';
 import 'backup_helper.dart';
 import 'bug_report_dialog.dart';
+import 'bug_reports_api.dart';
 import 'conn_status_sheet.dart';
 import 'crm/cloud_db_bridge.dart';
 import 'crm/cloud_mode.dart';
@@ -104,6 +105,8 @@ class _AppStartupState extends State<AppStartup> {
       await AuthController.instance.bootstrap();
       AuthController.instance.addListener(_syncLanWithCloudMode);
       await _syncLanWithCloudMode();
+      // Дотащить локальные баг-репорты, если сеть уже есть.
+      unawaited(BugReportsApi.instance.flushPending());
 
       final elapsed = DateTime.now().difference(started);
       final left = _minSplash - elapsed;
@@ -343,7 +346,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
 
   /// Пункты, видимые в текущем контексте (desktop / full phone / light / мастер).
   List<Map<String, dynamic>> _visibleMenuItems(BuildContext context) {
-    var items = _menuItems;
+    var items = _menuItems.where((m) => !AppMenuIds.disabled.contains(m['id'] as int)).toList();
     final user = AuthController.instance.user;
     if (isStudioMaster(user)) {
       items = items.where((m) => !kMasterHiddenMenuIds.contains(m['id'] as int)).toList();
@@ -984,7 +987,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Тариф · Демо',
+              'Демо · тест',
               style: GoogleFonts.manrope(
                 color: AppColors.text,
                 fontWeight: FontWeight.w800,
@@ -993,7 +996,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             ),
             const SizedBox(height: 4),
             Text(
-              'Тестовый режим. Биллинг позже.',
+              'Тестовый контур. Тарифы подключим позже.',
               style: GoogleFonts.manrope(
                 color: AppColors.textMuted,
                 fontSize: 11.5,

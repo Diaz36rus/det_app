@@ -245,7 +245,7 @@ class SyncServer {
       queryParameters: {'url': target},
     ).toString();
     final intent =
-        'intent://connect?url=${Uri.encodeComponent(target)}#Intent;scheme=detapp;package=com.example.det_app;S.browser_fallback_url=${Uri.encodeComponent(req.uri.toString())};end';
+        'intent://connect?url=${Uri.encodeComponent(target)}#Intent;scheme=detapp;package=ru.detapp.app;S.browser_fallback_url=${Uri.encodeComponent(req.uri.toString())};end';
     final escapedTarget = const HtmlEscape().convert(target);
     final html = '''
 <!DOCTYPE html>

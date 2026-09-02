@@ -51,14 +51,15 @@ _FILM_CATEGORIES = {"Плёнка оклейка", "Плёнка тониров�
 
 
 def _company_id(user: User) -> int:
+    # Platform admin со своей студией (company_id) работает как владелец.
+    if user.company_id is not None:
+        return user.company_id
     if user.is_platform_admin:
         raise HTTPException(
             status_code=400,
             detail="Войдите пользователем компании (например owner@demo.det-app.ru)",
         )
-    if user.company_id is None:
-        raise HTTPException(status_code=400, detail="Пользователь без компании")
-    return user.company_id
+    raise HTTPException(status_code=400, detail="Пользователь без компании")
 
 
 def _default_branch_id(db: Session, user: User, company_id: int) -> int:
@@ -510,13 +511,22 @@ def update_register(
 
 @router.get("/shifts/current", response_model=CashShiftOut | None)
 def current_shift(
+    branch_id: int | None = Query(default=None),
     user: User = Depends(require_permissions("cash.read")),
     db: Session = Depends(get_db),
 ):
     company_id = _company_id(user)
-    branch_id = _default_branch_id(db, user, company_id)
+    if branch_id is not None:
+        br = db.scalar(
+            select(Branch).where(Branch.id == branch_id, Branch.company_id == company_id)
+        )
+        if br is None:
+            raise HTTPException(404, "Филиал не найден")
+        bid = br.id
+    else:
+        bid = _default_branch_id(db, user, company_id)
     ensure_registers(db, company_id)
-    shift = _current_open_shift(db, company_id, branch_id)
+    shift = _current_open_shift(db, company_id, bid)
     if shift is None:
         return None
     return _shift_out(db, shift)
@@ -665,19 +675,30 @@ def journal(
     from_date: str | None = Query(default=None, alias="from"),
     to_date: str | None = Query(default=None, alias="to"),
     shift_id: int | None = None,
+    branch_id: int | None = Query(default=None),
     user: User = Depends(require_permissions("cash.read")),
     db: Session = Depends(get_db),
 ):
     company_id = _company_id(user)
-    branch_id = _default_branch_id(db, user, company_id)
+    if branch_id is not None:
+        br = db.scalar(
+            select(Branch).where(Branch.id == branch_id, Branch.company_id == company_id)
+        )
+        if br is None:
+            raise HTTPException(404, "Филиал не найден")
+        bid = br.id
+        fq = select(CashFlow).where(
+            CashFlow.company_id == company_id, CashFlow.branch_id == bid
+        )
+        pq = select(CashPayment).where(
+            CashPayment.company_id == company_id, CashPayment.branch_id == bid
+        )
+    else:
+        # «Все филиалы»
+        fq = select(CashFlow).where(CashFlow.company_id == company_id)
+        pq = select(CashPayment).where(CashPayment.company_id == company_id)
     regs = {r.id: r for r in ensure_registers(db, company_id)}
 
-    fq = select(CashFlow).where(
-        CashFlow.company_id == company_id, CashFlow.branch_id == branch_id
-    )
-    pq = select(CashPayment).where(
-        CashPayment.company_id == company_id, CashPayment.branch_id == branch_id
-    )
     if shift_id is not None:
         fq = fq.where(CashFlow.shift_id == shift_id)
         pq = pq.where(CashPayment.shift_id == shift_id)

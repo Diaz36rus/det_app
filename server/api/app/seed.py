@@ -23,7 +23,7 @@ from app.security import hash_password
 
 
 def ensure_company_price_catalog(db: Session, company_id: int) -> dict[str, int]:
-    """Upsert полного прайса: создаёт недостающие, обновляет category/price/workshop."""
+    """Upsert полного прайса: создаёт недостающие, обновляет category/price*/workshop."""
     existing = {
         row.name: row
         for row in db.scalars(select(CrmService).where(CrmService.company_id == company_id)).all()
@@ -38,6 +38,10 @@ def ensure_company_price_catalog(db: Session, company_id: int) -> dict[str, int]
                     name=item["name"],
                     category=item["category"],
                     price=item["price"],
+                    price2=item.get("price2", 0) or 0,
+                    price3=item.get("price3", 0) or 0,
+                    price4=item.get("price4", 0) or 0,
+                    fixed_price=item.get("fixed_price", 0) or 0,
                     workshop=item["workshop"],
                     is_active=True,
                 )
@@ -48,9 +52,17 @@ def ensure_company_price_catalog(db: Session, company_id: int) -> dict[str, int]
         if row.category != item["category"]:
             row.category = item["category"]
             changed = True
-        if float(row.price or 0) != float(item["price"]):
-            row.price = item["price"]
-            changed = True
+        for attr, key in (
+            ("price", "price"),
+            ("price2", "price2"),
+            ("price3", "price3"),
+            ("price4", "price4"),
+            ("fixed_price", "fixed_price"),
+        ):
+            new_v = float(item.get(key, 0) or 0)
+            if float(getattr(row, attr, 0) or 0) != new_v:
+                setattr(row, attr, new_v)
+                changed = True
         if (row.workshop or "") != (item["workshop"] or ""):
             row.workshop = item["workshop"]
             changed = True
@@ -173,6 +185,19 @@ def ensure_payroll_multi_master() -> None:
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_workshop_payroll_master "
                 "ON crm_order_workshop_payroll (order_id, workshop, master_id)"
+            )
+        )
+        for col in ("price2", "price3", "price4", "fixed_price"):
+            conn.execute(
+                text(
+                    f"ALTER TABLE crm_services ADD COLUMN IF NOT EXISTS {col} "
+                    "DOUBLE PRECISION DEFAULT 0"
+                )
+            )
+        conn.execute(
+            text(
+                "ALTER TABLE crm_cars ADD COLUMN IF NOT EXISTS year "
+                "INTEGER NOT NULL DEFAULT 0"
             )
         )
 

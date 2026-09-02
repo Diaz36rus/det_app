@@ -4,6 +4,7 @@ import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
 import 'car_catalog.dart';
+import 'car_label.dart';
 import 'car_make_model_fields.dart';
 import 'crm/crm_api.dart';
 import 'database.dart';
@@ -39,10 +40,11 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
   final _phoneController = TextEditingController(text: PhonePlus7Formatter.prefix);
   final _plateController = TextEditingController();
   final _vinController = TextEditingController();
+  final _yearController = TextEditingController();
   String _carMakeModel = '';
   final _carFieldsKey = GlobalKey<CarMakeModelFieldsState>();
   List<String> _extraMakes = const [];
-  List<String> _extraModels = const [];
+  Map<String, List<String>> _extraModelsByMake = const {};
   String _newCarCategory = '1';
 
   static const _vipAccent = Color(0xFFD4A017);
@@ -57,16 +59,10 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
   Future<void> _loadCarCatalogExtras() async {
     final rows = await DatabaseHelper().distinctCarMakeModels();
     if (!mounted) return;
-    final makes = <String>{};
-    final models = <String>{};
-    for (final row in rows) {
-      final parts = CarCatalog.split(row);
-      if (parts.make.isNotEmpty) makes.add(parts.make);
-      if (parts.model.isNotEmpty) models.add(parts.model);
-    }
+    final extras = CarCatalog.extrasFromMakeModels(rows);
     setState(() {
-      _extraMakes = makes.toList()..sort();
-      _extraModels = models.toList()..sort();
+      _extraMakes = extras.makes;
+      _extraModelsByMake = extras.modelsByMake;
     });
   }
 
@@ -82,6 +78,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
     _phoneController.dispose();
     _plateController.dispose();
     _vinController.dispose();
+    _yearController.dispose();
     super.dispose();
   }
 
@@ -151,6 +148,13 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
     final make = _carMakeModel.trim();
     final plate = PlateMaskFormatter.normalize(_plateController.text);
     final vin = VinUtils.normalize(_vinController.text);
+    final year = _parseCarYear(_yearController.text);
+    if (_yearController.text.trim().isNotEmpty && year == 0) {
+      if (mounted) {
+        showAppToast(context, 'Год авто: укажите число от 1980 до ${DateTime.now().year + 1}');
+      }
+      return;
+    }
 
     final identity = await findIdentityMatch(phone: phone, plate: plate, vin: vin);
     if (identity != null) {
@@ -166,6 +170,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
       _setCarMakeModel('');
       _plateController.clear();
       _vinController.clear();
+      _yearController.clear();
       setState(() => _newCarCategory = '1');
       _loadClients(_searchController.text);
       return;
@@ -179,6 +184,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
         plate,
         vin: vin,
         category: _newCarCategory,
+        year: year,
       );
     }
 
@@ -187,6 +193,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
     _setCarMakeModel('');
     _plateController.clear();
     _vinController.clear();
+    _yearController.clear();
     setState(() => _newCarCategory = '1');
     _loadClients(_searchController.text);
   }
@@ -203,7 +210,17 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
       plate: car['plate']?.toString() ?? "",
       vin: car['vin']?.toString() ?? "",
       category: car['category']?.toString() ?? "1",
+      year: (car['year'] as num?)?.toInt() ?? 0,
     );
+  }
+
+  int _parseCarYear(String raw) {
+    final t = raw.trim();
+    if (t.isEmpty) return 0;
+    final y = int.tryParse(t) ?? 0;
+    final maxY = DateTime.now().year + 1;
+    if (y < 1980 || y > maxY) return 0;
+    return y;
   }
 
   void _showCarDialog({
@@ -213,10 +230,12 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
     String plate = "",
     String vin = "",
     String category = "1",
+    int year = 0,
   }) {
     var makeModel = make;
     final plateCtrl = TextEditingController(text: PlateMaskFormatter.normalize(plate));
     final vinCtrl = TextEditingController(text: vin);
+    final yearCtrl = TextEditingController(text: year > 0 ? '$year' : '');
     var selectedCategory = ['1', '2', '3', '4'].contains(category) ? category : '1';
     final isEdit = carId != null;
 
@@ -241,7 +260,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                         initialMakeModel: makeModel,
                         stacked: true,
                         extraMakes: _extraMakes,
-                        extraModels: _extraModels,
+                        extraModelsByMake: _extraModelsByMake,
                         onChanged: (v) => makeModel = v,
                       ),
                       const SizedBox(height: 10),
@@ -269,6 +288,16 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                           setDialogState(() => selectedCategory = val);
                         },
                       ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: yearCtrl,
+                        decoration: const InputDecoration(
+                          labelText: "Год",
+                          hintText: "необязательно",
+                          isDense: true,
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
                     ],
                   ),
                 ),
@@ -280,6 +309,14 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                       final vinWarning = VinUtils.validate(vinCtrl.text);
                       if (vinWarning != null) {
                         showAppToast(context, vinWarning);
+                        return;
+                      }
+                      final yearVal = _parseCarYear(yearCtrl.text);
+                      if (yearCtrl.text.trim().isNotEmpty && yearVal == 0) {
+                        showAppToast(
+                          context,
+                          'Год авто: укажите число от 1980 до ${DateTime.now().year + 1}',
+                        );
                         return;
                       }
                       final plateNorm = PlateMaskFormatter.normalize(plateCtrl.text);
@@ -312,6 +349,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                           plate: plateNorm,
                           vin: vinNorm,
                           category: selectedCategory,
+                          year: yearVal,
                         );
                       } else {
                         await DatabaseHelper().addCar(
@@ -320,6 +358,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                           plateNorm,
                           vin: vinNorm,
                           category: selectedCategory,
+                          year: yearVal,
                         );
                       }
                       if (context.mounted) Navigator.pop(context);
@@ -336,6 +375,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
       ).whenComplete(() {
         plateCtrl.dispose();
         vinCtrl.dispose();
+        yearCtrl.dispose();
       }),
     );
   }
@@ -392,7 +432,11 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                                     ),
                                     const SizedBox(height: 4),
                                     Text(
-                                      "${h['make_model'] ?? ''} · ${h['plate'] ?? ''}",
+                                      formatCarMakePlate({
+                                        'make_model': h['make_model'] ?? '',
+                                        'plate': h['plate'] ?? '',
+                                        'year': h['year'],
+                                      }),
                                       style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12),
                                     ),
                                     const SizedBox(height: 2),
@@ -565,7 +609,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                 initialMakeModel: _carMakeModel,
                 stacked: true,
                 extraMakes: _extraMakes,
-                extraModels: _extraModels,
+                extraModelsByMake: _extraModelsByMake,
                 onChanged: (v) {
                   if (_carMakeModel == v) return;
                   _carMakeModel = v;
@@ -595,6 +639,12 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                 onChanged: (v) {
                   if (v != null) setState(() => _newCarCategory = v);
                 },
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _yearController,
+                decoration: const InputDecoration(labelText: "Год", hintText: "необязательно", isDense: true),
+                keyboardType: TextInputType.number,
               ),
               const SizedBox(height: 10),
               SizedBox(
@@ -630,7 +680,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                     key: _carFieldsKey,
                     initialMakeModel: _carMakeModel,
                     extraMakes: _extraMakes,
-                    extraModels: _extraModels,
+                    extraModelsByMake: _extraModelsByMake,
                     onChanged: (v) {
                       if (_carMakeModel == v) return;
                       _carMakeModel = v;
@@ -674,7 +724,13 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                   ),
                 ),
                 const SizedBox(width: 10),
-                const Expanded(child: SizedBox()),
+                Expanded(
+                  child: TextField(
+                    controller: _yearController,
+                    decoration: const InputDecoration(labelText: "Год", hintText: "необяз.", isDense: true),
+                    keyboardType: TextInputType.number,
+                  ),
+                ),
                 const SizedBox(width: 10),
                 SizedBox(
                   height: 48,
@@ -910,6 +966,8 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                                       Text(
                                         [
                                           "${car['category'] ?? '1'} кл.",
+                                          if (((car['year'] as num?)?.toInt() ?? 0) > 0)
+                                            "${car['year']}",
                                           vin.isEmpty ? "VIN не указан" : "VIN $vin",
                                         ].join(" · "),
                                         style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),

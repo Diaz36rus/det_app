@@ -16,7 +16,7 @@ class AuthApiException implements Exception {
 class AuthApi {
   AuthApi({this.baseUrl = defaultBaseUrl});
 
-  static const defaultBaseUrl = 'http://api.det-app.ru';
+  static const defaultBaseUrl = 'https://api.det-app.ru';
 
   final String baseUrl;
 

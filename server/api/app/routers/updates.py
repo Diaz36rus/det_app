@@ -50,9 +50,14 @@ def download_pack(filename: str):
     path = _releases_root() / "packs" / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Файл не найден")
-    media = "application/vnd.android.package-archive" if filename.lower().endswith(".apk") else None
-    if filename.lower().endswith(".zip"):
+    media = "application/octet-stream"
+    lower = filename.lower()
+    if lower.endswith(".apk"):
+        media = "application/vnd.android.package-archive"
+    elif lower.endswith(".zip"):
         media = "application/zip"
+    elif lower.endswith(".exe"):
+        media = "application/vnd.microsoft.portable-executable"
     return FileResponse(path, filename=filename, media_type=media)
 
 
@@ -77,6 +82,27 @@ def latest_android_apk():
     return RedirectResponse(android_url, status_code=302)
 
 
+@router.get("/windows")
+def latest_windows_setup():
+    """Постоянная ссылка: актуальный Windows Setup.exe (если загружен)."""
+    path = _releases_root() / "latest.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Релизов ещё нет. Загрузите первый билд.")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    setup_url = (data.get("windows_setup_url") or "").strip()
+    if not setup_url:
+        raise HTTPException(status_code=404, detail="Setup ещё не загружен")
+    name = Path(setup_url).name
+    local = _releases_root() / "packs" / name
+    if local.is_file() and _SAFE_NAME.match(name):
+        return FileResponse(
+            local,
+            filename=name,
+            media_type="application/vnd.microsoft.portable-executable",
+        )
+    return RedirectResponse(setup_url, status_code=302)
+
+
 @router.post("/publish")
 async def publish_release(
     x_release_token: str | None = Header(default=None, alias="X-Release-Token"),
@@ -87,15 +113,20 @@ async def publish_release(
     db_version: int = Form(0),
     critical: bool = Form(False),
     windows_zip: UploadFile | None = File(default=None),
+    windows_setup: UploadFile | None = File(default=None),
     android_apk: UploadFile | None = File(default=None),
     sha256: str = Form(""),
     size: int = Form(0),
+    setup_sha256: str = Form(""),
+    setup_size: int = Form(0),
     android_sha256: str = Form(""),
     android_size: int = Form(0),
 ):
     _require_token(x_release_token)
-    if windows_zip is None and android_apk is None:
-        raise HTTPException(status_code=400, detail="Нужен windows_zip и/или android_apk")
+    if windows_zip is None and android_apk is None and windows_setup is None:
+        raise HTTPException(
+            status_code=400, detail="Нужен windows_zip и/или windows_setup и/или android_apk"
+        )
 
     notes_clean = (notes or "").strip()
     # Чинит типичный mojibake: UTF-8 «Сборка» прочитали как cp1251 → «РЎР±РѕСЂРєР°».
@@ -117,6 +148,8 @@ async def publish_release(
         "critical": bool(critical),
         "url": "",
         "sha256": "",
+        "windows_setup_url": "",
+        "windows_setup_sha256": "",
         "android_url": "",
         "android_sha256": "",
     }
@@ -133,6 +166,19 @@ async def publish_release(
         manifest["url"] = f"{base}/updates/packs/{name}"
         manifest["sha256"] = digest
         manifest["size"] = size if size > 0 else len(raw)
+
+    if windows_setup is not None:
+        name = windows_setup.filename or f"DetApp-Setup-b{build}.exe"
+        name = Path(name).name
+        if not _SAFE_NAME.match(name):
+            name = f"DetApp-Setup-b{build}.exe"
+        dest = packs / name
+        raw = await windows_setup.read()
+        dest.write_bytes(raw)
+        digest = setup_sha256.strip().lower() or hashlib.sha256(raw).hexdigest()
+        manifest["windows_setup_url"] = f"{base}/updates/packs/{name}"
+        manifest["windows_setup_sha256"] = digest
+        manifest["windows_setup_size"] = setup_size if setup_size > 0 else len(raw)
 
     if android_apk is not None:
         name = android_apk.filename or f"det_app-{build}.apk"
@@ -157,6 +203,11 @@ async def publish_release(
                 manifest["sha256"] = prev.get("sha256", "")
                 if prev.get("size") is not None:
                     manifest["size"] = prev["size"]
+            if not manifest["windows_setup_url"] and prev.get("windows_setup_url"):
+                manifest["windows_setup_url"] = prev["windows_setup_url"]
+                manifest["windows_setup_sha256"] = prev.get("windows_setup_sha256", "")
+                if prev.get("windows_setup_size") is not None:
+                    manifest["windows_setup_size"] = prev["windows_setup_size"]
             if not manifest["android_url"] and prev.get("android_url"):
                 manifest["android_url"] = prev["android_url"]
                 manifest["android_sha256"] = prev.get("android_sha256", "")

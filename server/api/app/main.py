@@ -75,8 +75,8 @@ def cloud_join(slug: str = Query(default="", min_length=0)):
     deep = f"detapp://invite?slug={quote(s)}" if s else "detapp://invite"
     intent = (
         f"intent://invite?slug={quote(s)}#Intent;scheme=detapp;"
-        f"package=com.example.det_app;"
-        f"S.browser_fallback_url={quote(f'http://api.det-app.ru/updates/android')};end"
+        f"package=ru.detapp.app;"
+        f"S.browser_fallback_url={quote(f'https://api.det-app.ru/updates/android')};end"
     )
     title = escape(studio_name) if studio_name else "Det App"
     slug_safe = escape(s) if s else "—"
@@ -111,7 +111,7 @@ def cloud_join(slug: str = Query(default="", min_length=0)):
   <p>Откройте приложение и отправьте заявку на доступ. Должность назначит администратор студии.</p>
   <a class="btn ok" href="{escape(intent)}">Открыть Det App</a>
   <a class="btn primary" href="{escape(deep)}">Открыть (запасная ссылка)</a>
-  <a class="btn muted" href="http://api.det-app.ru/updates/android">Скачать APK</a>
+  <a class="btn muted" href="https://api.det-app.ru/updates/android">Скачать APK</a>
   <p>Нет приложения? Сначала установите APK, затем нажмите «Открыть» снова.<br>
   Либо на экране входа: «Меня пригласили» → введите код <b>{slug_safe}</b>.</p>
   <code>{escape(deep)}</code>

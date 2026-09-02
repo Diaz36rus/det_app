@@ -100,8 +100,7 @@ class PlateBadge extends StatelessWidget {
   }
 }
 
-/// Логотип марки авто (SVG mono / color PNG) или инициалы, если марки нет в каталоге.
-/// SVG: белый colorFilter + [BrandLogoFit]. PNG: светлая пластина под цветной эмблемой.
+/// Логотип марки: цветной PNG на светлой плитке; SVG — только fallback без white-tint.
 class CarBrandMark extends StatefulWidget {
   const CarBrandMark(
     this.makeModel, {
@@ -174,8 +173,8 @@ class _CarBrandMarkState extends State<CarBrandMark> {
     final asset = _asset;
     final pad = size * 0.08;
     final isPng = asset != null && asset.endsWith('.png');
-    // Color PNG logos often have dark chrome / black ink — light plate keeps them readable.
-    final plate = isPng ? const Color(0xFFF2F4F7) : AppColors.bg;
+    // Единая светлая плитка под цветные эмблемы (и ч/б SVG fallback).
+    const plate = Color(0xFFF2F4F7);
     return Container(
       width: size,
       height: size,
@@ -203,14 +202,25 @@ class _CarBrandMarkState extends State<CarBrandMark> {
                       asset,
                       fit: BoxFit.contain,
                       filterQuality: FilterQuality.high,
-                      errorBuilder: (_, __, ___) => Text(
-                        CarBrandMark.brandInitials(widget.makeModel),
-                        style: GoogleFonts.manrope(
-                          color: AppColors.primary,
-                          fontWeight: FontWeight.w800,
-                          fontSize: size * 0.28,
-                        ),
-                      ),
+                      errorBuilder: (_, __, ___) {
+                        final stem = asset.split('/').last.replaceAll('.png', '');
+                        final svg = '${CarBrands.assetDir}/$stem.svg';
+                        return SvgPicture.asset(
+                          svg,
+                          width: size,
+                          height: size,
+                          fit: BoxFit.contain,
+                          // Без white-tint: чёрный SI на светлой плитке.
+                          placeholderBuilder: (_) => Text(
+                            CarBrandMark.brandInitials(widget.makeModel),
+                            style: GoogleFonts.manrope(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.w800,
+                              fontSize: size * 0.28,
+                            ),
+                          ),
+                        );
+                      },
                     )
                   : Transform.scale(
                       scale: _glyphScale,
@@ -219,10 +229,7 @@ class _CarBrandMarkState extends State<CarBrandMark> {
                         width: size,
                         height: size,
                         fit: BoxFit.contain,
-                        colorFilter: const ColorFilter.mode(
-                          AppColors.text,
-                          BlendMode.srcIn,
-                        ),
+                        // Исходные цвета SVG (часто ч/б), без перекраски в белый.
                         placeholderBuilder: (_) => Text(
                           CarBrandMark.brandInitials(widget.makeModel),
                           style: GoogleFonts.manrope(

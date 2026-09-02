@@ -378,7 +378,7 @@ class DatabaseHelper {
 
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''CREATE TABLE clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT DEFAULT '', is_vip INTEGER DEFAULT 0)''');
-    await db.execute('''CREATE TABLE cars (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL, make_model TEXT NOT NULL, plate TEXT DEFAULT '', vin TEXT DEFAULT '', category TEXT DEFAULT '1')''');
+    await db.execute('''CREATE TABLE cars (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL, make_model TEXT NOT NULL, plate TEXT DEFAULT '', vin TEXT DEFAULT '', category TEXT DEFAULT '1', year INTEGER DEFAULT 0)''');
     await db.execute('''CREATE TABLE orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL, car_id INTEGER NOT NULL, 
       status TEXT DEFAULT 'Принят в работу', price REAL DEFAULT 0, notes TEXT DEFAULT '', 
@@ -487,7 +487,7 @@ class DatabaseHelper {
     )''');
     await _seedCashRegisters(db);
     await db.execute('''CREATE TABLE custom_works (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, category TEXT DEFAULT 'Прочее', price REAL DEFAULT 0)''');
-    await db.execute('''CREATE TABLE services (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL, name TEXT NOT NULL UNIQUE, price1 REAL DEFAULT 0, price2 REAL DEFAULT 0, price3 REAL DEFAULT 0, price4 REAL DEFAULT 0, fixed_price REAL DEFAULT 0)''');
+    await db.execute('''CREATE TABLE services (id INTEGER PRIMARY KEY AUTOINCREMENT, category TEXT NOT NULL, name TEXT NOT NULL UNIQUE, price1 REAL DEFAULT 0, price2 REAL DEFAULT 0, price3 REAL DEFAULT 0, price4 REAL DEFAULT 0, fixed_price REAL DEFAULT 0, workshop TEXT DEFAULT '', is_active INTEGER DEFAULT 1)''');
     await db.execute('''CREATE TABLE inventory (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -1022,6 +1022,12 @@ class DatabaseHelper {
         note TEXT DEFAULT ''
       )''');
     }
+    // --- Версия 33: год авто + workshop/is_active у услуг ---
+    if (oldVersion < 33) {
+      await _ensureColumn(db, 'cars', 'year', 'INTEGER DEFAULT 0');
+      await _ensureColumn(db, 'services', 'workshop', "TEXT DEFAULT ''");
+      await _ensureColumn(db, 'services', 'is_active', 'INTEGER DEFAULT 1');
+    }
   }
 
   static Future<void> _seedCashRegisters(Database db) async {
@@ -1309,14 +1315,80 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getAllOrders() async {
     if (CloudDbBridge.active) return CloudDbBridge.instance.getAllOrders();
     final db = await database;
-    return await db.rawQuery('''
-      SELECT orders.*, clients.name as client_name, clients.phone as client_phone, cars.make_model, cars.plate, m.name as master_name,
+    final rows = await db.rawQuery('''
+      SELECT orders.*, clients.name as client_name, clients.phone as client_phone, cars.make_model, cars.plate, cars.year, m.name as master_name,
+        r.name as receptionist_name,
         (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
         (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_done
       FROM orders JOIN clients ON orders.client_id = clients.id JOIN cars ON orders.car_id = cars.id
       LEFT JOIN masters m ON orders.master_id = m.id
+      LEFT JOIN masters r ON orders.receptionist_id = r.id
       WHERE orders.is_completed = 0 ORDER BY orders.id DESC
     ''');
+    final list = rows.map((e) => Map<String, dynamic>.from(e)).toList();
+    await _attachWorkshopMasters(list);
+    return list;
+  }
+
+  /// Для карточек доски: мастера, сгруппированные по цеху работ.
+  Future<void> _attachWorkshopMasters(List<Map<String, dynamic>> orders) async {
+    if (orders.isEmpty) return;
+    final ids = orders
+        .map((o) => (o['id'] as num?)?.toInt())
+        .whereType<int>()
+        .toList();
+    if (ids.isEmpty) return;
+    final db = await database;
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final items = await db.rawQuery(
+      'SELECT order_id, workshop, master_ids FROM order_items WHERE order_id IN ($placeholders)',
+      ids,
+    );
+    final masters = await db.query('masters', columns: ['id', 'name']);
+    final nameById = <int, String>{
+      for (final m in masters)
+        if (m['id'] != null)
+          (m['id'] as num).toInt(): (m['name']?.toString() ?? '').trim(),
+    };
+
+    final byOrder = <int, Map<String, List<String>>>{};
+    final seen = <int, Map<String, Set<int>>>{};
+    for (final it in items) {
+      final oid = (it['order_id'] as num?)?.toInt();
+      if (oid == null) continue;
+      final ws = (it['workshop']?.toString() ?? '').trim();
+      if (ws.isEmpty) continue;
+      final raw = it['master_ids']?.toString() ?? '';
+      final midList = <int>[];
+      for (final p in raw.split(',')) {
+        final id = int.tryParse(p.trim());
+        if (id != null) midList.add(id);
+      }
+      if (midList.isEmpty) continue;
+      final wsMap = byOrder.putIfAbsent(oid, () => <String, List<String>>{});
+      final seenWs = seen.putIfAbsent(oid, () => <String, Set<int>>{});
+      final names = wsMap.putIfAbsent(ws, () => <String>[]);
+      final seenIds = seenWs.putIfAbsent(ws, () => <int>{});
+      for (final mid in midList) {
+        if (!seenIds.add(mid)) continue;
+        final n = nameById[mid];
+        if (n == null || n.isEmpty) continue;
+        names.add(n);
+      }
+    }
+
+    for (final o in orders) {
+      final oid = (o['id'] as num?)?.toInt();
+      if (oid == null) {
+        o['workshop_masters'] = const <Map<String, dynamic>>[];
+        continue;
+      }
+      final wsMap = byOrder[oid] ?? const {};
+      o['workshop_masters'] = [
+        for (final e in wsMap.entries)
+          if (e.value.isNotEmpty) {'workshop': e.key, 'names': e.value},
+      ];
+    }
   }
 
   Future<Map<String, dynamic>?> getOrderById(int orderId) async {
@@ -1324,7 +1396,7 @@ class DatabaseHelper {
     final db = await database;
     List<Map> res = await db.rawQuery('''
       SELECT orders.*, clients.name as client_name, clients.phone as client_phone, clients.is_vip,
-             cars.make_model, cars.plate, cars.vin, cars.category,
+             cars.make_model, cars.plate, cars.vin, cars.category, cars.year,
              m.name as master_name,
              r.name as receptionist_name,
              (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
@@ -1347,7 +1419,7 @@ class DatabaseHelper {
     if (q.isEmpty) {
       return await db.rawQuery('''
         SELECT orders.*, clients.name as client_name, clients.phone as client_phone,
-               cars.make_model, cars.plate, cars.vin, m.name as master_name,
+               cars.make_model, cars.plate, cars.vin, cars.year, m.name as master_name,
                (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
                (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_done
         FROM orders
@@ -1361,7 +1433,7 @@ class DatabaseHelper {
     final like = "%$q%";
     return await db.rawQuery('''
       SELECT orders.*, clients.name as client_name, clients.phone as client_phone,
-             cars.make_model, cars.plate, cars.vin, m.name as master_name,
+             cars.make_model, cars.plate, cars.vin, cars.year, m.name as master_name,
              (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_total,
              (SELECT COUNT(*) FROM order_items WHERE order_items.order_id = orders.id AND order_items.is_done = 1 AND NOT (order_items.parent_id IS NULL AND order_items.name IN ('Оклейка', 'Тонировка'))) as works_done
       FROM orders
@@ -1384,7 +1456,7 @@ class DatabaseHelper {
     return await db.rawQuery('''
       SELECT orders.id, orders.status, orders.price, orders.paid_amount,
              orders.start_time, orders.end_time, orders.due_date, orders.tech_wash_start, orders.tech_wash_end,
-             clients.name as client_name, cars.make_model, cars.plate
+             clients.name as client_name, cars.make_model, cars.plate, cars.year
       FROM orders
       JOIN clients ON orders.client_id = clients.id
       JOIN cars ON orders.car_id = cars.id
@@ -1426,7 +1498,7 @@ class DatabaseHelper {
              order_items.workshop,
              order_items.is_done, order_items.parent_id,
              orders.status, orders.price, orders.paid_amount,
-             clients.name as client_name, cars.make_model, cars.plate
+             clients.name as client_name, cars.make_model, cars.plate, cars.year
       FROM order_items
       JOIN orders ON order_items.order_id = orders.id
       JOIN clients ON orders.client_id = clients.id
@@ -1465,14 +1537,35 @@ class DatabaseHelper {
     return await db.insert('clients', {'name': name, 'phone': phone, 'is_vip': isVip});
   }
 
-  Future<int> addCar(int clientId, String makeModel, String plate, {String vin = "", String category = "1"}) async {
+  Future<int> addCar(
+    int clientId,
+    String makeModel,
+    String plate, {
+    String vin = "",
+    String category = "1",
+    int year = 0,
+  }) async {
     if (CloudDbBridge.active) {
-      final id = await CloudDbBridge.instance.addCar(clientId, makeModel, plate, vin: vin, category: category);
+      final id = await CloudDbBridge.instance.addCar(
+        clientId,
+        makeModel,
+        plate,
+        vin: vin,
+        category: category,
+        year: year,
+      );
       bumpDataRevision();
       return id;
     }
     final db = await database;
-    return await db.insert('cars', {'client_id': clientId, 'make_model': makeModel, 'plate': plate, 'vin': vin, 'category': category});
+    return await db.insert('cars', {
+      'client_id': clientId,
+      'make_model': makeModel,
+      'plate': plate,
+      'vin': vin,
+      'category': category,
+      'year': year,
+    });
   }
 
   /// Уникальные `make_model` из базы — для автоподстановки «своих» марок/моделей.
@@ -1490,9 +1583,23 @@ class DatabaseHelper {
         .toList();
   }
 
-  Future<void> updateCar(int carId, {String? makeModel, String? plate, String? vin, String? category}) async {
+  Future<void> updateCar(
+    int carId, {
+    String? makeModel,
+    String? plate,
+    String? vin,
+    String? category,
+    int? year,
+  }) async {
     if (CloudDbBridge.active) {
-      await CloudDbBridge.instance.updateCar(carId, makeModel: makeModel, plate: plate, vin: vin, category: category);
+      await CloudDbBridge.instance.updateCar(
+        carId,
+        makeModel: makeModel,
+        plate: plate,
+        vin: vin,
+        category: category,
+        year: year,
+      );
       return;
     }
     final db = await database;
@@ -1501,6 +1608,7 @@ class DatabaseHelper {
     if (plate != null) data['plate'] = plate;
     if (vin != null) data['vin'] = vin;
     if (category != null) data['category'] = category;
+    if (year != null) data['year'] = year;
     if (data.isEmpty) return;
     await db.update('cars', data, where: 'id = ?', whereArgs: [carId]);
   }
@@ -2787,10 +2895,15 @@ class DatabaseHelper {
     if (trimmed.isEmpty) throw ArgumentError.value(name, 'name', 'Название плёнки не может быть пустым');
     final filmUnit = FilmUnits.normalize(unit);
     final db = await database;
-    final existing = await db.query('wrap_films', where: 'name = ?', whereArgs: [trimmed], limit: 1);
-    if (existing.isNotEmpty) {
-      final filmId = (existing.first['id'] as num).toInt();
-      final invId = (existing.first['inventory_id'] as num?)?.toInt();
+
+    Future<List<Map<String, dynamic>>> findByName() => db.rawQuery(
+          'SELECT * FROM wrap_films WHERE lower(trim(name)) = lower(trim(?)) LIMIT 1',
+          [trimmed],
+        );
+
+    Future<int> ensureLinked(Map<String, dynamic> row) async {
+      final filmId = (row['id'] as num).toInt();
+      final invId = (row['inventory_id'] as num?)?.toInt();
       if (invId == null || invId <= 0) {
         final newInv = await addInventoryItem(
           trimmed,
@@ -2804,6 +2917,11 @@ class DatabaseHelper {
       }
       return filmId;
     }
+
+    final existing = await findByName();
+    if (existing.isNotEmpty) {
+      return ensureLinked(existing.first);
+    }
     final invId = await addInventoryItem(
       trimmed,
       0,
@@ -2811,9 +2929,16 @@ class DatabaseHelper {
       category: category,
       metersPerRoll: metersPerRoll,
     );
-    final id = await db.insert('wrap_films', {'name': trimmed, 'inventory_id': invId});
-    bumpDataRevision();
-    return id;
+    try {
+      final id = await db.insert('wrap_films', {'name': trimmed, 'inventory_id': invId});
+      bumpDataRevision();
+      return id;
+    } catch (e) {
+      // UNIQUE name — уже есть (регистр/гонка/синк склада).
+      final again = await findByName();
+      if (again.isNotEmpty) return ensureLinked(again.first);
+      rethrow;
+    }
   }
 
   Future<List<Map<String, dynamic>>> getOrderWrapFilms(int orderId) async {
@@ -2905,7 +3030,7 @@ class DatabaseHelper {
     final normalized = plate.trim();
     if (normalized.isEmpty) return [];
     return db.rawQuery('''
-      SELECT orders.*, clients.name AS client_name, cars.make_model, cars.plate
+      SELECT orders.*, clients.name AS client_name, cars.make_model, cars.plate, cars.year
       FROM orders
       JOIN cars ON cars.id = orders.car_id
       JOIN clients ON clients.id = orders.client_id
@@ -2926,7 +3051,7 @@ class DatabaseHelper {
     final args = <Object>[endTime.replaceFirst('T', ' '), startTime.replaceFirst('T', ' ')];
     if (excludeOrderId != null) args.add(excludeOrderId);
     return db.rawQuery('''
-      SELECT orders.*, clients.name AS client_name, cars.make_model, cars.plate
+      SELECT orders.*, clients.name AS client_name, cars.make_model, cars.plate, cars.year
       FROM orders
       JOIN clients ON clients.id = orders.client_id
       JOIN cars ON cars.id = orders.car_id
@@ -2942,17 +3067,70 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getMasterDayStats(String dayYyyyMmDd) async {
     if (CloudDbBridge.active) return CloudDbBridge.instance.getMasterDayStats(dayYyyyMmDd);
     final db = await database;
+    await db.execute('''CREATE TABLE IF NOT EXISTS order_workshop_payroll (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_id INTEGER NOT NULL,
+      workshop TEXT NOT NULL,
+      amount REAL NOT NULL DEFAULT 0,
+      master_id INTEGER NOT NULL,
+      UNIQUE(order_id, workshop, master_id)
+    )''');
+    // День: end_time → start_time → created_at. Мастера: order_items + payroll + orders.master_ids.
     return db.rawQuery('''
-      SELECT m.id, m.name, COUNT(DISTINCT o.id) AS orders_count, 0.0 AS revenue
+      SELECT m.id, m.name,
+             COUNT(DISTINCT o.id) AS orders_count,
+             COALESCE(SUM(CASE
+               WHEN oi.id IS NOT NULL AND (
+                 instr(',' || replace(coalesce(oi.master_ids, ''), ' ', '') || ',', ',' || m.id || ',') > 0
+                 OR (
+                   trim(coalesce(oi.master_ids, '')) = ''
+                   AND (
+                     instr(',' || replace(coalesce(o.master_ids, ''), ' ', '') || ',', ',' || m.id || ',') > 0
+                     OR EXISTS (
+                       SELECT 1 FROM order_workshop_payroll p0
+                       WHERE p0.order_id = o.id AND p0.master_id = m.id
+                     )
+                   )
+                 )
+               ) THEN oi.price ELSE 0
+             END), 0) AS revenue,
+             COALESCE((
+               SELECT SUM(p.amount)
+               FROM order_workshop_payroll p
+               INNER JOIN orders o3 ON o3.id = p.order_id
+               WHERE p.master_id = m.id
+                 AND o3.status IN ('Мойка', 'Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование', 'Кузовные работы', 'Выдан')
+                 AND substr(replace(coalesce(
+                       nullif(trim(o3.end_time), ''),
+                       nullif(trim(o3.start_time), ''),
+                       o3.created_at
+                     ), 'T', ' '), 1, 10) = ?
+             ), 0) AS payroll
       FROM masters m
       LEFT JOIN orders o ON (
         o.status IN ('Мойка', 'Химчистка', 'Полировка', 'Оклейка', 'Интерьер', 'Оборудование', 'Кузовные работы', 'Выдан')
-        AND substr(replace(coalesce(nullif(o.end_time, ''), o.start_time), 'T', ' '), 1, 10) = ?
-        AND instr(',' || replace(coalesce(o.master_ids, ''), ' ', '') || ',', ',' || m.id || ',') > 0
+        AND substr(replace(coalesce(
+              nullif(trim(o.end_time), ''),
+              nullif(trim(o.start_time), ''),
+              o.created_at
+            ), 'T', ' '), 1, 10) = ?
+        AND (
+          instr(',' || replace(coalesce(o.master_ids, ''), ' ', '') || ',', ',' || m.id || ',') > 0
+          OR EXISTS (
+            SELECT 1 FROM order_items oi2
+            WHERE oi2.order_id = o.id
+              AND instr(',' || replace(coalesce(oi2.master_ids, ''), ' ', '') || ',', ',' || m.id || ',') > 0
+          )
+          OR EXISTS (
+            SELECT 1 FROM order_workshop_payroll p
+            WHERE p.order_id = o.id AND p.master_id = m.id
+          )
+        )
       )
+      LEFT JOIN order_items oi ON oi.order_id = o.id
       GROUP BY m.id, m.name
-      ORDER BY orders_count DESC, m.name COLLATE NOCASE
-    ''', [dayYyyyMmDd]);
+      ORDER BY orders_count DESC, payroll DESC, m.name COLLATE NOCASE
+    ''', [dayYyyyMmDd, dayYyyyMmDd]);
   }
 
   Future<void> addTaskToOrder(int orderId, String taskName, double price) async {
@@ -3157,7 +3335,7 @@ class DatabaseHelper {
       SELECT orders.id, orders.created_at, orders.notes, orders.price, orders.paid_amount,
              orders.status, orders.is_completed,
              (orders.price - orders.paid_amount) as debt,
-             cars.make_model, cars.plate
+             cars.make_model, cars.plate, cars.year
       FROM orders
       JOIN cars ON orders.car_id = cars.id
       WHERE orders.client_id = ?
@@ -4118,7 +4296,7 @@ class DatabaseHelper {
       SELECT orders.id, orders.price, orders.paid_amount, orders.status,
              (orders.price - orders.paid_amount) as debt,
              clients.name as client_name, clients.phone as client_phone,
-             cars.make_model, cars.plate
+             cars.make_model, cars.plate, cars.year
       FROM orders
       JOIN clients ON clients.id = orders.client_id
       JOIN cars ON cars.id = orders.car_id
@@ -5183,7 +5361,11 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getAllServices() async {
     if (CloudDbBridge.active) return CloudDbBridge.instance.getAllServices();
     final db = await database;
-    return await db.query('services', orderBy: 'id ASC');
+    return await db.query(
+      'services',
+      where: 'is_active = 1 OR is_active IS NULL',
+      orderBy: 'id ASC',
+    );
   }
 
   Future<void> updateServicePrice(String name, String field, double price) async {
@@ -5194,6 +5376,123 @@ class DatabaseHelper {
     }
     final db = await database;
     await db.update('services', {field: price}, where: 'name = ?', whereArgs: [name]);
+  }
+
+  Future<int> addService({
+    required String name,
+    String category = 'Прочее',
+    String workshop = '',
+    double price1 = 0,
+    double price2 = 0,
+    double price3 = 0,
+    double price4 = 0,
+    double fixedPrice = 0,
+  }) async {
+    final n = name.trim();
+    if (n.isEmpty) throw StateError('Пустое название услуги');
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addService(
+        name: n,
+        category: category,
+        workshop: workshop,
+        price1: price1,
+        price2: price2,
+        price3: price3,
+        price4: price4,
+        fixedPrice: fixedPrice,
+      );
+      bumpDataRevision();
+      return id;
+    }
+    final db = await database;
+    try {
+      return await db.insert('services', {
+        'name': n,
+        'category': category.trim().isEmpty ? 'Прочее' : category.trim(),
+        'workshop': workshop.trim(),
+        'price1': price1,
+        'price2': price2,
+        'price3': price3,
+        'price4': price4,
+        'fixed_price': fixedPrice,
+        'is_active': 1,
+      });
+    } on DatabaseException catch (e) {
+      if (e.isUniqueConstraintError()) {
+        throw StateError('Услуга с таким названием уже есть');
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> updateServiceMeta(
+    int id, {
+    String? name,
+    String? category,
+    String? workshop,
+  }) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateServiceMeta(
+        id,
+        name: name,
+        category: category,
+        workshop: workshop,
+      );
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    final existing = await db.query('services', columns: ['name'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (existing.isEmpty) return;
+    final oldName = existing.first['name']?.toString() ?? '';
+    final data = <String, dynamic>{};
+    if (name != null) data['name'] = name.trim();
+    if (category != null) data['category'] = category.trim().isEmpty ? 'Прочее' : category.trim();
+    if (workshop != null) data['workshop'] = workshop.trim();
+    if (data.isEmpty) return;
+    try {
+      await db.update('services', data, where: 'id = ?', whereArgs: [id]);
+    } on DatabaseException catch (e) {
+      if (e.isUniqueConstraintError()) {
+        throw StateError('Услуга с таким названием уже есть');
+      }
+      rethrow;
+    }
+    final newName = data['name']?.toString();
+    if (newName != null && newName.isNotEmpty && oldName.isNotEmpty && newName != oldName) {
+      await db.update(
+        'service_recipes',
+        {'service_name': newName},
+        where: 'service_name = ?',
+        whereArgs: [oldName],
+      );
+    }
+  }
+
+  /// `true` — скрыта (есть в заказах / soft-delete), `false` — удалена насовсем.
+  Future<bool> deleteService(int id) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteService(id);
+      bumpDataRevision();
+      return true; // облако всегда soft-delete
+    }
+    final db = await database;
+    final rows = await db.query('services', columns: ['name'], where: 'id = ?', whereArgs: [id], limit: 1);
+    if (rows.isEmpty) return false;
+    final svcName = rows.first['name']?.toString() ?? '';
+    if (svcName.isNotEmpty) {
+      final used = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM order_items WHERE name = ?',
+        [svcName],
+      );
+      final count = (used.first['c'] as num?)?.toInt() ?? 0;
+      if (count > 0) {
+        await db.update('services', {'is_active': 0}, where: 'id = ?', whereArgs: [id]);
+        return true;
+      }
+    }
+    await db.delete('services', where: 'id = ?', whereArgs: [id]);
+    return false;
   }
 
   Future<List<Map<String, dynamic>>> getCustomWorks() async {
@@ -5288,7 +5587,7 @@ class DatabaseHelper {
     if (client == null) return [];
     final db = await database;
     return await db.rawQuery('''
-      SELECT cars.id, cars.make_model, cars.plate, cars.vin, cars.category FROM cars 
+      SELECT cars.id, cars.make_model, cars.plate, cars.vin, cars.category, cars.year FROM cars 
       WHERE cars.client_id = ? ORDER BY cars.id DESC
     ''', [client['id']]);
   }

@@ -27,19 +27,42 @@ $sshArgs = @('-i', $KeyPath, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking
 $apiLocal = Join-Path $root 'server\api\app'
 
 Write-Host '==> upload API app sources' -ForegroundColor Cyan
-& $scp @sshArgs (Join-Path $apiLocal 'models.py') "${remote}:/opt/det-app/api/app/models.py"
-if ($LASTEXITCODE -ne 0) { throw 'scp models failed' }
-& $scp @sshArgs (Join-Path $apiLocal 'main.py') "${remote}:/opt/det-app/api/app/main.py"
-if ($LASTEXITCODE -ne 0) { throw 'scp main failed' }
-& $scp @sshArgs (Join-Path $apiLocal 'schemas.py') "${remote}:/opt/det-app/api/app/schemas.py"
-if ($LASTEXITCODE -ne 0) { throw 'scp schemas failed' }
-& $scp @sshArgs (Join-Path $apiLocal 'routers\company.py') "${remote}:/opt/det-app/api/app/routers/company.py"
-if ($LASTEXITCODE -ne 0) { throw 'scp company router failed' }
-& $scp @sshArgs (Join-Path $apiLocal 'routers\site.py') "${remote}:/opt/det-app/api/app/routers/site.py"
-if ($LASTEXITCODE -ne 0) { throw 'scp site router failed' }
+$files = @(
+  @{ Local = 'models.py'; Remote = 'models.py' },
+  @{ Local = 'main.py'; Remote = 'main.py' },
+  @{ Local = 'schemas.py'; Remote = 'schemas.py' },
+  @{ Local = 'seed.py'; Remote = 'seed.py' },
+  @{ Local = 'crm_extra_schemas.py'; Remote = 'crm_extra_schemas.py' },
+  @{ Local = 'price_catalog.py'; Remote = 'price_catalog.py' },
+  @{ Local = 'routers\company.py'; Remote = 'routers/company.py' },
+  @{ Local = 'routers\site.py'; Remote = 'routers/site.py' },
+  @{ Local = 'routers\updates.py'; Remote = 'routers/updates.py' },
+  @{ Local = 'routers\crm.py'; Remote = 'routers/crm.py' },
+  @{ Local = 'routers\crm_extra.py'; Remote = 'routers/crm_extra.py' }
+)
+foreach ($f in $files) {
+  $src = Join-Path $apiLocal $f.Local
+  if (-not (Test-Path $src)) { throw "missing: $src" }
+  Write-Host ("  scp {0}" -f $f.Local)
+  & $scp @sshArgs $src "${remote}:/opt/det-app/api/app/$($f.Remote)"
+  if ($LASTEXITCODE -ne 0) { throw "scp $($f.Local) failed" }
+}
 
 Write-Host '==> rebuild api' -ForegroundColor Cyan
-& $ssh @sshArgs $remote 'cd /opt/det-app && docker compose up -d --build api && sleep 4 && curl -s http://127.0.0.1/health'
+& $ssh @sshArgs $remote 'cd /opt/det-app && docker compose up -d --build api && sleep 8 && curl -sf http://127.0.0.1:8000/health'
 Write-Host ''
 if ($LASTEXITCODE -ne 0) { throw 'api rebuild failed' }
+
+Write-Host '==> verify crm_cars.year' -ForegroundColor Cyan
+$verifyLocal = Join-Path $PSScriptRoot '_verify_year_remote.sh'
+@'
+#!/bin/bash
+set -e
+cd /opt/det-app
+docker compose exec -T db psql -U detapp -d detapp -tAc "SELECT column_name FROM information_schema.columns WHERE table_name = 'crm_cars' AND column_name = 'year'"
+'@ | Set-Content -Path $verifyLocal -Encoding ascii
+& $scp @sshArgs $verifyLocal "${remote}:/tmp/det_verify_year.sh"
+& $ssh @sshArgs $remote "sed -i 's/\r$//' /tmp/det_verify_year.sh && bash /tmp/det_verify_year.sh"
+if ($LASTEXITCODE -ne 0) { throw 'year column check failed' }
+Remove-Item -Force $verifyLocal -ErrorAction SilentlyContinue
 Write-Host 'Done.' -ForegroundColor Green

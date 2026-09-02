@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// Публичный сайт продукта (лендинг + политика).
-const kWebsiteUrl = 'http://det-app.ru';
+const kWebsiteUrl = 'https://det-app.ru';
 
 /// Открыть внешний URL в браузере системы.
 Future<bool> openExternalUrl(String url) async {

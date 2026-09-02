@@ -270,6 +270,7 @@ if ($apkSha) {
   $meta['android_sha256'] = $apkSha
   $meta['android_size'] = $apkSize
 }
+# Setup meta filled after Inno build below — placeholder rewritten later
 [System.IO.File]::WriteAllText(
   (Join-Path $DistRoot 'update_pack_meta.json'),
   (($meta | ConvertTo-Json) + "`r`n"),
@@ -291,6 +292,61 @@ if ($packDirReady) {
 }
 
 $appZipMb = [math]::Round((Get-Item $AppZipPath).Length / 1MB, 1)
+
+# --- 10. Windows Setup (Inno) — same layout as portable, updates keep working ---
+$SetupName = $null
+$SetupPath = $null
+$setupSha = $null
+$setupSize = $null
+if ($packDirReady) {
+  Write-Step "Build Windows Setup (Inno)"
+  $isccCandidates = @(
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+    "${env:LOCALAPPDATA}\Programs\Inno Setup 6\ISCC.exe"
+  )
+  $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+  $iss = Join-Path $PSScriptRoot 'detapp_setup.iss'
+  if (-not $iscc) {
+    Write-Host "WARN: Inno Setup 6 (ISCC.exe) not found — skip Setup.exe" -ForegroundColor Yellow
+    Write-Host "      Install: https://jrsoftware.org/isinfo.php" -ForegroundColor Yellow
+  } elseif (-not (Test-Path $iss)) {
+    Write-Host "WARN: missing $iss — skip Setup.exe" -ForegroundColor Yellow
+  } else {
+    $SetupName = "DetApp-Setup-$appVersion-b$appBuild.exe"
+    $SetupPath = Join-Path $DistRoot $SetupName
+    if (Test-Path $SetupPath) { Remove-Item $SetupPath -Force }
+    $srcAbs = (Resolve-Path $PackDir).Path
+    $outAbs = (Resolve-Path $DistRoot).Path
+    & $iscc `
+      "/DMyAppVersion=$appVersion" `
+      "/DMyAppBuild=$appBuild" `
+      "/DSourceDir=$srcAbs" `
+      "/DOutputDir=$outAbs" `
+      $iss
+    if ($LASTEXITCODE -ne 0) {
+      throw "ISCC failed (exit $LASTEXITCODE)"
+    }
+    if (-not (Test-Path $SetupPath)) {
+      throw "Setup not produced: $SetupPath"
+    }
+    $setupSha = (Get-FileHash -LiteralPath $SetupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $setupSize = (Get-Item $SetupPath).Length
+    $setupMb = [math]::Round($setupSize / 1MB, 1)
+    Write-Host ("Setup: {0} ({1} MB)" -f $SetupName, $setupMb) -ForegroundColor Green
+    $meta['setup_name'] = $SetupName
+    $meta['setup_sha256'] = $setupSha
+    $meta['setup_size'] = $setupSize
+    [System.IO.File]::WriteAllText(
+      (Join-Path $DistRoot 'update_pack_meta.json'),
+      (($meta | ConvertTo-Json) + "`r`n"),
+      [System.Text.UTF8Encoding]::new($false)
+    )
+  }
+} else {
+  Write-Step "Skip Windows Setup (staging folder locked)"
+}
+
 Write-Host ""
 Write-Host "Done." -ForegroundColor Green
 if ($packDirReady) {
@@ -300,6 +356,9 @@ if ($packDirReady) {
   Write-Host "Folder:     (skipped - use D:\DetApp for daily launch)"
 }
 Write-Host ("App update: {0} ({1} MB)" -f $AppZipPath, $appZipMb)
+if ($SetupPath) {
+  Write-Host ("Installer:  {0}" -f $SetupPath)
+}
 Write-Host "Manifest:   $latestPath"
 Write-Host "SHA256:     $sha"
 if ($apkSha) {
@@ -310,3 +369,4 @@ Write-Host "Publish to home server:" -ForegroundColor Yellow
 Write-Host "  powershell -ExecutionPolicy Bypass -File tools\publish_update.ps1 -PublishDir D:\detapp-updates -BaseUrl http://192.168.3.2:8080"
 Write-Host ""
 Write-Host "Daily launch: D:\DetApp\app\det_app.exe (not dist\)." -ForegroundColor Yellow
+Write-Host "After Setup:  %LOCALAPPDATA%\DetApp\app\det_app.exe" -ForegroundColor Yellow

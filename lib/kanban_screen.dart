@@ -8,6 +8,9 @@ import 'app_notifications.dart';
 import 'app_theme.dart';
 import 'auth/auth_controller.dart';
 import 'board_export.dart';
+import 'branch_filter_bar.dart';
+import 'branch_scope.dart';
+import 'car_label.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'issue_guard.dart';
@@ -80,12 +83,80 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
     return DateFormat('dd.MM, HH:mm').format(dt);
   }
 
+  List<({String workshop, List<String> names})> _workshopMastersOf(Map<String, dynamic> o) {
+    final raw = o['workshop_masters'];
+    if (raw is! List) return const [];
+    final out = <({String workshop, List<String> names})>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final ws = e['workshop']?.toString().trim() ?? '';
+      final namesRaw = e['names'];
+      final names = <String>[];
+      if (namesRaw is List) {
+        for (final n in namesRaw) {
+          final s = n.toString().trim();
+          if (s.isNotEmpty) names.add(s);
+        }
+      }
+      if (ws.isEmpty || names.isEmpty) continue;
+      out.add((workshop: ws, names: names));
+    }
+    // Fallback: один мастер с шапки заказа.
+    if (out.isEmpty) {
+      final master = (o['master_name']?.toString() ?? '').trim();
+      if (master.isNotEmpty) {
+        final status = o['status']?.toString() ?? '';
+        out.add((workshop: status, names: [master]));
+      }
+    }
+    return out;
+  }
+
+  Widget _cardMetaRow({
+    required IconData icon,
+    required Color iconColor,
+    required String text,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, size: 14, color: iconColor),
+          ),
+          const SizedBox(width: 5),
+          Expanded(
+            child: Text(
+              text,
+              style: GoogleFonts.manrope(
+                color: AppColors.textMuted,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                height: 1.25,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
+    BranchScope.instance.addListener(_onBranchScope);
+    unawaited(BranchScope.instance.ensureLoaded());
     _loadOrders();
     _startTimer();
     AppNotifications.refreshUnread();
+  }
+
+  void _onBranchScope() {
+    if (mounted) setState(() {});
   }
 
   void _startTimer() {
@@ -98,6 +169,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
 
   @override
   void dispose() {
+    BranchScope.instance.removeListener(_onBranchScope);
     _timer?.cancel();
     _kanbanController.dispose();
     _searchCtrl.dispose();
@@ -119,6 +191,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
   }
 
   bool _matchesBoardFilters(Map<String, dynamic> o) {
+    if (!BranchScope.instance.matchesOrderBranch(o['branch_id'])) return false;
     if (_debtOnly) {
       final price = (o['price'] as num?)?.toDouble() ?? 0;
       final paid = (o['paid_amount'] as num?)?.toDouble() ?? 0;
@@ -136,6 +209,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
       o['client_phone']?.toString() ?? '',
       o['make_model']?.toString() ?? '',
       o['plate']?.toString() ?? '',
+      ((o['year'] as num?)?.toInt() ?? 0) > 0 ? '${o['year']}' : '',
       o['master_name']?.toString() ?? '',
       o['notes']?.toString() ?? '',
     ].join(' ').toLowerCase();
@@ -143,7 +217,10 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
   }
 
   bool get _hasExtraFilters =>
-      _debtOnly || _todayOnly || _searchCtrl.text.trim().isNotEmpty;
+      _debtOnly ||
+      _todayOnly ||
+      _searchCtrl.text.trim().isNotEmpty ||
+      BranchScope.instance.selectedId != null;
 
   Widget _filterChip(
     String label,
@@ -385,13 +462,16 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
     final plate = o['plate']?.toString() ?? '';
     final make = o['make_model']?.toString() ?? '';
     final client = o['client_name']?.toString() ?? '';
-    final master = (o['master_name']?.toString() ?? '').trim();
+    final receptionist = (o['receptionist_name']?.toString() ?? '').trim();
     final when = _cardWhenLabel(o);
     final service = _serviceLine(o, status);
     final price = (o['price'] as num?)?.toDouble() ?? 0;
     final paid = (o['paid_amount'] as num?)?.toDouble() ?? 0;
     final debt = price - paid;
-    final title = make.isNotEmpty ? make : (client.isNotEmpty ? client : 'Заказ');
+    final title = make.isNotEmpty
+        ? '$make${carYearBit(o['year'])}'
+        : (client.isNotEmpty ? client : 'Заказ');
+    final workshopMasters = _workshopMastersOf(o);
 
     return PulseAnchor(
       active: !isFeedback && orderId != null && isPulseActive(orderId),
@@ -473,71 +553,37 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
               overflow: TextOverflow.ellipsis,
             ),
             if (!isFeedback) ...[
-              if (client.isNotEmpty || when.isNotEmpty || master.isNotEmpty) ...[
+              if (client.isNotEmpty ||
+                  when.isNotEmpty ||
+                  receptionist.isNotEmpty ||
+                  workshopMasters.isNotEmpty) ...[
                 const SizedBox(height: 8),
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    if (client.isNotEmpty)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.person_outline_rounded, size: 14, color: AppColors.textDim),
-                          const SizedBox(width: 4),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 120),
-                            child: Text(
-                              client,
-                              style: GoogleFonts.manrope(
-                                color: AppColors.textMuted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    if (when.isNotEmpty)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.schedule_rounded, size: 14, color: AppColors.textDim),
-                          const SizedBox(width: 4),
-                          Text(
-                            when,
-                            style: GoogleFonts.manrope(
-                              color: AppColors.textDim,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    if (master.isNotEmpty)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.handyman_outlined, size: 14, color: AppColors.primary.withOpacity(0.85)),
-                          const SizedBox(width: 4),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 110),
-                            child: Text(
-                              master,
-                              style: GoogleFonts.manrope(
-                                color: AppColors.textMuted,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                  ],
-                ),
+                // Фиксированные строки друг под другом (высота карточки растёт).
+                if (client.isNotEmpty)
+                  _cardMetaRow(
+                    icon: Icons.person_outline_rounded,
+                    iconColor: AppColors.textDim,
+                    text: client,
+                  ),
+                if (when.isNotEmpty)
+                  _cardMetaRow(
+                    icon: Icons.schedule_rounded,
+                    iconColor: AppColors.textDim,
+                    text: when,
+                  ),
+                if (receptionist.isNotEmpty)
+                  _cardMetaRow(
+                    icon: Icons.badge_outlined,
+                    iconColor: AppColors.textDim,
+                    text: receptionist,
+                  ),
+                for (final row in workshopMasters)
+                  _cardMetaRow(
+                    icon: Icons.handyman_outlined,
+                    iconColor: (kOrderStatusColors[row.workshop] ?? AppColors.primary)
+                        .withOpacity(0.95),
+                    text: row.names.join(', '),
+                  ),
               ],
               const SizedBox(height: 6),
               Row(
@@ -1002,6 +1048,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Title уже в AppBar — не дублируем.
+          const BranchFilterBar(compact: true),
           _searchField(),
           const SizedBox(height: 10),
           _statusDropdown(expanded: true),
@@ -1061,6 +1108,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
           ],
         ),
         const SizedBox(height: 12),
+        const BranchFilterBar(compact: true),
         Row(
           children: [
             SizedBox(width: 200, child: _statusDropdown(expanded: true)),

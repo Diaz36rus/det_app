@@ -7,8 +7,9 @@
   <meta name="theme-color" content="#0B0614" />
   <meta property="og:title" content="Det App — CRM для детейлинг-студии" />
   <meta property="og:description" content="Заказы, цеха, касса и склад в одном ритме. Закрытый тест." />
-  <meta property="og:image" content="http://det-app.ru/assets/logo.png" />
-  <meta property="og:url" content="http://det-app.ru/" />
+  <meta property="og:image" content="https://det-app.ru/assets/ui-board.jpg" />
+  <meta property="og:url" content="https://det-app.ru/" />
+  <meta property="og:type" content="website" />
   <title>Det App — CRM для детейлинг-студии</title>
   <link rel="icon" type="image/png" href="assets/logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -58,20 +59,20 @@
         <p class="eyebrow">Интерфейс</p>
         <h2>Студия на экране — как в зале</h2>
         <p class="showcase__text">
-          Тёмный рабочий контур под детейлинг: доска, заказ, календарь и касса —
-          без «админской» серости.
+          Живая доска заказов на ПК и телефоне: машины, цеха, мастера и суммы —
+          в одном рабочем контуре, без «админской» серости.
         </p>
       </div>
       <div class="showcase__stage">
         <div class="device device--laptop float-soft">
           <div class="device__bezel">
-            <img src="assets/ui-board.jpg" alt="Доска заказов Det App" loading="lazy" />
+            <img src="assets/ui-board.jpg" alt="Доска заказов Det App на Windows" width="1600" height="875" loading="lazy" />
           </div>
           <div class="device__base" aria-hidden="true"></div>
         </div>
         <div class="device device--phone float-soft-delay">
           <div class="device__bezel device__bezel--phone">
-            <img src="assets/ui-phone.jpg" alt="Цеха на телефоне" loading="lazy" />
+            <img src="assets/ui-phone.jpg" alt="Доска заказов Det App на Android" width="720" height="1600" loading="lazy" />
           </div>
         </div>
       </div>
@@ -81,7 +82,7 @@
       <div class="day__head">
         <p class="eyebrow">День студии</p>
         <h2>От записи до выдачи</h2>
-        <p class="day__lead">Один поток — без прыжков между таблицами и чатами.</p>
+        <p class="day__lead">Один поток на ПК и телефоне — без прыжков между таблицами и чатами.</p>
       </div>
       <ol class="day__steps">
         <li class="day__step">
@@ -90,18 +91,20 @@
             <h3>Запись</h3>
             <p>Клиент, авто, услуги и слот в календаре — сразу в системе.</p>
           </div>
-          <div class="frame">
-            <img src="assets/ui-calendar.jpg" alt="Календарь" loading="lazy" />
+          <div class="pair">
+            <div class="frame frame--desk"><img src="assets/ui-calendar.jpg" alt="Календарь на ПК" loading="lazy" /></div>
+            <div class="frame frame--phone"><img src="assets/ui-phone-calendar.jpg" alt="Календарь на телефоне" loading="lazy" /></div>
           </div>
         </li>
         <li class="day__step">
           <span class="day__num">02</span>
           <div>
-            <h3>Цеха</h3>
-            <p>Доска ведёт заказ по этапам. Мастер видит свой цех и задачи.</p>
+            <h3>Доска</h3>
+            <p>Заказы по этапам цехов. Мастер видит свой поток и задачи.</p>
           </div>
-          <div class="frame">
-            <img src="assets/ui-board.jpg" alt="Доска" loading="lazy" />
+          <div class="pair">
+            <div class="frame frame--desk"><img src="assets/ui-board.jpg" alt="Доска на ПК" loading="lazy" /></div>
+            <div class="frame frame--phone"><img src="assets/ui-phone.jpg" alt="Доска на телефоне" loading="lazy" /></div>
           </div>
         </li>
         <li class="day__step">
@@ -110,8 +113,10 @@
             <h3>Карточка заказа</h3>
             <p>Работы, мастера, материалы и ЗП — рядом с машиной, не в Excel.</p>
           </div>
-          <div class="frame">
-            <img src="assets/ui-order.jpg" alt="Заказ" loading="lazy" />
+          <div class="pair pair--order">
+            <div class="frame frame--phone frame--order">
+              <img src="assets/ui-order.jpg" alt="Карточка заказа на телефоне" loading="lazy" />
+            </div>
           </div>
         </li>
         <li class="day__step">
@@ -120,8 +125,9 @@
             <h3>Касса и выдача</h3>
             <p>Оплата, смена, выдача клиенту — закрытие дня без хаоса.</p>
           </div>
-          <div class="frame">
-            <img src="assets/ui-cash.jpg" alt="Касса" loading="lazy" />
+          <div class="pair">
+            <div class="frame frame--desk"><img src="assets/ui-cash.jpg" alt="Касса на ПК" loading="lazy" /></div>
+            <div class="frame frame--phone"><img src="assets/ui-phone-cash.jpg" alt="Касса на телефоне" loading="lazy" /></div>
           </div>
         </li>
       </ol>
@@ -133,11 +139,38 @@
         <h2>Что видит студия</h2>
       </div>
       <div class="screens__rail">
-        <figure class="screens__item"><div class="frame frame--rail"><img src="assets/ui-board.jpg" alt="Доска заказов" loading="lazy" /></div><figcaption>Доска</figcaption></figure>
-        <figure class="screens__item"><div class="frame frame--rail"><img src="assets/ui-calendar.jpg" alt="Календарь" loading="lazy" /></div><figcaption>Календарь</figcaption></figure>
-        <figure class="screens__item"><div class="frame frame--rail"><img src="assets/ui-order.jpg" alt="Заказ" loading="lazy" /></div><figcaption>Заказ</figcaption></figure>
-        <figure class="screens__item"><div class="frame frame--rail"><img src="assets/ui-cash.jpg" alt="Касса" loading="lazy" /></div><figcaption>Касса</figcaption></figure>
-        <figure class="screens__item"><div class="frame frame--rail"><img src="assets/ui-phone.jpg" alt="Телефон" loading="lazy" /></div><figcaption>Телефон</figcaption></figure>
+        <figure class="screens__item">
+          <div class="frame frame--rail"><img src="assets/ui-board.jpg" alt="Доска заказов" loading="lazy" /></div>
+          <figcaption>Доска · ПК</figcaption>
+        </figure>
+        <figure class="screens__item screens__item--phone">
+          <div class="frame frame--rail frame--rail-phone"><img src="assets/ui-phone.jpg" alt="Доска на телефоне" loading="lazy" /></div>
+          <figcaption>Доска · телефон</figcaption>
+        </figure>
+        <figure class="screens__item">
+          <div class="frame frame--rail"><img src="assets/ui-calendar.jpg" alt="Календарь" loading="lazy" /></div>
+          <figcaption>Календарь · ПК</figcaption>
+        </figure>
+        <figure class="screens__item screens__item--phone">
+          <div class="frame frame--rail frame--rail-phone"><img src="assets/ui-phone-calendar.jpg" alt="Календарь на телефоне" loading="lazy" /></div>
+          <figcaption>Календарь · телефон</figcaption>
+        </figure>
+        <figure class="screens__item">
+          <div class="frame frame--rail"><img src="assets/ui-cash.jpg" alt="Касса" loading="lazy" /></div>
+          <figcaption>Касса · ПК</figcaption>
+        </figure>
+        <figure class="screens__item screens__item--phone">
+          <div class="frame frame--rail frame--rail-phone"><img src="assets/ui-phone-cash.jpg" alt="Касса на телефоне" loading="lazy" /></div>
+          <figcaption>Касса · телефон</figcaption>
+        </figure>
+        <figure class="screens__item">
+          <div class="frame frame--rail"><img src="assets/screen-clients.jpg" alt="Клиенты" loading="lazy" /></div>
+          <figcaption>Клиенты · ПК</figcaption>
+        </figure>
+        <figure class="screens__item screens__item--phone">
+          <div class="frame frame--rail frame--rail-phone"><img src="assets/ui-order.jpg" alt="Заказ на телефоне" loading="lazy" /></div>
+          <figcaption>Заказ · телефон</figcaption>
+        </figure>
       </div>
     </section>
 
@@ -175,10 +208,11 @@
       <div class="download-grid">
         <div class="download-main">
           <div class="panel__actions">
-            <a class="btn btn--primary" id="dl-windows" href="#" aria-disabled="true">Windows</a>
+            <a class="btn btn--primary" id="dl-windows" href="#" aria-disabled="true">Windows Setup</a>
+            <a class="btn btn--ghost" id="dl-windows-zip" href="#" aria-disabled="true" hidden>Windows zip</a>
             <a class="btn btn--ghost" id="dl-android" href="#" aria-disabled="true">Android APK</a>
           </div>
-          <p class="panel__hint">На телефоне после установки: «Меня пригласили» или раздел ниже. На ПК — обновление из меню приложения.</p>
+          <p class="panel__hint">Setup ставит в профиль Windows; дальше обновления — из меню приложения. На телефоне: «Меня пригласили» или раздел ниже.</p>
         </div>
         <div class="qr-box" id="qr-box" hidden>
           <canvas id="apk-qr" width="160" height="160" aria-label="QR для скачивания APK"></canvas>

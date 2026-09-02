@@ -7,6 +7,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'app_theme.dart';
+import 'database.dart';
 
 /// PDF заказ-наряда по структуре шаблона «заказ-наряд.docx».
 class WorkOrderPdf {
@@ -24,6 +25,7 @@ class WorkOrderPdf {
     required Map<String, dynamic> order,
     required List<Map<String, dynamic>> items,
     required List<Map<String, dynamic>> masters,
+    List<Map<String, dynamic>> payroll = const [],
   }) async {
     final orderId = order['id'];
     showDialog<void>(
@@ -69,6 +71,7 @@ class WorkOrderPdf {
                       order: order,
                       items: items,
                       masters: masters,
+                      payroll: payroll,
                     ),
                     builder: (context, snapshot) {
                       if (snapshot.hasError) {
@@ -115,6 +118,7 @@ class WorkOrderPdf {
     required Map<String, dynamic> order,
     required List<Map<String, dynamic>> items,
     required List<Map<String, dynamic>> masters,
+    List<Map<String, dynamic>> payroll = const [],
   }) async {
     final font = await PdfGoogleFonts.notoSansRegular();
     final fontBold = await PdfGoogleFonts.notoSansBold();
@@ -122,6 +126,7 @@ class WorkOrderPdf {
 
     final doc = pw.Document(theme: base);
     final printItems = _itemsForPrint(items);
+    final payrollByWs = _payrollTotalsByWorkshop(payroll);
     final pages = <List<Map<String, dynamic>>>[];
     if (printItems.isEmpty) {
       pages.add([]);
@@ -162,6 +167,7 @@ class WorkOrderPdf {
                   child: _worksTable(
                     pages[p],
                     masters,
+                    payrollByWs: payrollByWs,
                     startIndex: p * maxRowsFirstPage,
                   ),
                 ),
@@ -177,6 +183,35 @@ class WorkOrderPdf {
     }
 
     return doc.save();
+  }
+
+  /// Сумма ЗП по цеху (несколько мастеров → сумма).
+  static Map<String, double> _payrollTotalsByWorkshop(List<Map<String, dynamic>> payroll) {
+    final out = <String, double>{};
+    for (final row in payroll) {
+      final ws = (row['workshop']?.toString() ?? '').trim();
+      if (ws.isEmpty) continue;
+      final amount = (row['amount'] as num?)?.toDouble() ?? 0;
+      if (amount <= 0) continue;
+      out[ws] = (out[ws] ?? 0) + amount;
+    }
+    return out;
+  }
+
+  static String _itemWorkshop(Map<String, dynamic> item) {
+    var ws = (item['workshop'] as String?)?.trim() ?? '';
+    if (ws.isEmpty) {
+      ws = workshopForService(name: item['name']?.toString()) ?? '';
+    }
+    return ws;
+  }
+
+  static String _payrollCell(Map<String, dynamic> item, Map<String, double> payrollByWs) {
+    final ws = _itemWorkshop(item);
+    if (ws.isEmpty) return '';
+    final amount = payrollByWs[ws];
+    if (amount == null || amount <= 0) return '';
+    return '${_money(amount)} ₽';
   }
 
   static pw.Widget _title(Map<String, dynamic> order) {
@@ -356,6 +391,7 @@ class WorkOrderPdf {
   static pw.Widget _worksTable(
     List<Map<String, dynamic>> pageItems,
     List<Map<String, dynamic>> masters, {
+    required Map<String, double> payrollByWs,
     required int startIndex,
   }) {
     // Работы/Исполнитель −30%, Сумма −50%, Выполнено −15%; всё в Комментарии.
@@ -402,7 +438,7 @@ class WorkOrderPdf {
                 _cell('${startIndex + i + 1}', align: pw.Alignment.center, height: rowH),
                 _cell(w['name']?.toString() ?? '', height: rowH),
                 _cell(_executor(w, masters), height: rowH),
-                _cell('', height: rowH),
+                _cell(_payrollCell(w, payrollByWs), align: pw.Alignment.center, height: rowH),
                 _cell('${_money(w['price'])} ₽', align: pw.Alignment.centerRight, height: rowH),
                 _cell('', height: rowH), // Комментарии — от руки; цеховой чат в PDF не идёт
                 _cell('', height: rowH),

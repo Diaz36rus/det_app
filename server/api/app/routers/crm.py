@@ -44,14 +44,15 @@ router = APIRouter(prefix="/crm", tags=["crm"])
 
 
 def _company_id(user: User) -> int:
+    # Platform admin со своей студией (company_id) работает как владелец.
+    if user.company_id is not None:
+        return user.company_id
     if user.is_platform_admin:
         raise HTTPException(
             status_code=400,
             detail="Войдите пользователем компании (например owner@demo.det-app.ru)",
         )
-    if user.company_id is None:
-        raise HTTPException(status_code=400, detail="Пользователь без компании")
-    return user.company_id
+    raise HTTPException(status_code=400, detail="Пользователь без компании")
 
 
 def _is_studio_master(user: User) -> bool:
@@ -369,6 +370,7 @@ def create_car(
         plate=(body.plate or "").strip(),
         vin=(body.vin or "").strip(),
         category=(body.category or "1").strip() or "1",
+        year=int(body.year or 0),
     )
     db.add(row)
     db.commit()
@@ -736,6 +738,8 @@ def update_car(
         row.vin = body.vin.strip()
     if body.category is not None:
         row.category = (body.category or "1").strip() or "1"
+    if body.year is not None:
+        row.year = int(body.year or 0)
     db.commit()
     db.refresh(row)
     return row

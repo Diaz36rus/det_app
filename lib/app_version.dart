@@ -8,7 +8,7 @@ class AppVersion {
   AppVersion._();
 
   /// Версия схемы SQLite (синхрон с DatabaseHelper).
-  static const int dbSchema = 32;
+  static const int dbSchema = 33;
 
   static PackageInfo? _info;
 

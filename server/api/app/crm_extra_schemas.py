@@ -26,6 +26,10 @@ class CrmServiceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     category: str = Field(default="Прочее", max_length=80)
     price: float = 0
+    price2: float = 0
+    price3: float = 0
+    price4: float = 0
+    fixed_price: float = 0
     workshop: str = Field(default="", max_length=80)
 
 
@@ -33,6 +37,10 @@ class CrmServiceUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     category: str | None = None
     price: float | None = None
+    price2: float | None = None
+    price3: float | None = None
+    price4: float | None = None
+    fixed_price: float | None = None
     workshop: str | None = None
     is_active: bool | None = None
 
@@ -43,6 +51,10 @@ class CrmServiceOut(BaseModel):
     name: str
     category: str
     price: float
+    price2: float = 0
+    price3: float = 0
+    price4: float = 0
+    fixed_price: float = 0
     workshop: str
     is_active: bool
 

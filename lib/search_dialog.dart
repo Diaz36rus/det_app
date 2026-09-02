@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
+import 'car_label.dart';
 import 'database.dart';
 import 'order_details_dialog.dart';
 import 'responsive.dart';
@@ -78,7 +79,7 @@ class _SearchDialogState extends State<SearchDialog> {
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.directions_car_outlined, color: AppColors.primary),
                         title: Text(
-                          "${car['make_model']} · ${car['plate']}",
+                          formatCarMakePlate(car),
                           style: GoogleFonts.manrope(color: AppColors.text, fontWeight: FontWeight.w600),
                         ),
                         subtitle: Text(

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     ## PIN для wipe и т.п. на клиенте зашит отдельно; на API — reserved.
     owner_destructive_pin: str = "9294"
     releases_dir: str = "/data/releases"
-    public_base_url: str = "http://api.det-app.ru"
+    public_base_url: str = "https://api.det-app.ru"
     release_upload_token: str = ""
 
 

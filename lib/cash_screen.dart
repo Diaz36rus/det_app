@@ -4,11 +4,14 @@ import 'package:intl/intl.dart';
 import 'app_datetime.dart';
 import 'app_theme.dart';
 import 'app_toast.dart';
+import 'branch_filter_bar.dart';
+import 'branch_scope.dart';
 import 'cash_catalog.dart';
 import 'cash_csv_export.dart';
 import 'cash_operation_dialog.dart';
 import 'cash_register_tx_dialog.dart';
 import 'cash_shift_panel.dart';
+import 'car_label.dart';
 import 'database.dart';
 import 'db_refresh_mixin.dart';
 import 'debt_reminder.dart';
@@ -71,7 +74,19 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
   @override
   void initState() {
     super.initState();
+    BranchScope.instance.addListener(_onBranch);
+    BranchScope.instance.ensureLoaded();
     _setPeriod('today');
+  }
+
+  void _onBranch() {
+    if (mounted) _loadData();
+  }
+
+  @override
+  void dispose() {
+    BranchScope.instance.removeListener(_onBranch);
+    super.dispose();
   }
 
   Future<void> _setPeriod(String type) async {
@@ -445,7 +460,11 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                             style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 14),
                           ),
                           subtitle: Text(
-                            '${d['make_model']} · ${d['plate']}',
+                            formatCarMakePlate({
+                              'make_model': d['make_model'],
+                              'plate': d['plate'],
+                              'year': d['year'],
+                            }),
                             style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
                           ),
                           trailing: Row(
@@ -552,6 +571,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          const BranchFilterBar(compact: true),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1249,6 +1269,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
 
     if (mobile) {
       return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           for (var i = 0; i < items.length; i++) ...[
             if (i > 0) const SizedBox(height: 8),

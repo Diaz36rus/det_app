@@ -76,6 +76,49 @@ void main() {
       final models = CarCatalog.modelsFor('Toyota', extra: ['MySpecial']);
       expect(models, contains('MySpecial'));
     });
+
+    test('extras from orders stay scoped to make', () {
+      final extras = CarCatalog.extrasFromMakeModels([
+        'BMW X5',
+        'MINI Cooper S',
+        'Toyota Camry',
+        'BMW 5 Series',
+      ]);
+      expect(extras.makes.map((e) => e.toLowerCase()), containsAll(['bmw', 'mini', 'toyota']));
+      final bmwModels = CarCatalog.filterModels(
+        'BMW',
+        '',
+        modelsByMake: extras.modelsByMake,
+      );
+      expect(bmwModels, contains('X5'));
+      expect(bmwModels, contains('5 Series'));
+      expect(bmwModels, isNot(contains('Cooper S')));
+      expect(bmwModels, isNot(contains('Camry')));
+
+      final miniModels = CarCatalog.filterModels(
+        'Mini',
+        '',
+        modelsByMake: extras.modelsByMake,
+      );
+      expect(miniModels, contains('Cooper S'));
+      expect(miniModels, isNot(contains('X5')));
+    });
+
+    test('empty make yields no models', () {
+      expect(CarCatalog.filterModels('', ''), isEmpty);
+    });
+
+    test('model hint never mixes foreign brands', () {
+      final hint = CarCatalog.modelHintFor('Toyota');
+      expect(hint.toLowerCase(), isNot(contains('x5')));
+      expect(hint.toLowerCase(), contains('camry'));
+    });
+
+    test('filterBrands empty query returns more than first letter B', () {
+      final all = CarCatalog.filterBrands('');
+      expect(all.length, greaterThan(40));
+      expect(all.any((b) => b.toLowerCase().startsWith('t')), isTrue);
+    });
   });
 
   group('CarBrands', () {

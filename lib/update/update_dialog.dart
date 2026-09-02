@@ -371,14 +371,21 @@ class _UpdateDialogState extends State<UpdateDialog> {
             child: const Text('Проверить'),
           ),
         if (!_ready && !_applying && r?.status == UpdateCheckStatus.available) ...[
-          TextButton(
-            onPressed: _openManualDownload,
-            child: Text(Platform.isAndroid ? 'APK в браузере' : 'Zip в браузере'),
-          ),
-          ElevatedButton(
-            onPressed: _download,
-            child: Text(Platform.isAndroid ? 'Скачать APK' : 'Скачать'),
-          ),
+          if (r!.storeUpdateOnly)
+            ElevatedButton(
+              onPressed: () => openExternalUrl('https://www.rustore.ru/catalog/app/ru.detapp.app'),
+              child: const Text('Открыть RuStore'),
+            )
+          else ...[
+            TextButton(
+              onPressed: _openManualDownload,
+              child: Text(Platform.isAndroid ? 'APK в браузере' : 'Zip в браузере'),
+            ),
+            ElevatedButton(
+              onPressed: _download,
+              child: Text(Platform.isAndroid ? 'Скачать APK' : 'Скачать'),
+            ),
+          ],
         ],
         if (_ready && _apkOpened) ...[
           TextButton(

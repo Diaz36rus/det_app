@@ -40,6 +40,7 @@ from app.crm_extra_schemas import (
 from app.db import get_db
 from app.deps import require_permissions
 from app.models import (
+    Branch,
     CashFlow,
     CrmCar,
     CrmClient,
@@ -49,6 +50,7 @@ from app.models import (
     CrmInventoryMove,
     CrmMaster,
     CrmOrder,
+    CrmOrderWorkshopPayroll,
     CrmOrderWrapFilm,
     CrmPromocode,
     CrmService,
@@ -168,6 +170,10 @@ def create_service(
         name=body.name.strip(),
         category=body.category or "Прочее",
         price=float(body.price or 0),
+        price2=float(body.price2 or 0),
+        price3=float(body.price3 or 0),
+        price4=float(body.price4 or 0),
+        fixed_price=float(body.fixed_price or 0),
         workshop=body.workshop or "",
     )
     db.add(row)
@@ -193,6 +199,14 @@ def update_service(
         row.category = body.category
     if body.price is not None:
         row.price = float(body.price)
+    if body.price2 is not None:
+        row.price2 = float(body.price2)
+    if body.price3 is not None:
+        row.price3 = float(body.price3)
+    if body.price4 is not None:
+        row.price4 = float(body.price4)
+    if body.fixed_price is not None:
+        row.fixed_price = float(body.fixed_price)
     if body.workshop is not None:
         row.workshop = body.workshop
     if body.is_active is not None:
@@ -1144,6 +1158,7 @@ def _day_key(dt: datetime | None) -> str:
 def company_stats(
     master_day: str | None = Query(default=None, description="YYYY-MM-DD"),
     days: int = Query(default=30, ge=1, le=90),
+    branch_id: int | None = Query(default=None),
     user: User = Depends(require_permissions("orders.read")),
     db: Session = Depends(get_db),
 ):
@@ -1154,11 +1169,17 @@ def company_stats(
     day = (master_day or today)[:10]
     since = (now.date() - timedelta(days=days - 1)).isoformat()
 
+    q = select(CrmOrder).where(CrmOrder.company_id == cid)
+    if branch_id is not None:
+        br = db.scalar(
+            select(Branch).where(Branch.id == branch_id, Branch.company_id == cid)
+        )
+        if br is None:
+            raise HTTPException(404, "Филиал не найден")
+        q = q.where(CrmOrder.branch_id == branch_id)
     orders = list(
         db.scalars(
-            select(CrmOrder)
-            .where(CrmOrder.company_id == cid)
-            .options(
+            q.options(
                 selectinload(CrmOrder.items),
                 selectinload(CrmOrder.master_links),
             )
@@ -1249,6 +1270,27 @@ def company_stats(
                 ids.add(int(part))
         return ids
 
+    def _order_activity_day(o: CrmOrder) -> str:
+        """День для блока «Мастера»: end → start → created_at (как у услуг по завершённым)."""
+        for raw in (o.end_time, o.start_time):
+            stamp = (raw or "").replace("T", " ").strip()
+            if len(stamp) >= 10:
+                return stamp[:10]
+        return _day_key(o.created_at)
+
+    payroll_by_order: dict[int, set[int]] = {}
+    payroll_amount_by_order: dict[int, dict[int, float]] = {}
+    for p in db.scalars(
+        select(CrmOrderWorkshopPayroll).where(CrmOrderWorkshopPayroll.company_id == cid)
+    ).all():
+        if p.master_id is None:
+            continue
+        oid = int(p.order_id)
+        mid = int(p.master_id)
+        payroll_by_order.setdefault(oid, set()).add(mid)
+        bucket = payroll_amount_by_order.setdefault(oid, {})
+        bucket[mid] = float(bucket.get(mid, 0.0)) + float(p.amount or 0)
+
     masters = list(
         db.scalars(select(CrmMaster).where(CrmMaster.company_id == cid).order_by(CrmMaster.name)).all()
     )
@@ -1258,26 +1300,34 @@ def company_stats(
             continue
         count = 0
         revenue = 0.0
+        payroll = 0.0
         for o in orders:
             if o.status not in _MASTER_DAY_STATUSES:
                 continue
-            stamp = (o.end_time or o.start_time or "").replace("T", " ").strip()
-            if len(stamp) < 10 or stamp[:10] != day:
+            if _order_activity_day(o) != day:
                 continue
             order_ids = _master_ids_for_order(o)
+            payroll_ids = payroll_by_order.get(int(o.id), set())
             item_hit = False
             for it in o.items or []:
                 mids = _master_ids_for_item(it)
-                if m.id in mids or (not mids and m.id in order_ids):
+                if m.id in mids or (not mids and (m.id in order_ids or m.id in payroll_ids)):
                     revenue += float(it.price or 0)
                     item_hit = True
-            if m.id in order_ids or item_hit:
+            if m.id in order_ids or m.id in payroll_ids or item_hit:
                 count += 1
+                payroll += float(payroll_amount_by_order.get(int(o.id), {}).get(m.id, 0.0))
         master_day_rows.append(
-            {"id": m.id, "name": m.name, "orders_count": count, "revenue": revenue}
+            {
+                "id": m.id,
+                "name": m.name,
+                "orders_count": count,
+                "revenue": revenue,
+                "payroll": payroll,
+            }
         )
     master_day_rows.sort(
-        key=lambda r: (-int(r["orders_count"]), -float(r["revenue"]), str(r["name"]))
+        key=lambda r: (-int(r["orders_count"]), -float(r["payroll"]), -float(r["revenue"]), str(r["name"]))
     )
 
     return CrmStatsOut(

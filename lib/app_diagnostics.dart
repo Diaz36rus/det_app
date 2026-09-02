@@ -118,6 +118,7 @@ class AppDiagnostics extends ChangeNotifier {
       _syncBaseUrl = AuthApi.defaultBaseUrl;
       if (ok) {
         _setStatus(ConnStatus.ok, 'Облако · api.det-app.ru');
+        unawaited(BugReportsApi.instance.flushPending());
       } else {
         _setStatus(ConnStatus.down, 'Облако недоступно');
       }

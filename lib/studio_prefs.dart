@@ -16,6 +16,7 @@ class StudioPrefs {
   static const calendarStartHour = 'calendar_start_hour';
   static const calendarEndHour = 'calendar_end_hour';
   static const defaultBranchId = 'studio_default_branch_id';
+  static const opsBranchFilterId = 'ops_branch_filter_id';
   static const defaultCashRegisterId = 'studio_default_cash_register_id';
   static const tplBooking = 'msg_tpl_booking';
   static const tplDebt = 'msg_tpl_debt';
@@ -109,6 +110,17 @@ class StudioPrefs {
 
   static Future<void> saveDefaultBranchId(int? id) async {
     await DatabaseHelper().setAppSetting(defaultBranchId, id == null ? '' : '$id');
+  }
+
+  /// Фильтр филиала на доске/кассе/статах (`null` = все).
+  static Future<int?> loadOpsBranchFilterId() async {
+    final v = await DatabaseHelper().getAppSetting(opsBranchFilterId);
+    if (v == null || v.trim().isEmpty) return null;
+    return int.tryParse(v);
+  }
+
+  static Future<void> saveOpsBranchFilterId(int? id) async {
+    await DatabaseHelper().setAppSetting(opsBranchFilterId, id == null ? '' : '$id');
   }
 
   static Future<int?> loadDefaultCashRegisterId() async {

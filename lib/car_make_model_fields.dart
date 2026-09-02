@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'app_theme.dart';
+import 'car_brands.dart';
 import 'car_catalog.dart';
 
 /// Пара полей «Марка» + «Модель» с автоподстановкой.
-/// Свои [TextEditingController] — ввод не сбрасывается при rebuild родителя.
-/// Программная подстановка: [CarMakeModelFieldsState.setMakeModel] через [GlobalKey].
+/// Модели только для выбранной марки; при смене марки список моделей обновляется сразу.
 class CarMakeModelFields extends StatefulWidget {
   const CarMakeModelFields({
     super.key,
@@ -16,7 +16,7 @@ class CarMakeModelFields extends StatefulWidget {
     this.isDense = true,
     this.stacked = false,
     this.extraMakes = const [],
-    this.extraModels = const [],
+    this.extraModelsByMake = const {},
     this.makeFieldKey,
     this.modelFieldKey,
   });
@@ -27,7 +27,8 @@ class CarMakeModelFields extends StatefulWidget {
   final bool isDense;
   final bool stacked;
   final List<String> extraMakes;
-  final List<String> extraModels;
+  /// slug/ключ марки → модели, встречавшиеся в заказах (не общий пул).
+  final Map<String, List<String>> extraModelsByMake;
   final Key? makeFieldKey;
   final Key? modelFieldKey;
 
@@ -41,6 +42,10 @@ class CarMakeModelFieldsState extends State<CarMakeModelFields> {
   final _makeFocus = FocusNode();
   final _modelFocus = FocusNode();
 
+  /// Меняется при смене марки → пересоздаёт Autocomplete моделей.
+  int _modelEpoch = 0;
+  String _makeFingerprint = '';
+
   String get makeModel => CarCatalog.join(_makeCtrl.text, _modelCtrl.text);
 
   @override
@@ -49,13 +54,14 @@ class CarMakeModelFieldsState extends State<CarMakeModelFields> {
     final parts = CarCatalog.split(widget.initialMakeModel);
     _makeCtrl = TextEditingController(text: parts.make);
     _modelCtrl = TextEditingController(text: parts.model);
-    _makeCtrl.addListener(_emit);
+    _makeFingerprint = _fingerprint(_makeCtrl.text);
+    _makeCtrl.addListener(_onMakeEdited);
     _modelCtrl.addListener(_emit);
   }
 
   @override
   void dispose() {
-    _makeCtrl.removeListener(_emit);
+    _makeCtrl.removeListener(_onMakeEdited);
     _modelCtrl.removeListener(_emit);
     _makeCtrl.dispose();
     _modelCtrl.dispose();
@@ -64,13 +70,46 @@ class CarMakeModelFieldsState extends State<CarMakeModelFields> {
     super.dispose();
   }
 
+  String _fingerprint(String make) {
+    final slug = CarBrands.slugFor(make.trim());
+    if (slug != null) return slug;
+    return CarCatalog.extrasKey(make);
+  }
+
   void _emit() => widget.onChanged?.call(makeModel);
 
-  /// Подставить «Марка Модель» без потери фокуса у других полей формы.
+  void _onMakeEdited() {
+    final fp = _fingerprint(_makeCtrl.text);
+    if (fp != _makeFingerprint) {
+      _makeFingerprint = fp;
+      final model = _modelCtrl.text.trim();
+      if (model.isNotEmpty &&
+          !CarCatalog.modelBelongsToMake(
+            _makeCtrl.text,
+            model,
+            modelsByMake: widget.extraModelsByMake,
+          )) {
+        _modelCtrl.removeListener(_emit);
+        _modelCtrl.text = '';
+        _modelCtrl.addListener(_emit);
+      }
+      // Пересоздаём optionsBuilder моделей сразу, без ожидания ввода в поле модели.
+      if (mounted) setState(() => _modelEpoch++);
+    }
+    _emit();
+  }
+
   void setMakeModel(String value) {
     final parts = CarCatalog.split(value);
+    _makeCtrl.removeListener(_onMakeEdited);
+    _modelCtrl.removeListener(_emit);
     if (_makeCtrl.text != parts.make) _makeCtrl.text = parts.make;
     if (_modelCtrl.text != parts.model) _modelCtrl.text = parts.model;
+    _makeFingerprint = _fingerprint(_makeCtrl.text);
+    _makeCtrl.addListener(_onMakeEdited);
+    _modelCtrl.addListener(_emit);
+    if (mounted) setState(() => _modelEpoch++);
+    _emit();
   }
 
   void clear() => setMakeModel('');
@@ -84,16 +123,18 @@ class CarMakeModelFieldsState extends State<CarMakeModelFields> {
     required Iterable<String> Function(TextEditingValue) optionsBuilder,
   }) {
     return RawAutocomplete<String>(
+      key: fieldKey,
       textEditingController: controller,
       focusNode: focusNode,
       optionsBuilder: optionsBuilder,
       onSelected: (v) {
-        controller.text = v;
-        controller.selection = TextSelection.collapsed(offset: v.length);
+        controller.value = TextEditingValue(
+          text: v,
+          selection: TextSelection.collapsed(offset: v.length),
+        );
       },
       fieldViewBuilder: (context, textCtrl, focus, onSubmit) {
         return TextField(
-          key: fieldKey,
           controller: textCtrl,
           focusNode: focus,
           enabled: widget.enabled,
@@ -111,29 +152,34 @@ class CarMakeModelFieldsState extends State<CarMakeModelFields> {
       optionsViewBuilder: (context, onSelected, opts) {
         final list = opts.toList();
         if (list.isEmpty) return const SizedBox.shrink();
+        // Шире оверлей + свой скролл, чтобы родительский ScrollView формы не перехватывал жест.
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
-            elevation: 6,
+            elevation: 8,
             color: AppColors.surface2,
             borderRadius: BorderRadius.circular(10),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 220, minWidth: 240),
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                shrinkWrap: true,
-                itemCount: list.length,
-                itemBuilder: (context, i) {
-                  final opt = list[i];
-                  return ListTile(
-                    dense: true,
-                    title: Text(
-                      opt,
-                      style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
-                    ),
-                    onTap: () => onSelected(opt),
-                  );
-                },
+              constraints: const BoxConstraints(maxHeight: 280, minWidth: 260, maxWidth: 360),
+              child: NotificationListener<ScrollNotification>(
+                onNotification: (_) => true,
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  primary: false,
+                  shrinkWrap: false,
+                  itemCount: list.length,
+                  itemBuilder: (context, i) {
+                    final opt = list[i];
+                    return ListTile(
+                      dense: true,
+                      title: Text(
+                        opt,
+                        style: GoogleFonts.manrope(color: AppColors.text, fontSize: 13),
+                      ),
+                      onTap: () => onSelected(opt),
+                    );
+                  },
+                ),
               ),
             ),
           ),
@@ -144,12 +190,13 @@ class CarMakeModelFieldsState extends State<CarMakeModelFields> {
 
   @override
   Widget build(BuildContext context) {
+    final make = _makeCtrl.text.trim();
     final makeField = _field(
       fieldKey: widget.makeFieldKey,
       controller: _makeCtrl,
       focusNode: _makeFocus,
       label: 'Марка',
-      hint: 'Toyota, BMW…',
+      hint: 'начните вводить…',
       optionsBuilder: (tv) => CarCatalog.filterBrands(
         tv.text,
         extra: widget.extraMakes,
@@ -157,15 +204,15 @@ class CarMakeModelFieldsState extends State<CarMakeModelFields> {
     );
 
     final modelField = _field(
-      fieldKey: widget.modelFieldKey,
+      fieldKey: ValueKey('car_model_$_modelEpoch'),
       controller: _modelCtrl,
       focusNode: _modelFocus,
       label: 'Модель',
-      hint: _makeCtrl.text.trim().isEmpty ? 'Сначала марка' : 'Camry, X5…',
+      hint: CarCatalog.modelHintFor(make),
       optionsBuilder: (tv) => CarCatalog.filterModels(
         _makeCtrl.text,
         tv.text,
-        extra: widget.extraModels,
+        modelsByMake: widget.extraModelsByMake,
       ),
     );
 

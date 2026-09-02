@@ -52,19 +52,10 @@ class _AppSplashScreenState extends State<AppSplashScreen>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 72,
-                    height: 72,
+                    width: 88,
+                    height: 88,
                     decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          AppColors.primarySoft,
-                          Color(0xFF0A0610),
-                        ],
-                      ),
-                      border: Border.all(color: AppColors.primary.withOpacity(0.45), width: 1.5),
+                      borderRadius: BorderRadius.circular(22),
                       boxShadow: [
                         BoxShadow(
                           color: AppColors.primary.withOpacity(0.22),
@@ -73,10 +64,13 @@ class _AppSplashScreenState extends State<AppSplashScreen>
                         ),
                       ],
                     ),
-                    child: const Icon(
-                      Icons.local_car_wash_rounded,
-                      color: AppColors.primary,
-                      size: 34,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(22),
+                      child: Image.asset(
+                        'assets/branding/app_icon_source.png',
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 22),

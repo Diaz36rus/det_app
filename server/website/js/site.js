@@ -1,7 +1,7 @@
 (() => {
   const API = "/api";
-  const API_PUBLIC = "http://api.det-app.ru";
-  const PKG = "com.example.det_app";
+  const API_PUBLIC = "https://api.det-app.ru";
+  const PKG = "ru.detapp.app";
 
   const year = document.querySelector("[data-year]");
   if (year) year.textContent = String(new Date().getFullYear());
@@ -122,12 +122,29 @@
         notes.hidden = false;
         notes.textContent = String(m.notes);
       }
-      if (win && m.url) {
-        win.href = m.url;
-        win.textContent = formatBytes(m.size)
-          ? `Windows · ${formatBytes(m.size)}`
-          : "Windows";
+      if (win && (m.windows_setup_url || m.url)) {
+        const setupUrl = m.windows_setup_url || m.url;
+        const setupSize = m.windows_setup_url
+          ? m.windows_setup_size
+          : m.size;
+        win.href = setupUrl;
+        win.textContent = formatBytes(setupSize)
+          ? `Windows Setup · ${formatBytes(setupSize)}`
+          : m.windows_setup_url
+            ? "Windows Setup"
+            : "Windows";
         setDisabled(win, false);
+      }
+      const winZip = document.getElementById("dl-windows-zip");
+      if (winZip && m.url && m.windows_setup_url) {
+        winZip.hidden = false;
+        winZip.href = m.url;
+        winZip.textContent = formatBytes(m.size)
+          ? `Windows zip · ${formatBytes(m.size)}`
+          : "Windows zip";
+        setDisabled(winZip, false);
+      } else if (winZip) {
+        winZip.hidden = true;
       }
       const apkUrl = m.android_url || `${API_PUBLIC}/updates/android`;
       if (apk) {
@@ -286,7 +303,7 @@
         <p class="release">Сборка ${m.version}+${m.build}</p>
         <p class="release-notes">${(m.notes || "Без заметок").replace(/</g, "&lt;")}</p>
         <div class="panel__actions" style="margin-top:1.5rem">
-          <a class="btn btn--primary" href="${m.url || "#"}">Windows</a>
+          <a class="btn btn--primary" href="${m.windows_setup_url || m.url || "#"}">${m.windows_setup_url ? "Windows Setup" : "Windows"}</a>
           <a class="btn btn--ghost" href="${m.android_url || API_PUBLIC + "/updates/android"}">Android APK</a>
         </div>`;
     } catch {

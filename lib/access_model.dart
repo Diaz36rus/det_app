@@ -88,7 +88,7 @@ const Set<int> kMasterHiddenMenuIds = {
   AppMenuIds.services,
   AppMenuIds.preview,
   AppMenuIds.studio,
-  AppMenuIds.notifications,
+  // Уведомления мастеру нужны на телефоне (цех / готовность).
 };
 
 /// PIN владельца приложения для необратимых действий (wipe и т.п.).

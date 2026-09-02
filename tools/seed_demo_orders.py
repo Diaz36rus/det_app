@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Reseed 10 busy overlapping demo orders (20–29.08.2026).
+"""Reseed ~15 busy overlapping demo orders (studio simulation).
 
-Deletes previous seed orders (#92–101 if present) and recreates with
-overlapping order windows and staggered per-work times.
+Deletes previous seed orders (by seed phones + Aug–Sep 2026 window)
+and recreates with overlapping order windows and staggered per-work times.
 
 Usage:
   python tools/seed_demo_orders.py
@@ -13,12 +13,14 @@ import json
 import urllib.error
 import urllib.request
 
-BASE = "http://api.det-app.ru"
-LOGIN = "owner@demo.det-app.ru"
-PASSWORD = "DetAppAdmin2026!"
+import os
+
+BASE = os.environ.get("SEED_API", "https://api.det-app.ru").rstrip("/")
+LOGIN = os.environ.get("SEED_LOGIN", "owner@demo.det-app.ru")
+PASSWORD = os.environ.get("SEED_PASSWORD", "DetAppAdmin2026!")
 
 # Previous seed ids (best-effort cleanup)
-OLD_ORDER_IDS = list(range(92, 112))
+OLD_ORDER_IDS = list(range(92, 200))
 
 PRICES = {
     "Экспресс-мойка": {1: 800, 2: 1000, 3: 1200, 4: 1400},
@@ -95,11 +97,11 @@ def iso(day: str, hour: int, minute: int = 0) -> str:
 # order window = min start .. max end of works
 # status = column for board (calendar uses work times)
 ORDERS = [
-    # --- 20.08 busy morning wash lane + хим + полир overlap ---
+    # --- 28.08: утро мойка + хим + полир параллельно ---
     {
         "client": ("Игорь Ковалёв", "9001112233"),
-        "car": ("Toyota Camry", "А123ВС777", "1"),
-        "day": "2026-08-20",
+        "car": ("Toyota Camry", "A123BC777", "1"),
+        "day": "2026-08-28",
         "status": "Мойка",
         "works": [
             ("Комплексная мойка", 9, 0, 10, 30),
@@ -109,8 +111,8 @@ ORDERS = [
     },
     {
         "client": ("Дмитрий Орлов", "9003334455"),
-        "car": ("Volkswagen Polo", "К789ОР136", "1"),
-        "day": "2026-08-20",
+        "car": ("Volkswagen Polo", "K789OP136", "1"),
+        "day": "2026-08-28",
         "status": "Мойка",
         "works": [
             ("Экспресс-мойка", 9, 45, 10, 45),
@@ -120,8 +122,8 @@ ORDERS = [
     },
     {
         "client": ("Анна Смирнова", "9002223344"),
-        "car": ("BMW X5", "Е456КХ777", "3"),
-        "day": "2026-08-20",
+        "car": ("BMW X5", "E456KX777", "3"),
+        "day": "2026-08-28",
         "status": "Химчистка",
         "works": [
             ("Комплексная мойка", 9, 30, 11, 0),
@@ -132,8 +134,8 @@ ORDERS = [
     },
     {
         "client": ("Елена Васильева", "9004445566"),
-        "car": ("Mercedes-Benz E-Class", "М012ТУ777", "2"),
-        "day": "2026-08-20",
+        "car": ("Mercedes-Benz E-Class", "M012TY777", "2"),
+        "day": "2026-08-28",
         "status": "Полировка",
         "works": [
             ("Легкая полировка", 11, 0, 15, 30),
@@ -142,11 +144,11 @@ ORDERS = [
         ],
         "shop": "Без абразива на капоте",
     },
-    # --- 21.08 оклейка + керамика + большая полировка ---
+    # --- 29.08: оклейка + керамика + большая полировка ---
     {
         "client": ("Сергей Николаев", "9005556677"),
-        "car": ("Kia Sportage", "Р451КТ777", "2"),
-        "day": "2026-08-21",
+        "car": ("Kia Sportage", "P451KT777", "2"),
+        "day": "2026-08-29",
         "status": "Оклейка",
         "works": [
             ("Комплексная мойка", 10, 0, 11, 30),
@@ -156,8 +158,8 @@ ORDERS = [
     },
     {
         "client": ("Мария Кузнецова", "9006667788"),
-        "car": ("Hyundai Solaris", "О234РС777", "1"),
-        "day": "2026-08-21",
+        "car": ("Hyundai Solaris", "O234PC777", "1"),
+        "day": "2026-08-29",
         "status": "Принят в работу",
         "works": [
             ("Мойка кузова", 11, 30, 13, 0),
@@ -167,8 +169,8 @@ ORDERS = [
     },
     {
         "client": ("Алексей Морозов", "9007778899"),
-        "car": ("Audi Q7", "Т567УВ777", "4"),
-        "day": "2026-08-21",
+        "car": ("Audi Q7", "T567YB777", "4"),
+        "day": "2026-08-29",
         "status": "Полировка",
         "works": [
             ("Восстановительная полировка", 9, 0, 17, 0),
@@ -176,11 +178,11 @@ ORDERS = [
         ],
         "shop": "Сложные царапины на заднем крыле",
     },
-    # --- 22.08 оклейка + предзапись пересекаются ---
+    # --- 30.08: суббота — плотная оклейка + предзаписи ---
     {
         "client": ("Павел Лебедев", "9009990011"),
-        "car": ("Lexus RX", "В345ДЕ777", "3"),
-        "day": "2026-08-22",
+        "car": ("Lexus RX", "B345KE777", "3"),
+        "day": "2026-08-30",
         "status": "Оклейка",
         "works": [
             ("Комплексная мойка", 9, 0, 10, 30),
@@ -191,8 +193,8 @@ ORDERS = [
     },
     {
         "client": ("Ольга Соколова", "9008889900"),
-        "car": ("Kia Rio", "У890ХЦ136", "1"),
-        "day": "2026-08-22",
+        "car": ("Kia Rio", "Y890XC136", "1"),
+        "day": "2026-08-30",
         "status": "Предварительная запись",
         "works": [
             ("Комплексная мойка", 10, 0, 11, 30),
@@ -202,8 +204,8 @@ ORDERS = [
     },
     {
         "client": ("Наталья Федорова", "9011112233"),
-        "car": ("Skoda Octavia", "С678ФХ777", "2"),
-        "day": "2026-08-22",
+        "car": ("Skoda Octavia", "C678XH777", "2"),
+        "day": "2026-08-30",
         "status": "Предварительная запись",
         "works": [
             ("Экспресс-мойка", 11, 0, 12, 0),
@@ -211,6 +213,68 @@ ORDERS = [
             ("Химчистка 1го сидения (Ткань)", 12, 30, 14, 30),
         ],
         "shop": "Детское кресло не снимать",
+    },
+    # --- 31.08 (сегодня): живая доска — мойка / хим / готово / в работе ---
+    {
+        "client": ("Виктор Григорьев", "9012223344"),
+        "car": ("Mazda CX-5", "H901KM777", "2"),
+        "day": "2026-08-31",
+        "status": "Мойка",
+        "works": [
+            ("Комплексная мойка", 9, 0, 10, 30),
+            ("Уборка салона", 10, 0, 11, 30),
+            ("Химчистка локально", 11, 0, 12, 0),
+        ],
+        "shop": "Пятно на заднем ряду",
+    },
+    {
+        "client": ("Ирина Белова", "9013334455"),
+        "car": ("Chery Tiggo 7 Pro", "A456BE777", "2"),
+        "day": "2026-08-31",
+        "status": "Химчистка",
+        "works": [
+            ("Мойка кузова", 9, 30, 11, 0),
+            ("Детейлинг уборка салона", 10, 30, 16, 0),
+            ("Химчистка двигателя", 14, 0, 16, 30),
+        ],
+        "shop": "Клиент ждёт к 17:00",
+    },
+    {
+        "client": ("Артём Зайцев", "9014445566"),
+        "car": ("Haval Jolion", "K234OP777", "1"),
+        "day": "2026-08-31",
+        "status": "Принят в работу",
+        "works": [
+            ("Экспресс-мойка", 12, 0, 13, 0),
+            ("Быстрая сухая керамика", 12, 45, 14, 15),
+            ("Krytex лобовое стекло", 14, 0, 15, 0),
+        ],
+        "shop": None,
+    },
+    # --- 01–02.09: предзаписи на неделю ---
+    {
+        "client": ("Светлана Романова", "9015556677"),
+        "car": ("Geely Coolray", "M789TY777", "1"),
+        "day": "2026-09-01",
+        "status": "Предварительная запись",
+        "works": [
+            ("Комплексная мойка", 10, 0, 11, 30),
+            ("Тонировка · Лобовое стекло", 11, 0, 14, 0),
+            ("Тонировка · Заднее стекло", 13, 30, 16, 30),
+        ],
+        "shop": "Плёнка 50% сзади",
+    },
+    {
+        "client": ("Максим Кузьмин", "9016667788"),
+        "car": ("Toyota Land Cruiser Prado", "T012YB777", "4"),
+        "day": "2026-09-02",
+        "status": "Предварительная запись",
+        "works": [
+            ("Комплексная мойка", 9, 0, 11, 0),
+            ("Восстановительная полировка", 10, 0, 17, 0),
+            ("Керамика на кузов (2 слоя)", 16, 0, 19, 0),
+        ],
+        "shop": "Полный кузов, без капота — капот уже в керамике",
     },
 ]
 
@@ -227,8 +291,13 @@ def find_or_create_client(token: str, name: str, phone: str) -> int:
 
 
 def plate_key(p: str) -> str:
-    table = str.maketrans("АВЕКМНОРСТУХ", "ABEKMHOPCTYX")
+    table = str.maketrans("АВЕКМНОРСТУХавекмнорстух", "ABEKMHOPCTYXABEKMHOPCTYX")
     return (p or "").upper().replace(" ", "").translate(table)
+
+
+def plate_latin(p: str) -> str:
+    """Госномер только латиницей (как на реальных номерах РФ)."""
+    return plate_key(p)
 
 
 def find_or_create_car(
@@ -248,7 +317,7 @@ def find_or_create_car(
         body={
             "client_id": client_id,
             "make_model": make,
-            "plate": plate,
+            "plate": plate_latin(plate),
             "vin": "",
             "category": category,
         },
@@ -307,6 +376,11 @@ SEED_PHONES = {
     "9008889900",
     "9009990011",
     "9011112233",
+    "9012223344",
+    "9013334455",
+    "9014445566",
+    "9015556677",
+    "9016667788",
 }
 
 
@@ -320,11 +394,12 @@ def cleanup_old(token: str) -> int:
         client = o.get("client") or {}
         phone = "".join(ch for ch in (client.get("phone") or "") if ch.isdigit())[-10:]
         due = (o.get("due_date") or "")[:10]
-        if phone in seed_tails and due.startswith("2026-08-"):
+        in_window = due.startswith("2026-08-") or due.startswith("2026-09-")
+        if phone in seed_tails and in_window:
             req("DELETE", f"/crm/orders/{oid}", token=token)
             deleted += 1
             continue
-        if oid in OLD_ORDER_IDS and due.startswith("2026-08-"):
+        if oid in OLD_ORDER_IDS and in_window:
             req("DELETE", f"/crm/orders/{oid}", token=token)
             deleted += 1
     return deleted

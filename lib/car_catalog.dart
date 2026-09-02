@@ -264,31 +264,114 @@ class CarCatalog {
     return list;
   }
 
+  /// Ключ для карты «марка → модели из заказов»: slug или нормализованное имя.
+  static String extrasKey(String make) {
+    final slug = CarBrands.slugFor(make.trim());
+    if (slug != null) return slug;
+    return make
+        .toLowerCase()
+        .replaceAll('ё', 'е')
+        .replaceAll(RegExp(r'[^a-zа-я0-9]+'), '');
+  }
+
+  /// Из строк `make_model` собирает марки и модели **по маркам** (не общий пул).
+  static ({List<String> makes, Map<String, List<String>> modelsByMake}) extrasFromMakeModels(
+    Iterable<String> rows,
+  ) {
+    final makes = <String>{};
+    final byMake = <String, Set<String>>{};
+    for (final row in rows) {
+      final parts = split(row);
+      if (parts.make.isEmpty) continue;
+      makes.add(parts.make);
+      if (parts.model.isEmpty) continue;
+      final key = extrasKey(parts.make);
+      if (key.isEmpty) continue;
+      byMake.putIfAbsent(key, () => <String>{}).add(parts.model);
+    }
+    final map = <String, List<String>>{
+      for (final e in byMake.entries) e.key: (e.value.toList()..sort()),
+    };
+    return (makes: makes.toList()..sort(), modelsByMake: map);
+  }
+
+  static List<String> extrasForMake(
+    String make,
+    Map<String, List<String>> modelsByMake,
+  ) {
+    if (make.trim().isEmpty || modelsByMake.isEmpty) return const [];
+    final key = extrasKey(make);
+    if (key.isEmpty) return const [];
+    return modelsByMake[key] ?? const [];
+  }
+
+  static bool modelBelongsToMake(
+    String make,
+    String model, {
+    Map<String, List<String>> modelsByMake = const {},
+  }) {
+    final m = model.trim();
+    if (m.isEmpty) return true;
+    final list = modelsFor(make, extra: extrasForMake(make, modelsByMake));
+    final lower = m.toLowerCase();
+    return list.any((e) => e.toLowerCase() == lower);
+  }
+
   static List<String> filterBrands(String query, {Iterable<String> extra = const []}) {
     final q = query.trim().toLowerCase();
     final all = <String>{...brands, ...extra};
     final list = all.toList()
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    if (q.isEmpty) return list.take(40).toList();
+    if (q.isEmpty) return list; // полный список — скролл в выпадашке
     final starts = list.where((b) => b.toLowerCase().startsWith(q)).toList();
     final contains = list
         .where((b) => !b.toLowerCase().startsWith(q) && b.toLowerCase().contains(q))
         .toList();
-    return [...starts, ...contains].take(40).toList();
+    return [...starts, ...contains];
   }
 
   static List<String> filterModels(
     String make,
     String query, {
     Iterable<String> extra = const [],
+    Map<String, List<String>> modelsByMake = const {},
   }) {
+    if (make.trim().isEmpty) return const [];
+    final fromDb = extrasForMake(make, modelsByMake);
+    final mergedExtra = <String>{...extra, ...fromDb};
     final q = query.trim().toLowerCase();
-    final list = modelsFor(make, extra: extra);
-    if (q.isEmpty) return list.take(40).toList();
+    final list = modelsFor(make, extra: mergedExtra);
+    if (q.isEmpty) return list;
     final starts = list.where((m) => m.toLowerCase().startsWith(q)).toList();
     final contains = list
         .where((m) => !m.toLowerCase().startsWith(q) && m.toLowerCase().contains(q))
         .toList();
-    return [...starts, ...contains].take(40).toList();
+    return [...starts, ...contains];
+  }
+
+  /// Короткий hint только из моделей этой марки (без чужих вроде X5 у Toyota).
+  static String modelHintFor(String make) {
+    if (make.trim().isEmpty) return 'Сначала марка';
+    final all = modelsFor(make);
+    if (all.isEmpty) return 'выберите или введите';
+    // Предпочитаем «знакомые» модели, иначе первые две по алфавиту.
+    const preferred = {
+      'toyota': ['Camry', 'RAV4'],
+      'bmw': ['X5', '3 Series'],
+      'mercedes': ['E-Class', 'GLE'],
+      'audi': ['A6', 'Q5'],
+      'hyundai': ['Solaris', 'Tucson'],
+      'kia': ['Rio', 'Sportage'],
+      'lada': ['Vesta', 'Granta'],
+      'haval': ['Jolion', 'F7'],
+    };
+    final key = _slugKey(make);
+    final pick = <String>[];
+    for (final p in preferred[key] ?? const <String>[]) {
+      if (all.any((m) => m.toLowerCase() == p.toLowerCase())) pick.add(p);
+      if (pick.length >= 2) break;
+    }
+    if (pick.isEmpty) pick.addAll(all.take(2));
+    return 'напр. ${pick.join(', ')}';
   }
 }

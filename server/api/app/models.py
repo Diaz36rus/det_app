@@ -146,6 +146,7 @@ class CrmCar(Base):
     plate: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     vin: Mapped[str] = mapped_column(String(64), default="", nullable=False)
     category: Mapped[str] = mapped_column(String(8), default="1", nullable=False)
+    year: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     client: Mapped[CrmClient] = relationship(back_populates="cars")
@@ -262,6 +263,10 @@ class CrmService(Base):
     category: Mapped[str] = mapped_column(String(80), default="Прочее", nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     price: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    price2: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    price3: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    price4: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    fixed_price: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     workshop: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 

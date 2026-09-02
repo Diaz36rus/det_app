@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import 'auth_api.dart';
@@ -17,6 +19,7 @@ class AuthController extends ChangeNotifier {
   AuthUser? user;
   AuthTokens? _tokens;
   String? lastError;
+  Completer<bool>? _refreshLock;
 
   bool get isSignedIn => status == AuthStatus.signedIn && user != null;
 
@@ -161,8 +164,50 @@ class AuthController extends ChangeNotifier {
     lastError = null;
   }
 
-  /// На будущее: заголовок Authorization для облачных запросов.
+  /// Заголовок Authorization для облачных запросов.
   String? get accessToken => _tokens?.accessToken;
+
+  String? get refreshToken => _tokens?.refreshToken;
+
+  /// Обновить access по refresh. При 401 — разлогин.
+  /// Параллельные вызовы ждут один общий refresh.
+  Future<bool> refreshAccessToken() async {
+    if (_refreshLock != null) return _refreshLock!.future;
+    final lock = Completer<bool>();
+    _refreshLock = lock;
+    try {
+      final rt = _tokens?.refreshToken;
+      if (rt == null || rt.isEmpty) {
+        await _clearLocal();
+        status = AuthStatus.signedOut;
+        notifyListeners();
+        lock.complete(false);
+        return false;
+      }
+      final refreshed = await _api.refresh(rt);
+      final me = await _api.me(refreshed.accessToken);
+      _tokens = refreshed;
+      user = me;
+      await _store.save(refreshed, me);
+      status = AuthStatus.signedIn;
+      notifyListeners();
+      lock.complete(true);
+      return true;
+    } on AuthApiException catch (e) {
+      if (e.statusCode == 401) {
+        await _clearLocal();
+        status = AuthStatus.signedOut;
+        notifyListeners();
+      }
+      lock.complete(false);
+      return false;
+    } catch (_) {
+      lock.complete(false);
+      return false;
+    } finally {
+      if (identical(_refreshLock, lock)) _refreshLock = null;
+    }
+  }
 
   /// Обновить профиль с /auth/me (после смены названия студии и т.п.).
   Future<bool> refreshMe() async {
@@ -174,6 +219,13 @@ class AuthController extends ChangeNotifier {
       await _store.save(_tokens!, me);
       notifyListeners();
       return true;
+    } on AuthApiException catch (e) {
+      if (e.statusCode == 401) {
+        final ok = await refreshAccessToken();
+        if (!ok) return false;
+        return refreshMe();
+      }
+      return false;
     } catch (_) {
       return false;
     }

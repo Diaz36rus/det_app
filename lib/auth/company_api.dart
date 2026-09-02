@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import 'auth_api.dart';
 import 'auth_models.dart';
+import 'authed_http.dart';
 
 /// API компании: пользователи, роли, назначение.
 class CompanyApi {
@@ -14,20 +15,13 @@ class CompanyApi {
   Uri _u(String path, [Map<String, String>? q]) =>
       Uri.parse('$baseUrl$path').replace(queryParameters: q);
 
-  Map<String, String> _auth(String token) => {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      };
-
   Future<List<AuthUser>> listUsers({
     required String accessToken,
     bool? pending,
   }) async {
     final q = <String, String>{};
     if (pending != null) q['pending'] = pending ? 'true' : 'false';
-    final r = await http
-        .get(_u('/company/users', q.isEmpty ? null : q), headers: _auth(accessToken))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedGet(_u('/company/users', q.isEmpty ? null : q));
     if (r.statusCode != 200) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }
@@ -36,9 +30,7 @@ class CompanyApi {
   }
 
   Future<List<CompanyRole>> listRoles({required String accessToken}) async {
-    final r = await http
-        .get(_u('/company/roles'), headers: _auth(accessToken))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedGet(_u('/company/roles'));
     if (r.statusCode != 200) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }
@@ -47,9 +39,7 @@ class CompanyApi {
   }
 
   Future<List<CompanyBranch>> listBranches({required String accessToken}) async {
-    final r = await http
-        .get(_u('/company/branches'), headers: _auth(accessToken))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedGet(_u('/company/branches'));
     if (r.statusCode != 200) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }
@@ -58,9 +48,7 @@ class CompanyApi {
   }
 
   Future<List<String>> listWorkshops({required String accessToken}) async {
-    final r = await http
-        .get(_u('/company/workshops'), headers: _auth(accessToken))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedGet(_u('/company/workshops'));
     if (r.statusCode != 200) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }
@@ -72,13 +60,10 @@ class CompanyApi {
     required String accessToken,
     required String name,
   }) async {
-    final r = await http
-        .post(
-          _u('/company/branches'),
-          headers: _auth(accessToken),
-          body: jsonEncode({'name': name.trim()}),
-        )
-        .timeout(const Duration(seconds: 15));
+    final r = await authedPost(
+      _u('/company/branches'),
+      body: jsonEncode({'name': name.trim()}),
+    );
     if (r.statusCode != 200 && r.statusCode != 201) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }
@@ -86,9 +71,7 @@ class CompanyApi {
   }
 
   Future<CompanyProfile> getProfile({required String accessToken}) async {
-    final r = await http
-        .get(_u('/company/profile'), headers: _auth(accessToken))
-        .timeout(const Duration(seconds: 15));
+    final r = await authedGet(_u('/company/profile'));
     if (r.statusCode != 200) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }
@@ -99,13 +82,10 @@ class CompanyApi {
     required String accessToken,
     required String name,
   }) async {
-    final r = await http
-        .patch(
-          _u('/company/profile'),
-          headers: _auth(accessToken),
-          body: jsonEncode({'name': name.trim()}),
-        )
-        .timeout(const Duration(seconds: 15));
+    final r = await authedPatch(
+      _u('/company/profile'),
+      body: jsonEncode({'name': name.trim()}),
+    );
     if (r.statusCode != 200) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }
@@ -122,22 +102,20 @@ class CompanyApi {
     List<int> branchIds = const [],
     List<String> workshops = const [],
   }) async {
-    final r = await http
-        .post(
-          _u('/company/users'),
-          headers: _auth(accessToken),
-          body: jsonEncode({
-            'email': email.trim().toLowerCase(),
-            'password': password,
-            'full_name': fullName.trim(),
-            if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
-            'role_names': roleNames,
-            'branch_ids': branchIds,
-            'workshops': workshops,
-            'link_master': true,
-          }),
-        )
-        .timeout(const Duration(seconds: 20));
+    final r = await authedPost(
+      _u('/company/users'),
+      body: jsonEncode({
+        'email': email.trim().toLowerCase(),
+        'password': password,
+        'full_name': fullName.trim(),
+        if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
+        'role_names': roleNames,
+        'branch_ids': branchIds,
+        'workshops': workshops,
+        'link_master': true,
+      }),
+      timeout: const Duration(seconds: 20),
+    );
     if (r.statusCode != 200 && r.statusCode != 201) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }
@@ -151,18 +129,16 @@ class CompanyApi {
     List<int> branchIds = const [],
     List<String> workshops = const [],
   }) async {
-    final r = await http
-        .patch(
-          _u('/company/users/$userId/assign'),
-          headers: _auth(accessToken),
-          body: jsonEncode({
-            'role_names': roleNames,
-            'branch_ids': branchIds,
-            'workshops': workshops,
-            'link_master': true,
-          }),
-        )
-        .timeout(const Duration(seconds: 20));
+    final r = await authedPatch(
+      _u('/company/users/$userId/assign'),
+      body: jsonEncode({
+        'role_names': roleNames,
+        'branch_ids': branchIds,
+        'workshops': workshops,
+        'link_master': true,
+      }),
+      timeout: const Duration(seconds: 20),
+    );
     if (r.statusCode != 200) {
       throw AuthApiException(_err(r), statusCode: r.statusCode);
     }

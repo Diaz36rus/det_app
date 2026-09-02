@@ -3,12 +3,12 @@ const kSyncQrScheme = 'detapp';
 const kSyncQrHost = 'connect';
 const kInviteQrHost = 'invite';
 const kSyncQrPrefix = 'DETAPP|'; // устаревший текстовый формат
-const kAndroidPackage = 'com.example.det_app';
+const kAndroidPackage = 'ru.detapp.app';
 
 /// Облачный QR приглашения: http://api…/join?slug=… → страница → detapp://invite?slug=
 String encodeInviteQrPayload({
   required String slug,
-  String apiBase = 'http://api.det-app.ru',
+  String apiBase = 'https://api.det-app.ru',
 }) {
   final s = slug.trim().toLowerCase();
   if (s.isEmpty) return '';
