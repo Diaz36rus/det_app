@@ -29,6 +29,13 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 121,
+    version: '1.0.1',
+    items: [
+      'Android / RuStore: убрано REQUEST_INSTALL_PACKAGES — обновление только через магазин',
+    ],
+  ),
+  PatchRelease(
     build: 120,
     version: '1.0.1',
     items: [

@@ -1,8 +1,12 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- LAN sync + обновления APK по Wi‑Fi -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- LAN sync + сеть -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- RuStore / Play: самоустановка APK запрещена. Явно снимаем, если плагин (open_filex и т.п.) тянет permission. -->
+    <uses-permission
+        android:name="android.permission.REQUEST_INSTALL_PACKAGES"
+        tools:node="remove"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <application
         android:label="Det App"

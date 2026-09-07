@@ -174,6 +174,11 @@ class UpdateService {
     if (!Platform.isAndroid) {
       throw StateError('prepareAndroidUpdate только для Android');
     }
+    if (await InstallSource.isFromAppStore()) {
+      throw StateError(
+        'Установка из магазина: облачный APK отключён. Обновите через RuStore.',
+      );
+    }
     if (!manifest.hasAndroidPack) {
       throw StateError('В манифесте нет пакета Android');
     }
@@ -211,6 +216,11 @@ class UpdateService {
 
   /// Открыть системный установщик APK.
   Future<String> openAndroidInstaller(PreparedApkUpdate prepared) async {
+    if (await InstallSource.isFromAppStore()) {
+      throw StateError(
+        'Установка из магазина: облачный APK отключён. Обновите через RuStore.',
+      );
+    }
     await markPatchNotesUpdateFrom();
     final r = await OpenFilex.open(prepared.apkPath);
     if (r.type != ResultType.done) {
