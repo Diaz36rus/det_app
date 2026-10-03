@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from jwt import InvalidTokenError
 from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user, user_permission_codes
-from app.models import Branch, Company, CrmMaster, Role, User, UserBranch
+from app.models import Branch, Company, CrmMaster, User, UserBranch
 from app.permissions_catalog import PERMISSIONS
 from app.phone_util import looks_like_email, phone_digits10
 from app.schemas import (
@@ -24,9 +24,13 @@ from app.security import (
     hash_password,
     verify_password,
 )
+from app.rate_limit import client_ip, hit, limit_by_ip, reset
 from app.studio_provision import provision_studio
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Сверка с фиктивным хэшем, когда логин не найден: одинаковое время ответа.
+_DUMMY_HASH = hash_password("detapp-timing-guard")
 
 
 def _user_out(user: User, db: Session | None = None) -> UserOut:
@@ -75,13 +79,20 @@ def _find_user_by_login(db: Session, raw: str) -> User | None:
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest, db: Session = Depends(get_db)):
+def login(body: LoginRequest, request: Request, db: Session = Depends(get_db)):
     raw = (body.login or (str(body.email) if body.email else "") or "").strip()
     if not raw:
         raise HTTPException(status_code=422, detail="Укажите email или телефон")
+    hit(f"login-ip:{client_ip(request)}", 30, 300)
+    login_key = f"login-id:{raw.lower()[:120]}"
+    hit(login_key, 10, 900)
     user = _find_user_by_login(db, raw)
-    if user is None or not verify_password(body.password, user.password_hash):
+    if user is None:
+        verify_password(body.password, _DUMMY_HASH)
         raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+    if not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
+    reset(login_key)
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Пользователь отключён")
     if user.company_id and not user.is_platform_admin:
@@ -94,7 +105,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post("/refresh", response_model=TokenResponse, dependencies=[Depends(limit_by_ip("refresh", 60, 60))])
 def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
     try:
         payload = decode_token(body.refresh_token)
@@ -107,6 +118,10 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise HTTPException(status_code=401, detail="Пользователь не найден")
+    if user.company_id and not user.is_platform_admin:
+        company = db.get(Company, user.company_id)
+        if company is not None and not company.is_active:
+            raise HTTPException(status_code=403, detail="Студия отключена администратором платформы")
     return TokenResponse(
         access_token=create_access_token(user.id),
         refresh_token=create_refresh_token(user.id),
@@ -118,7 +133,7 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _user_out(user, db)
 
 
-@router.get("/studio-lookup", response_model=StudioLookupOut)
+@router.get("/studio-lookup", response_model=StudioLookupOut, dependencies=[Depends(limit_by_ip("studio-lookup", 30, 60))])
 def studio_lookup(slug: str, db: Session = Depends(get_db)):
     s = (slug or "").strip().lower()
     if len(s) < 2:
@@ -129,7 +144,7 @@ def studio_lookup(slug: str, db: Session = Depends(get_db)):
     return StudioLookupOut(id=company.id, name=company.name, slug=company.slug, is_active=company.is_active)
 
 
-@router.post("/register-studio", response_model=TokenResponse)
+@router.post("/register-studio", response_model=TokenResponse, dependencies=[Depends(limit_by_ip("register-studio", 5, 3600))])
 def register_studio(body: RegisterStudioRequest, db: Session = Depends(get_db)):
     """Клиент создаёт свою студию и сразу входит как её владелец."""
     _, _, owner = provision_studio(
@@ -149,7 +164,7 @@ def register_studio(body: RegisterStudioRequest, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/request-access", response_model=TokenResponse)
+@router.post("/request-access", response_model=TokenResponse, dependencies=[Depends(limit_by_ip("request-access", 10, 3600))])
 def request_access(body: AccessRequest, db: Session = Depends(get_db)):
     """Сотрудник подключается к компании и ждёт назначения должности/цеха."""
     slug = (body.company_slug or "demo").strip().lower()

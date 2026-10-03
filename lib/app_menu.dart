@@ -24,6 +24,8 @@ class AppMenuIds {
   static const studio = 13;
   /// Уведомления (inbox + долги).
   static const notifications = 14;
+  /// Лиды студии (R2 inbox).
+  static const leads = 15;
   static const workshop = 100;
 
   /// На облегчённом телефоне (ПК + мобилка) эти экраны только на десктопе.

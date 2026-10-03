@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -11,6 +12,7 @@ from app.config import settings
 from app.db import get_db
 from app.deps import get_current_user, require_platform_admin
 from app.models import Company, User, BugReport
+from app.rate_limit import limit_by_ip
 from app.security import decode_token
 from jwt import InvalidTokenError
 
@@ -86,13 +88,13 @@ def _require_list_access(
     if user is not None and user.is_platform_admin:
         return True
     expected = (settings.release_upload_token or "").strip()
-    if expected and x_release_token and x_release_token.strip() == expected:
+    if expected and x_release_token and hmac.compare_digest(x_release_token.strip(), expected):
         return True
     raise HTTPException(status_code=403, detail="Нужен platform admin или X-Release-Token")
 
 
-@router.post("", response_model=BugReportOut)
-@router.post("/", response_model=BugReportOut)
+@router.post("", response_model=BugReportOut, dependencies=[Depends(limit_by_ip("bugs", 20, 600))])
+@router.post("/", response_model=BugReportOut, dependencies=[Depends(limit_by_ip("bugs", 20, 600))])
 def create_bug(
     body: BugReportCreate,
     db: Session = Depends(get_db),

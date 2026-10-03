@@ -67,6 +67,23 @@ class CrmApi {
     return CrmMaster.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
   }
 
+  Future<CrmMaster> setMyOnShift(bool onShift) async {
+    final r = await authedPut(
+      _u('/crm/me/on-shift'),
+      body: jsonEncode({'on_shift': onShift}),
+      timeout: const Duration(seconds: 15),
+    );
+    _ensure(r);
+    return CrmMaster.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<List<CrmMaster>> listMastersOnShift() async {
+    final r = await authedGet(_u('/crm/masters/on-shift'), timeout: const Duration(seconds: 15));
+    _ensure(r);
+    final list = jsonDecode(utf8.decode(r.bodyBytes)) as List;
+    return list.map((e) => CrmMaster.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
   Future<void> deleteMaster(int id) async {
     final r = await authedDelete(_u('/crm/masters/$id'), timeout: const Duration(seconds: 15));
     _ensure(r);
@@ -160,6 +177,8 @@ class CrmApi {
     String status = 'Принят в работу',
     String dueDate = '',
     List<int> masterIds = const [],
+    String leadSource = '',
+    double depositRequired = 0,
   }) async {
     final r = await authedPost(_u('/crm/orders'), body: _jsonBody({
             'client_id': clientId,
@@ -168,6 +187,8 @@ class CrmApi {
             'notes': notes,
             'due_date': dueDate,
             'master_ids': masterIds,
+            'lead_source': leadSource,
+            'deposit_required': depositRequired,
             'items': [for (final e in items) Map<String, Object?>.from(e.toJson())],
           }), timeout: const Duration(seconds: 15));
     _ensure(r);
@@ -290,6 +311,7 @@ class CrmApi {
     String category = 'Прочее',
     double minQty = 0,
     double metersPerRoll = 0,
+    double unitCost = 0,
   }) async {
     final r = await authedPost(_u('/crm/inventory'), body: jsonEncode({
             'name': name,
@@ -298,6 +320,7 @@ class CrmApi {
             'category': category,
             'min_qty': minQty,
             'meters_per_roll': metersPerRoll,
+            'unit_cost': unitCost,
           }), timeout: const Duration(seconds: 15));
     _ensure(r);
     return CrmInventoryItem.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
@@ -611,6 +634,187 @@ class CrmApi {
     _ensure(r);
   }
 
+  Future<Map<String, dynamic>> getOrderMargin(int orderId) async {
+    final r = await authedGet(_u('/crm/orders/$orderId/margin'), timeout: const Duration(seconds: 15));
+    _ensure(r);
+    return Map<String, dynamic>.from(jsonDecode(utf8.decode(r.bodyBytes)) as Map);
+  }
+
+  Future<List<Map<String, dynamic>>> listStudioLeads({String? status}) async {
+    final q = status == null || status.isEmpty ? null : {'status': status};
+    final r = await authedGet(_u('/crm/leads', q), timeout: const Duration(seconds: 15));
+    _ensure(r);
+    final list = jsonDecode(utf8.decode(r.bodyBytes)) as List;
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<int> createStudioLead({
+    required String name,
+    String phone = '',
+    String carLabel = '',
+    String leadSource = '',
+    String note = '',
+  }) async {
+    final r = await authedPost(
+      _u('/crm/leads'),
+      body: jsonEncode({
+        'name': name,
+        'phone': phone,
+        'car_label': carLabel,
+        'lead_source': leadSource,
+        'note': note,
+      }),
+      timeout: const Duration(seconds: 15),
+    );
+    _ensure(r);
+    final map = jsonDecode(utf8.decode(r.bodyBytes)) as Map;
+    return (map['id'] as num).toInt();
+  }
+
+  Future<void> patchStudioLead(int id, Map<String, dynamic> body) async {
+    final r = await authedPatch(_u('/crm/leads/$id'), body: _jsonBody(_asJsonMap(body)), timeout: const Duration(seconds: 15));
+    _ensure(r);
+  }
+
+  Future<void> deleteStudioLead(int id) async {
+    final r = await authedDelete(_u('/crm/leads/$id'), timeout: const Duration(seconds: 15));
+    _ensure(r);
+  }
+
+  Future<List<Map<String, dynamic>>> listCarWarranties(int carId) async {
+    final r = await authedGet(_u('/crm/warranties', {'car_id': '$carId'}), timeout: const Duration(seconds: 15));
+    _ensure(r);
+    final list = jsonDecode(utf8.decode(r.bodyBytes)) as List;
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<int> createCarWarranty({
+    required int carId,
+    int? orderId,
+    String kind = 'Керамика',
+    String title = '',
+    String batch = '',
+    required String startedAt,
+    int months = 12,
+    String note = '',
+  }) async {
+    final r = await authedPost(
+      _u('/crm/warranties'),
+      body: jsonEncode({
+        'car_id': carId,
+        if (orderId != null) 'order_id': orderId,
+        'kind': kind,
+        'title': title,
+        'batch': batch,
+        'started_at': startedAt,
+        'months': months,
+        'note': note,
+      }),
+      timeout: const Duration(seconds: 15),
+    );
+    _ensure(r);
+    final map = jsonDecode(utf8.decode(r.bodyBytes)) as Map;
+    return (map['id'] as num).toInt();
+  }
+
+  Future<void> deleteCarWarranty(int id) async {
+    final r = await authedDelete(_u('/crm/warranties/$id'), timeout: const Duration(seconds: 15));
+    _ensure(r);
+  }
+
+  Future<List<Map<String, dynamic>>> listUpcomingWarranties({int withinDays = 14}) async {
+    final r = await authedGet(
+      _u('/crm/warranties/upcoming', {'within_days': '$withinDays'}),
+      timeout: const Duration(seconds: 15),
+    );
+    _ensure(r);
+    final list = jsonDecode(utf8.decode(r.bodyBytes)) as List;
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<void> patchWarranty(int id, Map<String, dynamic> body) async {
+    final r = await authedPatch(
+      _u('/crm/warranties/$id'),
+      body: _jsonBody(_asJsonMap(body)),
+      timeout: const Duration(seconds: 15),
+    );
+    _ensure(r);
+  }
+
+  Future<List<Map<String, dynamic>>> listPayrollRules() async {
+    final r = await authedGet(_u('/crm/payroll-rules'), timeout: const Duration(seconds: 15));
+    _ensure(r);
+    final list = jsonDecode(utf8.decode(r.bodyBytes)) as List;
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<int> createPayrollRule({
+    required String workshop,
+    String serviceName = '',
+    String mode = 'percent',
+    required double value,
+    String label = '',
+  }) async {
+    final r = await authedPost(
+      _u('/crm/payroll-rules'),
+      body: jsonEncode({
+        'workshop': workshop,
+        'service_name': serviceName,
+        'mode': mode,
+        'value': value,
+        'label': label,
+      }),
+      timeout: const Duration(seconds: 15),
+    );
+    _ensure(r);
+    final map = jsonDecode(utf8.decode(r.bodyBytes)) as Map;
+    return (map['id'] as num).toInt();
+  }
+
+  Future<void> deletePayrollRule(int id) async {
+    final r = await authedDelete(_u('/crm/payroll-rules/$id'), timeout: const Duration(seconds: 15));
+    _ensure(r);
+  }
+
+  Future<NotifyClientResult> notifyOrderClient(
+    int orderId, {
+    required String kind,
+    String text = '',
+  }) async {
+    final r = await authedPost(
+      _u('/crm/orders/$orderId/notify-client'),
+      body: jsonEncode({'kind': kind, 'text': text}),
+      timeout: const Duration(seconds: 20),
+    );
+    _ensure(r);
+    return NotifyClientResult.fromJson(jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>);
+  }
+
+  Future<Map<String, dynamic>> telegramBindLink(int clientId) async {
+    final r = await authedPost(
+      _u('/crm/clients/$clientId/telegram-bind-link'),
+      body: '{}',
+      timeout: const Duration(seconds: 15),
+    );
+    _ensure(r);
+    return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> clientNotifyChannels(int clientId) async {
+    final r = await authedGet(
+      _u('/crm/clients/$clientId/notify-channels'),
+      timeout: const Duration(seconds: 15),
+    );
+    _ensure(r);
+    return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> notifyPlatformStatus() async {
+    final r = await authedGet(_u('/crm/notify/status'), timeout: const Duration(seconds: 10));
+    _ensure(r);
+    return jsonDecode(utf8.decode(r.bodyBytes)) as Map<String, dynamic>;
+  }
+
   void _ensure(http.Response r) {
     if (r.statusCode >= 200 && r.statusCode < 300) return;
     var msg = 'Ошибка CRM (${r.statusCode})';
@@ -623,4 +827,37 @@ class CrmApi {
     } catch (_) {}
     throw CrmApiException(msg, statusCode: r.statusCode);
   }
+}
+
+class NotifyClientResult {
+  final bool ok;
+  final String channel;
+  final String detail;
+  final String? bindUrl;
+  final String text;
+  final bool telegramLinked;
+  final bool botReady;
+  final bool smsReady;
+
+  const NotifyClientResult({
+    required this.ok,
+    required this.channel,
+    required this.detail,
+    this.bindUrl,
+    required this.text,
+    required this.telegramLinked,
+    required this.botReady,
+    required this.smsReady,
+  });
+
+  factory NotifyClientResult.fromJson(Map<String, dynamic> j) => NotifyClientResult(
+        ok: j['ok'] == true,
+        channel: j['channel']?.toString() ?? 'none',
+        detail: j['detail']?.toString() ?? '',
+        bindUrl: j['bind_url']?.toString(),
+        text: j['text']?.toString() ?? '',
+        telegramLinked: j['telegram_linked'] == true,
+        botReady: j['bot_ready'] == true,
+        smsReady: j['sms_ready'] == true,
+      );
 }

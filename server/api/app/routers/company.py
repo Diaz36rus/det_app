@@ -25,6 +25,20 @@ from app.seed import _set_role_permissions
 
 router = APIRouter(prefix="/company", tags=["company"])
 
+PUBLIC_BASE = "https://api.det-app.ru"
+
+
+def _company_out(company: Company) -> CompanyOut:
+    return CompanyOut(
+        id=company.id,
+        name=company.name,
+        slug=company.slug,
+        is_active=company.is_active,
+        booking_enabled=bool(getattr(company, "booking_enabled", True)),
+        booking_url=f"{PUBLIC_BASE}/book/{company.slug}",
+        api_key_set=bool((getattr(company, "api_key", None) or "").strip()),
+    )
+
 KNOWN_WORKSHOPS = (
     "Мойка",
     "Химчистка",
@@ -111,6 +125,22 @@ def _ensure_company_user(user: User, db: Session, company_id: int | None = None)
     return _resolve_company_id(user, db, company_id)
 
 
+def _assert_can_grant(actor: User, codes) -> None:
+    """Нельзя выдать права, которых нет у самого actor (защита от эскалации)."""
+    if actor.is_platform_admin:
+        return
+    missing = sorted(set(codes) - user_permission_codes(actor))
+    if missing:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Нельзя выдать права, которых нет у вас: {', '.join(missing)}",
+        )
+
+
+def _role_codes(roles) -> set[str]:
+    return {p.code for r in roles for p in r.permissions}
+
+
 @router.get("/permissions", response_model=list[PermissionOut])
 def list_permissions(
     _: User = Depends(get_current_user),
@@ -134,7 +164,7 @@ def get_profile(
     company = db.get(Company, cid)
     if company is None:
         raise HTTPException(status_code=404, detail="Студия не найдена")
-    return company
+    return _company_out(company)
 
 
 @router.patch("/profile", response_model=CompanyOut)
@@ -153,9 +183,11 @@ def patch_profile(
         if len(name) < 2:
             raise HTTPException(status_code=400, detail="Слишком короткое название")
         company.name = name
+    if body.booking_enabled is not None:
+        company.booking_enabled = bool(body.booking_enabled)
     db.commit()
     db.refresh(company)
-    return company
+    return _company_out(company)
 
 
 @router.get("/branches", response_model=list[BranchOut])
@@ -219,6 +251,7 @@ def create_role(
     exists = db.scalar(select(Role).where(Role.company_id == company_id, Role.name == name))
     if exists:
         raise HTTPException(status_code=400, detail="Роль с таким именем уже есть")
+    _assert_can_grant(user, body.permission_codes)
     role = Role(company_id=company_id, name=name, is_system=False)
     db.add(role)
     db.flush()
@@ -246,9 +279,24 @@ def update_role(
     )
     if role is None:
         raise HTTPException(status_code=404, detail="Роль не найдена")
+    # Роль сильнее actor (например «Владелец») править нельзя.
+    _assert_can_grant(user, _role_codes([role]))
     if body.name is not None:
-        role.name = body.name.strip()
+        new_name = body.name.strip()
+        if role.is_system and new_name != role.name:
+            raise HTTPException(status_code=400, detail="Системную роль переименовать нельзя")
+        if len(new_name) < 2:
+            raise HTTPException(status_code=400, detail="Слишком короткое название роли")
+        clash = db.scalar(
+            select(Role.id).where(
+                Role.company_id == company_id, Role.name == new_name, Role.id != role.id
+            )
+        )
+        if clash:
+            raise HTTPException(status_code=400, detail="Роль с таким именем уже есть")
+        role.name = new_name
     if body.permission_codes is not None:
+        _assert_can_grant(user, body.permission_codes)
         by_code = {p.code: p for p in db.scalars(select(Permission)).all()}
         _set_role_permissions(db, role, body.permission_codes, by_code)
     db.commit()
@@ -270,6 +318,7 @@ def delete_role(
         raise HTTPException(status_code=404, detail="Роль не найдена")
     if role.is_system:
         raise HTTPException(status_code=400, detail="Системную роль удалять нельзя")
+    _assert_can_grant(user, _role_codes([role]))
     db.delete(role)
     db.commit()
     return {"ok": True}
@@ -341,6 +390,7 @@ def create_user(
 
     if not roles:
         raise HTTPException(status_code=400, detail="Укажите хотя бы одну должность")
+    _assert_can_grant(user, _role_codes(roles))
 
     workshops = [w.strip() for w in body.workshops if w and w.strip()]
     bad = [w for w in workshops if w not in KNOWN_WORKSHOPS]
@@ -439,12 +489,19 @@ def assign_user(
         raise HTTPException(status_code=400, detail="Укажите хотя бы одну должность")
 
     roles = db.scalars(
-        select(Role).where(Role.company_id == cid, Role.name.in_(role_names))
+        select(Role)
+        .where(Role.company_id == cid, Role.name.in_(role_names))
+        .options(selectinload(Role.permissions))
     ).all()
     found = {r.name for r in roles}
     missing = [n for n in role_names if n not in found]
     if missing:
         raise HTTPException(status_code=400, detail=f"Нет ролей: {', '.join(missing)}")
+    # Нельзя трогать того, у кого прав больше (владельца), и выдавать чужие права.
+    _assert_can_grant(user, _role_codes(target.roles))
+    _assert_can_grant(user, _role_codes(roles))
+    if target.id == user.id and not user.is_platform_admin and "users.manage" not in _role_codes(roles):
+        raise HTTPException(status_code=400, detail="Нельзя снять с себя управление сотрудниками")
 
     # заменить должности
     db.execute(delete(UserRole).where(UserRole.user_id == target.id))
@@ -492,7 +549,7 @@ def assign_user(
         # должности без link_master, но цеха заданы — всё равно пишем в master
         role_csv = ", ".join(workshops)
         master = db.get(CrmMaster, target.master_id) if target.master_id else None
-        if master is None:
+        if master is None or master.company_id != cid:
             master = CrmMaster(
                 company_id=cid,
                 name=target.full_name or target.email,

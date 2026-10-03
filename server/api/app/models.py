@@ -25,6 +25,8 @@ class Company(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     slug: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    api_key: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    booking_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     branches: Mapped[list[Branch]] = relationship(back_populates="company")
@@ -130,6 +132,8 @@ class CrmClient(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     is_vip: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    telegram_chat_id: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    telegram_linked_at: Mapped[str] = mapped_column(String(32), default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     company: Mapped[Company] = relationship(back_populates="crm_clients")
@@ -187,6 +191,8 @@ class CrmOrder(Base):
     receptionist_id: Mapped[int | None] = mapped_column(
         ForeignKey("crm_masters.id"), nullable=True, index=True
     )
+    lead_source: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    deposit_required: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -253,6 +259,7 @@ class CrmMaster(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     role: Mapped[str] = mapped_column(String(255), default="Универсал", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    on_shift: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class CrmService(Base):
@@ -321,6 +328,7 @@ class CrmInventoryItem(Base):
     category: Mapped[str] = mapped_column(String(80), default="Прочее", nullable=False)
     min_qty: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     meters_per_roll: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    unit_cost: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
 
 class CrmFilmRoll(Base):
@@ -406,6 +414,21 @@ class CrmPromocode(Base):
     code: Mapped[str] = mapped_column(String(80), nullable=False)
     discount_percent: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     discount_fixed: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class CrmPayrollRule(Base):
+    """Правила начисления ЗП по цеху/услуге."""
+
+    __tablename__ = "crm_payroll_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    workshop: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    service_name: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    mode: Mapped[str] = mapped_column(String(20), default="percent", nullable=False)
+    value: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
 
@@ -524,6 +547,70 @@ class BugReport(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class CrmWebhookEndpoint(Base):
+    """Исходящие вебхуки студии (заказы, лиды)."""
+
+    __tablename__ = "crm_webhook_endpoints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    secret: Mapped[str] = mapped_column(String(128), default="", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    events: Mapped[str] = mapped_column(
+        String(200),
+        default="order.created,order.status_changed,lead.created",
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmStudioLead(Base):
+    """Лиды студии (воронка до заказа)."""
+
+    __tablename__ = "crm_studio_leads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    phone: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    car_label: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    lead_source: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    status: Mapped[str] = mapped_column(String(80), default="new", nullable=False)
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crm_orders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class CrmCarWarranty(Base):
+    """Гарантии на авто / работы."""
+
+    __tablename__ = "crm_car_warranties"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False, index=True)
+    car_id: Mapped[int] = mapped_column(
+        ForeignKey("crm_cars.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crm_orders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(80), default="", nullable=False)
+    title: Mapped[str] = mapped_column(String(200), default="", nullable=False)
+    batch: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    started_at: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    months: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    ends_at: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    reminder_sent: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SiteLead(Base):

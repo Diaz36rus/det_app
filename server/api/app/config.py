@@ -1,5 +1,12 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_INSECURE_DEFAULTS = {
+    "change-me-in-production",
+    "change_me_long_random_jwt_secret",
+    "ChangeMeNow123!",
+    "change_me_release_upload_token",
+}
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -18,6 +25,36 @@ class Settings(BaseSettings):
     releases_dir: str = "/data/releases"
     public_base_url: str = "https://api.det-app.ru"
     release_upload_token: str = ""
+    # Swagger /docs в production по умолчанию выключен.
+    enable_docs: bool = False
+
+    # Telegram bot (платформенный, multi-tenant через deep-link)
+    telegram_bot_token: str = ""
+    telegram_bot_username: str = ""
+    telegram_bind_secret: str = ""
+    # setWebhook(secret_token=…) → заголовок X-Telegram-Bot-Api-Secret-Token
+    telegram_webhook_secret: str = ""
+    # SMS fallback: POST JSON {phone, text}; Authorization: Bearer key
+    sms_api_url: str = ""
+    sms_api_key: str = ""
+
+    @property
+    def is_production(self) -> bool:
+        return self.app_env.strip().lower() in ("production", "prod")
+
+    def assert_safe_for_production(self) -> None:
+        if not self.is_production:
+            return
+        problems: list[str] = []
+        if self.jwt_secret in _INSECURE_DEFAULTS or len(self.jwt_secret) < 32:
+            problems.append("JWT_SECRET (нужно ≥32 случайных символов)")
+        if self.platform_admin_password in _INSECURE_DEFAULTS or len(self.platform_admin_password) < 12:
+            problems.append("PLATFORM_ADMIN_PASSWORD (нужно ≥12 символов, не дефолт)")
+        token = self.release_upload_token.strip()
+        if token and (token in _INSECURE_DEFAULTS or len(token) < 20):
+            problems.append("RELEASE_UPLOAD_TOKEN (нужно ≥20 символов)")
+        if problems:
+            raise RuntimeError("Небезопасная конфигурация production: " + "; ".join(problems))
 
 
 settings = Settings()

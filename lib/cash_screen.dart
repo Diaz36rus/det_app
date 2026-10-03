@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'app_datetime.dart';
@@ -402,7 +402,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
     var debts = await DatabaseHelper().getOrderDebts();
     if (!mounted) return;
 
-    Future<void> remind(Map<String, dynamic> d, {required bool whatsapp}) async {
+    Future<void> remind(Map<String, dynamic> d, {required bool pickChannel}) async {
       final id = (d['id'] as num).toInt();
       final debt = (d['debt'] as num?)?.toDouble() ?? 0;
       final text = await DebtReminder.buildTextAsync(
@@ -412,21 +412,17 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
         plate: d['plate']?.toString(),
         car: d['make_model']?.toString(),
       );
-      if (whatsapp) {
-        final r = await DebtReminder.share(
+      if (pickChannel) {
+        if (!mounted) return;
+        final r = await DebtReminder.sharePickChannel(
+          context,
           phone: d['client_phone']?.toString(),
           text: text,
+          title: 'Напоминание о долге',
         );
-        if (!mounted) return;
-        if (r == 'opened') {
-          showAppToast(context, 'Открыт WhatsApp');
-        } else if (r == 'copied_link') {
-          showAppToast(context, 'Ссылка WhatsApp скопирована');
-        } else if (r == 'no_phone') {
-          showAppToast(context, 'Нет телефона — текст скопирован');
-        } else {
-          showAppToast(context, 'Текст скопирован');
-        }
+        if (!mounted || r == 'cancelled') return;
+        final msg = DebtReminder.toastForResult(r);
+        if (msg.isNotEmpty) showAppToast(context, msg);
       } else {
         await DebtReminder.copyText(text);
         if (mounted) showAppToast(context, 'Текст напоминания скопирован');
@@ -482,13 +478,13 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                                 tooltip: 'Скопировать текст',
                                 visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.copy_outlined, size: 18),
-                                onPressed: () => remind(d, whatsapp: false),
+                                onPressed: () => remind(d, pickChannel: false),
                               ),
                               IconButton(
-                                tooltip: 'WhatsApp',
+                                tooltip: 'Отправить клиенту',
                                 visualDensity: VisualDensity.compact,
                                 icon: const Icon(Icons.chat_outlined, size: 18, color: AppColors.success),
-                                onPressed: () => remind(d, whatsapp: true),
+                                onPressed: () => remind(d, pickChannel: true),
                               ),
                               IconButton(
                                 tooltip: 'Оплатить',

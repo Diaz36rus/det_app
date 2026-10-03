@@ -1,7 +1,14 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: detapp
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -29,8 +36,15 @@ services:
       RELEASES_DIR: /data/releases
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://api.det-app.ru}
       RELEASE_UPLOAD_TOKEN: ${RELEASE_UPLOAD_TOKEN}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      TELEGRAM_BIND_SECRET: ${TELEGRAM_BIND_SECRET:-}
+      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+      SMS_API_URL: ${SMS_API_URL:-}
+      SMS_API_KEY: ${SMS_API_KEY:-}
     volumes:
       - releases_data:/data/releases
+    logging: *logging
     depends_on:
       db:
         condition: service_healthy
@@ -46,6 +60,7 @@ services:
       - ./website:/srv/website:ro
       - caddy_data:/data
       - caddy_config:/config
+    logging: *logging
     depends_on:
       - api
 
@@ -64,6 +79,7 @@ services:
       - ./backup/loop.sh:/loop.sh:ro
       - pg_backups:/backups
     entrypoint: ["/bin/sh", "/loop.sh"]
+    logging: *logging
     depends_on:
       db:
         condition: service_healthy

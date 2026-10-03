@@ -3,7 +3,6 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:vector_graphics/vector_graphics.dart';
 
 /// Автомасштаб брендовых SVG: дотягивает иконки с «воздухом» в viewBox,
 /// плотные (BMW/Mini) оставляют scale ≈ 1, без обрезки круга.

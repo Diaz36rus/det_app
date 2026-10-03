@@ -47,3 +47,9 @@ app.*.map.json
 /dist/
 /apk/
 /tools/cache/
+
+# RuStore API key + Telegram notify (copy from rustore_key.example.json)
+/tools/rustore_key.json
+/tools/pepk.jar
+/tools/pepk_out.zip
+/tools/*.pem

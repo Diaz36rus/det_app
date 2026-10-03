@@ -919,7 +919,7 @@ void main() {
       expect(open.statusCode, 200, reason: utf8.decode(open.bodyBytes));
       shift = jsonDecode(utf8.decode(open.bodyBytes)) as Map<String, dynamic>;
     }
-    final shiftId = (shift!['id'] as num).toInt();
+    final shiftId = (shift['id'] as num).toInt();
 
     final invR = await http
         .post(

@@ -310,7 +310,7 @@ class _LoginScreenState extends State<LoginScreen> {
         TextButton(
           onPressed: () async {
             final ok = await openWebsite();
-            if (!context.mounted || ok) return;
+            if (!mounted || ok) return;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text('Не удалось открыть $kWebsiteUrl', style: GoogleFonts.manrope()),

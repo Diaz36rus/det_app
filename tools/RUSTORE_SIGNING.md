@@ -24,5 +24,7 @@ AAB → RuStore. APK → облачные обновления (тот же кл
 
 ## Дальше
 1. ~~HTTPS для `api.det-app.ru`~~ — готово (`https://api.det-app.ru`, `https://det-app.ru`)
-2. Карточка в консоли RuStore (тексты + скрины из `tools/RUSTORE_LISTING.md`)
-3. Залить AAB, пройти модерацию
+2. Карточка: `tools/rustore_listing.json` (тексты) + `tools/rustore_screens/`
+3. Разово: ключ Public API в `tools/rustore_key.json` (из `rustore_key.example.json`)
+4. Релиз в магазин: `tools\ship_store.ps1` (AAB собирается в том же проходе, `whatsNew` из патчноутов)
+5. Подпись AAB в консоли RuStore должна быть уже загружена (иначе метод `/aab` откажет)

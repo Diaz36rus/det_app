@@ -140,6 +140,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
     final mprCtrl = TextEditingController(
       text: '${item?['meters_per_roll'] ?? 0}',
     );
+    final costCtrl = TextEditingController(text: '${item?['unit_cost'] ?? 0}');
     var category = item?['category']?.toString() ??
         initialCategory ??
         InventoryCategories.other;
@@ -264,6 +265,17 @@ class _WarehouseScreenState extends State<WarehouseScreen>
                             ),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: costCtrl,
+                            decoration: InputDecoration(
+                              labelText: 'Себестоимость / ед.',
+                              suffixText: '₽',
+                              helperText: 'Для маржи заказа',
+                              isDense: true,
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          ),
                           if (editing) ...[
                             const SizedBox(height: 8),
                             Text(
@@ -292,6 +304,17 @@ class _WarehouseScreenState extends State<WarehouseScreen>
                             ),
                             keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           ),
+                          const SizedBox(height: 10),
+                          TextField(
+                            controller: costCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Себестоимость / ед.',
+                              suffixText: '₽',
+                              helperText: 'Для маржи заказа',
+                              isDense: true,
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          ),
                         ],
                       ],
                     ),
@@ -316,6 +339,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
     final qty = double.tryParse(qtyCtrl.text.replaceAll(',', '.')) ?? 0;
     final minQty = double.tryParse(minCtrl.text.replaceAll(',', '.')) ?? 0;
     final mpr = double.tryParse(mprCtrl.text.replaceAll(',', '.')) ?? 0;
+    final unitCost = double.tryParse(costCtrl.text.replaceAll(',', '.')) ?? 0;
     final film = InventoryCategories.isFilm(category);
     final resolvedUnit = InventoryUnits.normalize(unit, category: category);
 
@@ -328,6 +352,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
         minQty: minQty,
         category: category,
         metersPerRoll: film ? mpr : 0,
+        unitCost: unitCost,
       );
     } else {
       await DatabaseHelper().addInventoryItem(
@@ -337,6 +362,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
         minQty: minQty,
         category: category,
         metersPerRoll: film ? mpr : 0,
+        unitCost: unitCost,
       );
     }
     await _load(showSpinner: false);

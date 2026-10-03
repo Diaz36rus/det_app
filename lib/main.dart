@@ -16,6 +16,8 @@ import 'app_splash.dart';
 import 'app_theme.dart';
 import 'app_tour.dart';
 import 'app_version.dart';
+import 'on_shift_chip.dart';
+import 'on_shift_controller.dart';
 import 'auth/auth_controller.dart';
 import 'auth/auth_gate.dart';
 import 'backup_helper.dart';
@@ -36,6 +38,7 @@ import 'dev_guard.dart';
 import 'kanban_screen.dart';
 import 'services_screen.dart';
 import 'warehouse_screen.dart';
+import 'leads_screen.dart';
 import 'masters_screen.dart';
 import 'menu_backgrounds.dart';
 import 'orders_screen.dart';
@@ -103,7 +106,8 @@ class _AppStartupState extends State<AppStartup> {
       }
       // Облачная сессия: после bootstrap решаем, нужен ли LAN-хост.
       await AuthController.instance.bootstrap();
-      AuthController.instance.addListener(_syncLanWithCloudMode);
+      AuthController.instance.addListener(_onAuthChanged);
+      await OnShiftController.instance.refresh();
       await _syncLanWithCloudMode();
       // Дотащить локальные баг-репорты, если сеть уже есть.
       unawaited(BugReportsApi.instance.flushPending());
@@ -143,6 +147,11 @@ Future<void> _syncLanWithCloudMode() async {
   } else {
     await SyncController.instance.startHostIfNeeded();
   }
+}
+
+void _onAuthChanged() {
+  unawaited(_syncLanWithCloudMode());
+  unawaited(OnShiftController.instance.refresh());
 }
 
 class _StartupErrorApp extends StatelessWidget {
@@ -227,6 +236,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   String _selectedWorkshop = WORKSHOPS.first;
   DateTime? _newOrderDate;
   TimeOfDay? _newOrderTime;
+  Map<String, dynamic>? _leadPrefill;
   int _openBugs = 0;
   DateTime? _lastBackupAt;
 
@@ -243,6 +253,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
   final List<Map<String, dynamic>> _menuItems = [
     {"id": AppMenuIds.board, "icon": Icons.dashboard_outlined, "label": "Доска", "section": "main"},
     {"id": AppMenuIds.newOrder, "icon": Icons.receipt_long_outlined, "label": "Заказы", "section": "main"},
+    {"id": AppMenuIds.leads, "icon": Icons.inbox_outlined, "label": "Лиды", "section": "main"},
     {"id": AppMenuIds.clients, "icon": Icons.people_outline, "label": "Клиенты", "section": "main"},
     {"id": AppMenuIds.services, "icon": Icons.home_repair_service_outlined, "label": "Услуги", "section": "main"},
     {"id": AppMenuIds.inventory, "icon": Icons.inventory_2_outlined, "label": "Склад", "section": "main"},
@@ -386,6 +397,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       if (_selectedIndex == AppMenuIds.newOrder && id != AppMenuIds.newOrder) {
         _newOrderDate = null;
         _newOrderTime = null;
+        _leadPrefill = null;
       }
       _selectedIndex = id;
     });
@@ -554,14 +566,34 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
       case AppMenuIds.newOrder:
         final d = _newOrderDate;
         final t = _newOrderTime;
+        final lead = _leadPrefill;
         final key = d != null && t != null
-            ? "order_${d.year}-${d.month}-${d.day}_${t.hour}:${t.minute}"
-            : "order_default";
+            ? "order_${d.year}-${d.month}-${d.day}_${t.hour}:${t.minute}_${lead?['id'] ?? ''}"
+            : "order_default_${lead?['id'] ?? ''}";
         return OrdersScreen(
           key: ValueKey(key),
           initialDate: _newOrderDate,
           initialTime: _newOrderTime,
+          initialClientName: lead?['name']?.toString(),
+          initialClientPhone: lead?['phone']?.toString(),
+          initialCarLabel: lead?['car_label']?.toString(),
+          initialLeadSource: lead?['lead_source']?.toString(),
           onNavigateMenu: (i) => _selectMenu(i),
+        );
+      case AppMenuIds.leads:
+        return LeadsScreen(
+          key: const ValueKey(AppMenuIds.leads),
+          onCreateOrder: (lead) async {
+            final id = (lead['id'] as num?)?.toInt();
+            if (id != null) {
+              await DatabaseHelper().updateStudioLead(id, status: 'converted');
+            }
+            if (!mounted) return;
+            setState(() {
+              _leadPrefill = lead;
+              _selectedIndex = AppMenuIds.newOrder;
+            });
+          },
         );
       case AppMenuIds.calendar:
         final cal = _selectedCalendarDate;
@@ -626,6 +658,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
           if (_selectedIndex == AppMenuIds.newOrder && index != AppMenuIds.newOrder) {
             _newOrderDate = null;
             _newOrderTime = null;
+            _leadPrefill = null;
           }
           if (index == AppMenuIds.newOrder) {
             _newOrderDate = null;
@@ -735,6 +768,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 ),
               ),
               ConnStatusDot(onTap: () => showConnStatusSheet(context)),
+              const OnShiftChip(),
             ],
           ),
           const SizedBox(height: 4),
@@ -1729,6 +1763,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             style: AppTheme.pageTitleFor(context, inAppBar: true),
           ),
           actions: [
+            const OnShiftChip(),
             ConnStatusDot(onTap: () => showConnStatusSheet(context)),
             IconButton(
               tooltip: 'Поиск',

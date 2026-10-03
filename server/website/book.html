@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#07040c" />
+  <meta name="description" content="Онлайн-запись в студию через Det App" />
+  <title>Запись — Det App</title>
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/site.css?v=20260915j" />
+</head>
+<body>
+  <header class="top is-solid">
+    <a class="top__brand" href="/">
+      <img src="assets/logo.png" alt="" width="32" height="32" />
+      <span>Det App</span>
+    </a>
+    <nav class="top__nav" style="display:flex">
+      <a href="/#demo">Демо</a>
+      <a class="top__cta" href="/#request">В тест</a>
+    </nav>
+  </header>
+  <main class="panel" id="book-page">
+    <p class="eyebrow">Онлайн-запись</p>
+    <h2 id="book-title">Запись в студию</h2>
+    <p class="panel__lead" id="book-lead">Клиент оставляет заявку. Студия видит её в Det App — это не вход в CRM.</p>
+    <div class="status" id="book-status" data-state="loading">
+      <span class="status__dot" aria-hidden="true"></span>
+      <span class="status__text">Открываем запись…</span>
+    </div>
+    <form class="lead" id="book-form" hidden novalidate>
+      <div class="lead__grid">
+        <label>
+          <span>Имя *</span>
+          <input id="book-name" name="name" type="text" maxlength="200" autocomplete="name" required />
+        </label>
+        <label>
+          <span>Телефон *</span>
+          <input id="book-phone" name="phone" type="tel" maxlength="32" autocomplete="tel" required />
+        </label>
+        <label class="lead__wide">
+          <span>Автомобиль</span>
+          <input id="book-car" name="car" type="text" maxlength="200" placeholder="Марка, модель" />
+        </label>
+        <label>
+          <span>Дата</span>
+          <input id="book-date" name="preferred_date" type="date" />
+        </label>
+        <label>
+          <span>Время</span>
+          <input id="book-time" name="preferred_time" type="time" />
+        </label>
+        <label class="lead__wide">
+          <span>Услуга / комментарий</span>
+          <textarea id="book-note" name="note" rows="3" maxlength="4000" placeholder="Что нужно сделать?"></textarea>
+        </label>
+      </div>
+      <div class="panel__actions">
+        <button class="btn btn--primary" type="submit" id="book-submit">Отправить заявку</button>
+      </div>
+      <p class="invite__msg" id="book-msg" role="status" aria-live="polite"></p>
+    </form>
+    <p class="panel__hint">Отправляя форму, вы соглашаетесь на обработку контакта для связи по записи.</p>
+  </main>
+  <footer class="foot">
+    <div class="foot__links">
+      <a href="/">На главную</a>
+      <a href="/privacy.html">Политика</a>
+    </div>
+  </footer>
+  <script src="js/site.js?v=20260915j" defer></script>
+</body>
+</html>

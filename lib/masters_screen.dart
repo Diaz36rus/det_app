@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
+import 'app_toast.dart';
 import 'database.dart';
+import 'on_shift_controller.dart';
 import 'outsourcers_panel.dart';
 import 'pulse_anchor.dart';
 import 'responsive.dart';
@@ -406,6 +408,7 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
     final roles = splitMasterRoles(m['role']?.toString());
     final masterId = (m['id'] as num).toInt();
     final accent = _masterAccent(roles);
+    final onShift = m['on_shift'] == true || m['on_shift'] == 1;
 
     return PulseAnchor(
       active: isPulseActive(masterId),
@@ -489,7 +492,43 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
                               );
                             }).toList(),
                           ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: onShift ? AppColors.success : AppColors.textDim,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              onShift ? 'На смене' : 'Не на смене',
+                              style: GoogleFonts.manrope(
+                                color: onShift ? AppColors.success : AppColors.textMuted,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Spacer(),
+                            Switch.adaptive(
+                              value: onShift,
+                              activeColor: AppColors.success,
+                              onChanged: (v) async {
+                                final err =
+                                    await OnShiftController.instance.setMasterOnShift(masterId, v);
+                                if (!mounted) return;
+                                if (err != null) {
+                                  showAppToast(context, err);
+                                } else {
+                                  await _loadData();
+                                }
+                              },
+                            ),
+                          ],
+                        ),
                         TextButton.icon(
                           onPressed: () => _editRolesDialog(m),
                           icon: Icon(Icons.badge_outlined, size: 16, color: accent),

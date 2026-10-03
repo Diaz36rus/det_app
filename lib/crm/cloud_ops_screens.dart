@@ -220,10 +220,10 @@ class _OrderSheetHostState extends State<_OrderSheetHost> {
                   setState(() => _busy = true);
                   try {
                     await _api.patchOrder(widget.order.id, {'status': _status});
-                    if (!mounted) return;
+                    if (!context.mounted) return;
                     Navigator.pop(context, true);
                   } catch (e) {
-                    if (!mounted) return;
+                    if (!context.mounted) return;
                     setState(() => _busy = false);
                     ScaffoldMessenger.of(context)
                         .showSnackBar(SnackBar(content: Text('$e'), backgroundColor: AppColors.danger));

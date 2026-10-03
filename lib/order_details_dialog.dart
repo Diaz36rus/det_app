@@ -14,13 +14,16 @@ import 'app_toast.dart';
 import 'auth/auth_controller.dart';
 import 'car_label.dart';
 import 'cash_catalog.dart';
+import 'client_notify.dart';
 import 'crm/cloud_db_bridge.dart';
 import 'database.dart';
 import 'debt_reminder.dart';
 import 'issue_guard.dart';
 import 'master_picker.dart';
+import 'on_shift_controller.dart';
 import 'order_defects_sheet.dart';
 import 'inventory_catalog.dart';
+import 'order_lead_source.dart';
 import 'order_wrap_films_panel.dart';
 import 'outsource_assign_dialog.dart';
 import 'pulse_anchor.dart';
@@ -175,6 +178,16 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   double _discountPercent = 0;
   double _discountFixed = 0;
   String _promoCode = "";
+  String _leadSource = OrderLeadSources.unset;
+  double _depositRequired = 0;
+  Map<String, dynamic> _margin = const {
+    'price': 0.0,
+    'materials': 0.0,
+    'payroll': 0.0,
+    'outsource': 0.0,
+    'margin': 0.0,
+    'margin_pct': 0.0,
+  };
   late TextEditingController _priceController;
   late TextEditingController _autoPayController; // долг по услугам (авто, только чтение)
   late TextEditingController _payAmountController; // ручная сумма «оплатить сейчас»
@@ -243,6 +256,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     _discountPercent = (widget.order['discount_percent'] as num?)?.toDouble() ?? 0;
     _discountFixed = (widget.order['discount_fixed'] as num?)?.toDouble() ?? 0;
     _promoCode = widget.order['promo_code']?.toString() ?? "";
+    _leadSource = OrderLeadSources.normalize(widget.order['lead_source']?.toString());
+    _depositRequired = (widget.order['deposit_required'] as num?)?.toDouble() ?? 0;
     _priceController = TextEditingController(text: widget.order['price'].toString());
     _autoPayController = TextEditingController();
     _payAmountController = TextEditingController();
@@ -322,6 +337,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   Future<void> _loadData() async {
     try {
       _masters = await DatabaseHelper().getAllMastersFull();
+      unawaited(OnShiftController.instance.refresh());
       _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
       await _loadFeedSeen();
       _selectedMasterId = widget.order['master_id'];
@@ -395,6 +411,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       final dbItems = await DatabaseHelper().getOrderItems(widget.order['id']);
       _selectedWorks = dbItems.map((item) => Map<String, dynamic>.from(item)).toList();
       await _reloadPayroll(silent: true);
+      try {
+        _margin = await DatabaseHelper().getOrderMarginBreakdown(widget.order['id'] as int);
+      } catch (e) {
+        debugPrint('margin: $e');
+      }
       // Автоцех только в UI при открытии; мастеру нельзя PATCH workshop → иначе 403
       // и ложный «Не удалось загрузить заказ», хотя карточка уже открыта.
       final persistAutoWorkshop = !_opsRestricted;
@@ -1105,6 +1126,55 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                       'В кассе «начислено» считается по каждому мастеру.',
                       style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
                     ),
+                    if (canEdit) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            final mids = draft
+                                .map((l) => l['master_id'] as int?)
+                                .whereType<int>()
+                                .toList();
+                            final suggested = await DatabaseHelper().calculateWorkshopPayrollSuggestion(
+                              orderId: widget.order['id'] as int,
+                              workshop: workshop,
+                              masterIds: mids.isEmpty ? null : mids,
+                            );
+                            if (suggested.isEmpty) {
+                              if (ctx.mounted) {
+                                showAppToast(ctx, 'Нет правил ЗП — добавьте в Студия или введите вручную');
+                              }
+                              return;
+                            }
+                            setLocal(() {
+                              for (final c in draft) {
+                                (c['ctrl'] as TextEditingController).dispose();
+                              }
+                              draft
+                                ..clear()
+                                ..addAll(
+                                  suggested.map(
+                                    (s) => {
+                                      'master_id': s['master_id'],
+                                      'amount': (s['amount'] as num?)?.toDouble() ?? 0,
+                                      'ctrl': TextEditingController(
+                                        text: ((s['amount'] as num?)?.toDouble() ?? 0)
+                                            .toStringAsFixed(0),
+                                      ),
+                                    },
+                                  ),
+                                );
+                            });
+                          },
+                          icon: const Icon(Icons.calculate_outlined, size: 18),
+                          label: Text(
+                            'Рассчитать',
+                            style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12),
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     for (var i = 0; i < draft.length; i++) ...[
                       if (i > 0) const SizedBox(height: 10),
@@ -2260,25 +2330,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     return picked;
   }
 
-  /// Старый хинт — оставляем для редких мест; лучше [_ensureWorkWorkshop].
-  void _showNeedWorkshopHint() {
-    showDialog(
-      context: context,
-      useRootNavigator: true,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppColors.surface,
-        title: Text('Сначала цех', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
-        content: Text(
-          'У этой услуги не определился цех. Выберите цех на карточке работы или добавьте услугу из прайса.',
-          style: GoogleFonts.manrope(color: AppColors.textMuted),
-        ),
-        actions: [
-          ElevatedButton(onPressed: () => Navigator.pop(context), child: const Text('Понятно')),
-        ],
-      ),
-    );
-  }
-
   /// Сохраняет цех и время одной услуги в базу + пишет в ленту.
   Future<void> _saveWorkSchedule(int index, {String? start, String? end, String? workshop, String? logText}) async {
     final w = _selectedWorks[index];
@@ -2327,7 +2378,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   Future<void> _pickMastersForWork(int index, Map<String, dynamic> w) async {
     final workshop = await _ensureWorkWorkshop(index, w);
-    if (workshop == null || workshop.isEmpty) return;
+    if (!mounted || workshop == null || workshop.isEmpty) return;
     w = _selectedWorks[index];
     if (_opsRestricted && !_editableWorkshops.contains(workshop)) {
       showAppToast(context, 'Мастер может назначать только свой цех');
@@ -2504,7 +2555,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     final itemId = (w['id'] as num?)?.toInt();
     if (itemId == null) return;
     final workshop = await _ensureWorkWorkshop(index, w);
-    if (workshop == null || workshop.isEmpty) return;
+    if (!mounted || workshop == null || workshop.isEmpty) return;
     w = _selectedWorks[index];
     final result = await showOutsourceAssignDialog(
       context,
@@ -2688,7 +2739,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     ? null
                     : () async {
                   final ws = await _ensureWorkWorkshop(index, w);
-                  if (ws == null || ws.isEmpty) return;
+                  if (!mounted || ws == null || ws.isEmpty) return;
                   if (!_canEditWorkshopOps(ws)) {
                     showAppToast(context, 'Мастер может править только свой цех');
                     return;
@@ -2713,7 +2764,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     ? null
                     : () async {
                   final ws = await _ensureWorkWorkshop(index, w);
-                  if (ws == null || ws.isEmpty) return;
+                  if (!mounted || ws == null || ws.isEmpty) return;
                   if (!_canEditWorkshopOps(ws)) {
                     showAppToast(context, 'Мастер может править только свой цех');
                     return;
@@ -2943,7 +2994,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     );
     if (!ok || !mounted) return;
     await _setHandoverValue('handover_notified', true);
-    await DatabaseHelper().addOrderEvent(widget.order['id'], 'WhatsApp: уведомление о готовности');
+    await DatabaseHelper().addOrderEvent(widget.order['id'], 'Клиенту: уведомление о готовности');
     _events = await DatabaseHelper().getOrderEvents(widget.order['id']);
     if (mounted) setState(() {});
   }
@@ -3064,7 +3115,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     ),
                     secondary: isNotify
                         ? IconButton(
-                            tooltip: 'WhatsApp: готов к выдаче',
+                            tooltip: 'Клиенту: готов к выдаче',
                             visualDensity: VisualDensity.compact,
                             icon: const Icon(Icons.chat_outlined, color: AppColors.success, size: 20),
                             onPressed: _notifyReadyWhatsApp,
@@ -3254,19 +3305,19 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       showAppToast(context, 'У клиента нет телефона');
       return;
     }
-    final r = await DebtReminder.share(
+    final r = await DebtReminder.sharePickChannel(
+      context,
       phone: phone,
       text: 'Здравствуйте! Пишем по заказу #${widget.order['id']}.',
+      title: 'Написать клиенту',
     );
-    if (!mounted) return;
+    if (!mounted || r == 'cancelled') return;
     if (r == 'no_phone') {
       showAppToast(context, 'Некорректный телефон');
       return;
     }
-    showAppToast(
-      context,
-      r == 'opened' ? 'WhatsApp открыт' : 'Ссылка/текст скопированы',
-    );
+    final msg = DebtReminder.toastForResult(r);
+    if (msg.isNotEmpty) showAppToast(context, msg);
   }
 
   Future<void> _confirmDeleteThisOrder() async {
@@ -3439,7 +3490,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         return false;
       }
       final ready = await _ensureHandoverCompleteForIssue();
-      if (!ready) return false;
+      if (!mounted || !ready) return false;
     }
     final ok = await tryUpdateOrderStatus(
       context,
@@ -3776,7 +3827,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                   ),
                   _owRoundIconBtn(
                     icon: Icons.chat_bubble_outline_rounded,
-                    tooltip: 'WhatsApp',
+                    tooltip: 'Написать клиенту',
                     onPressed: phone.isEmpty ? null : _contactClient,
                   ),
                 ],
@@ -3819,7 +3870,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 if (_carLocationWorkshop != null) ...[
                   const SizedBox(height: 6),
                   Text(
-                    'Сейчас: ${_carLocationWorkshop}',
+                    'Сейчас: $_carLocationWorkshop',
                     style: GoogleFonts.manrope(
                       color: _carLocationAccent,
                       fontSize: 12,
@@ -3827,27 +3878,33 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     ),
                   ),
                 ],
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
                 Expanded(
-                  child: serviceRows.isEmpty
-                      ? Center(
-                          child: Text(
-                            'Нет услуг',
-                            style: GoogleFonts.manrope(color: AppColors.textDim),
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: [
+                      if (serviceRows.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 28),
+                          child: Center(
+                            child: Text(
+                              'Нет услуг',
+                              style: GoogleFonts.manrope(color: AppColors.textDim),
+                            ),
                           ),
                         )
-                      : ListView.separated(
-                          itemCount: serviceRows.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
-                          itemBuilder: (_, i) {
-                            final w = serviceRows[i];
-                            final price = (w['price'] as num?)?.toDouble() ?? 0;
-                            final done = (w['is_done'] as num?)?.toInt() == 1;
-                            final ws = _resolvedWorkWorkshop(w);
-                            final atCar = _workMatchesCarLocation(w);
-                            final locAccent = _carLocationAccent;
-                            final hasLoc = _carLocationWorkshop != null;
-                            return Opacity(
+                      else
+                        ...List.generate(serviceRows.length, (i) {
+                          final w = serviceRows[i];
+                          final price = (w['price'] as num?)?.toDouble() ?? 0;
+                          final done = (w['is_done'] as num?)?.toInt() == 1;
+                          final ws = _resolvedWorkWorkshop(w);
+                          final atCar = _workMatchesCarLocation(w);
+                          final locAccent = _carLocationAccent;
+                          final hasLoc = _carLocationWorkshop != null;
+                          return Padding(
+                            padding: EdgeInsets.only(bottom: i == serviceRows.length - 1 ? 0 : 10),
+                            child: Opacity(
                               opacity: hasLoc && !atCar ? 0.62 : 1,
                               child: Container(
                                 padding: atCar
@@ -3861,192 +3918,455 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                                       )
                                     : null,
                                 child: Row(
-                              children: [
-                                Container(
-                                  width: 40,
-                                  height: 40,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: [
-                                        (atCar ? locAccent : AppColors.primary).withOpacity(0.28),
-                                        (atCar ? locAccent : AppColors.primaryDeep).withOpacity(0.18),
-                                      ],
-                                    ),
-                                    border: Border.all(
-                                      color: (atCar ? locAccent : AppColors.primary).withOpacity(0.35),
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    _serviceIconFor(w),
-                                    size: 18,
-                                    color: atCar ? locAccent : AppColors.primary,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        w['name']?.toString() ?? '',
-                                        style: GoogleFonts.manrope(
-                                          color: AppColors.text,
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 14,
-                                          decoration: done ? TextDecoration.lineThrough : null,
+                                  children: [
+                                    Container(
+                                      width: 36,
+                                      height: 36,
+                                      alignment: Alignment.center,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: [
+                                            (atCar ? locAccent : AppColors.primary).withOpacity(0.28),
+                                            (atCar ? locAccent : AppColors.primaryDeep).withOpacity(0.18),
+                                          ],
                                         ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        [
-                                          if (ws.isNotEmpty) ws else (done ? 'Выполнено' : 'В заказе'),
-                                          if (atCar) 'сейчас',
-                                        ].join(' · '),
-                                        style: GoogleFonts.manrope(
-                                          color: atCar ? locAccent : AppColors.textDim,
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
+                                        border: Border.all(
+                                          color: (atCar ? locAccent : AppColors.primary).withOpacity(0.35),
                                         ),
                                       ),
-                                    ],
-                                  ),
+                                      child: Icon(
+                                        _serviceIconFor(w),
+                                        size: 17,
+                                        color: atCar ? locAccent : AppColors.primary,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            w['name']?.toString() ?? '',
+                                            style: GoogleFonts.manrope(
+                                              color: AppColors.text,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 13.5,
+                                              decoration: done ? TextDecoration.lineThrough : null,
+                                            ),
+                                            maxLines: 2,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            [
+                                              if (ws.isNotEmpty) ws else (done ? 'Выполнено' : 'В заказе'),
+                                              if (atCar) 'сейчас',
+                                            ].join(' · '),
+                                            style: GoogleFonts.manrope(
+                                              color: atCar ? locAccent : AppColors.textDim,
+                                              fontSize: 11.5,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Text(
+                                      '${_formatMoney(price)} ₽',
+                                      style: GoogleFonts.manrope(
+                                        color: AppColors.text,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 13.5,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                Text(
-                                  '${_formatMoney(price)} ₽',
-                                  style: GoogleFonts.manrope(
-                                    color: AppColors.text,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ],
-                            ),
                               ),
-                            );
+                            ),
+                          );
+                        }),
+                      if (!_opsRestricted) ...[
+                        const SizedBox(height: 10),
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              _priceListOpen = true;
+                              _openEditOrderDialog();
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: AppColors.border.withOpacity(0.85)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.add_rounded, size: 18, color: AppColors.primary.withOpacity(0.95)),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Добавить услугу',
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.textMuted,
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 13.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      Text(
+                        'Итого',
+                        style: GoogleFonts.manrope(
+                          color: AppColors.textDim,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${_formatMoney(_initialPrice)} ₽',
+                        style: GoogleFonts.manrope(
+                          color: AppColors.text,
+                          fontSize: 26,
+                          fontWeight: FontWeight.w800,
+                          height: 1.1,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _owMoneyLine('Предоплата', _paidAmount, muted: true),
+                      const SizedBox(height: 2),
+                      _owMoneyLine(
+                        'Остаток к оплате',
+                        _debt,
+                        color: _debt > 0.01 ? AppColors.danger : AppColors.success,
+                      ),
+                      if (!_opsRestricted) ...[
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String?>(
+                          value: _leadSource.isEmpty ? null : _leadSource,
+                          isExpanded: true,
+                          decoration: const InputDecoration(labelText: 'Источник заказа', isDense: true),
+                          dropdownColor: AppColors.surface2,
+                          items: [
+                            const DropdownMenuItem<String?>(value: null, child: Text('Не указан')),
+                            ...OrderLeadSources.all.map(
+                              (s) => DropdownMenuItem<String?>(value: s, child: Text(s)),
+                            ),
+                          ],
+                          onChanged: (v) async {
+                            final next = v ?? OrderLeadSources.unset;
+                            setState(() => _leadSource = next);
+                            await DatabaseHelper().updateOrderLeadSource(widget.order['id'] as int, next);
+                            widget.order['lead_source'] = next;
                           },
                         ),
-                ),
-                if (!_opsRestricted) ...[
-                  const SizedBox(height: 10),
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () {
-                        _priceListOpen = true;
-                        _openEditOrderDialog();
-                      },
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.border.withOpacity(0.85)),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Маржа',
+                          style: GoogleFonts.manrope(
+                            color: AppColors.textDim,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.add_rounded, size: 18, color: AppColors.primary.withOpacity(0.95)),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Добавить услугу',
+                        const SizedBox(height: 4),
+                        Text(
+                          '${_formatMoney((_margin['margin'] as num?)?.toDouble() ?? 0)} ₽'
+                          '  ·  ${((_margin['margin_pct'] as num?)?.toDouble() ?? 0).toStringAsFixed(0)}%',
+                          style: GoogleFonts.manrope(
+                            color: AppColors.text,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        _owMoneyLine('Материалы', (_margin['materials'] as num?)?.toDouble() ?? 0, muted: true),
+                        _owMoneyLine('ЗП цехов', (_margin['payroll'] as num?)?.toDouble() ?? 0, muted: true),
+                        if (((_margin['outsource'] as num?)?.toDouble() ?? 0) > 0.01)
+                          _owMoneyLine('Аутсорс', (_margin['outsource'] as num?)?.toDouble() ?? 0, muted: true),
+                        if (_depositRequired > 0.01) ...[
+                          const SizedBox(height: 4),
+                          _owMoneyLine('Депозит (нужен)', _depositRequired, muted: true),
+                        ],
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _editDepositRequired,
+                            child: Text(
+                              _depositRequired > 0.01
+                                  ? 'Депозит: ${_formatMoney(_depositRequired)} ₽'
+                                  : 'Задать депозит',
+                              style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: _addWarrantyFromOrder,
+                            child: Text(
+                              'Гарантия на авто',
+                              style: GoogleFonts.manrope(fontSize: 12, fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        _owClientNotifyMenu(),
+                        if (_depositRequired > 0.01 && _paidAmount + 0.01 < _depositRequired)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(
+                              'Депозит не закрыт: нужно ${_formatMoney(_depositRequired)} ₽, внесено ${_formatMoney(_paidAmount)} ₽',
                               style: GoogleFonts.manrope(
-                                color: AppColors.textMuted,
+                                color: AppColors.danger,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w700,
-                                fontSize: 13.5,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                onPressed: _openEditOrderDialog,
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppColors.text,
+                                  side: BorderSide(color: AppColors.border.withOpacity(0.95)),
+                                  backgroundColor: AppColors.bg.withOpacity(0.55),
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: Text(
+                                  'Изменить',
+                                  style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: ElevatedButton(
+                                onPressed: _openPaymentDialog,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: AppColors.onPrimary,
+                                  padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      'Оплата',
+                                      style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Text(
-                  'Итого',
-                  style: GoogleFonts.manrope(
-                    color: AppColors.textDim,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${_formatMoney(_initialPrice)} ₽',
-                  style: GoogleFonts.manrope(
-                    color: AppColors.text,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    height: 1.1,
-                    letterSpacing: -0.5,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                _owMoneyLine('Предоплата', _paidAmount, muted: true),
-                const SizedBox(height: 4),
-                _owMoneyLine(
-                  'Остаток к оплате',
-                  _debt,
-                  color: _debt > 0.01 ? AppColors.danger : AppColors.success,
-                ),
-                if (!_opsRestricted) ...[
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _openEditOrderDialog,
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: AppColors.text,
-                            side: BorderSide(color: AppColors.border.withOpacity(0.95)),
-                            backgroundColor: AppColors.bg.withOpacity(0.55),
-                            padding: const EdgeInsets.symmetric(vertical: 15),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: Text(
-                            'Изменить заказ',
-                            style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13.5),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: _openPaymentDialog,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary,
-                            foregroundColor: AppColors.onPrimary,
-                            padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 12),
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                'Оплата',
-                                style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 13.5),
-                              ),
-                              const SizedBox(width: 6),
-                              const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
-                            ],
-                          ),
-                        ),
-                      ),
+                        const SizedBox(height: 4),
+                      ],
                     ],
                   ),
-                ],
+                ),
               ],
             ),
           ),
         ),
       ],
     );
+  }
+
+  Widget _owClientNotifyMenu() {
+    final orderPayload = <String, dynamic>{
+      ...widget.order,
+      'price': _initialPrice,
+      'paid_amount': _paidAmount,
+    };
+    return PopupMenuButton<String>(
+      tooltip: 'Сообщение клиенту',
+      color: AppColors.surface,
+      offset: const Offset(0, 8),
+      onSelected: (v) {
+        if (v == 'tg_bind') {
+          final cid = (widget.order['client_id'] as num?)?.toInt();
+          if (cid == null) {
+            showAppToast(context, 'Нет клиента');
+            return;
+          }
+          ClientNotify.copyBindLink(context, clientId: cid);
+          return;
+        }
+        ClientNotify.sendForOrder(context, order: orderPayload, kind: v);
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: 'booking',
+          child: Text('Запись', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+        ),
+        PopupMenuItem(
+          value: 'tomorrow',
+          child: Text('Завтра', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+        ),
+        PopupMenuItem(
+          value: 'ready',
+          child: Text('Готов к выдаче', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+        ),
+        if (_debt > 0.01)
+          PopupMenuItem(
+            value: 'debt',
+            child: Text('Долг', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+          ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'tg_bind',
+          child: Text('Привязать Telegram', style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+        ),
+      ],
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border.withOpacity(0.9)),
+          color: AppColors.bg.withOpacity(0.4),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.campaign_outlined, size: 18, color: AppColors.primary.withOpacity(0.95)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Клиенту',
+                style: GoogleFonts.manrope(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5,
+                ),
+              ),
+            ),
+            Icon(Icons.expand_more_rounded, size: 20, color: AppColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editDepositRequired() async {
+    final ctrl = TextEditingController(
+      text: _depositRequired == 0 ? '' : _formatMoney(_depositRequired),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Депозит', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            labelText: 'Нужная предоплата, ₽',
+            helperText: '0 = не требуется',
+            isDense: true,
+          ),
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Сохранить')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    final v = double.tryParse(ctrl.text.replaceAll(' ', '').replaceAll(',', '.')) ?? 0;
+    await DatabaseHelper().updateOrderDepositRequired(widget.order['id'] as int, v);
+    if (!mounted) return;
+    setState(() {
+      _depositRequired = v < 0 ? 0 : v;
+      widget.order['deposit_required'] = _depositRequired;
+    });
+  }
+
+  Future<void> _addWarrantyFromOrder() async {
+    final carId = (_selectedCarId ?? widget.order['car_id'] as num?)?.toInt();
+    if (carId == null) {
+      showAppToast(context, 'Сначала выберите авто');
+      return;
+    }
+    var kind = 'Керамика';
+    final titleCtrl = TextEditingController();
+    final monthsCtrl = TextEditingController(text: '12');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          backgroundColor: AppColors.surface,
+          title: Text('Гарантия', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                value: kind,
+                decoration: const InputDecoration(labelText: 'Тип', isDense: true),
+                dropdownColor: AppColors.surface2,
+                items: const [
+                  DropdownMenuItem(value: 'Керамика', child: Text('Керамика')),
+                  DropdownMenuItem(value: 'ППФ', child: Text('ППФ')),
+                  DropdownMenuItem(value: 'Тонировка', child: Text('Тонировка')),
+                  DropdownMenuItem(value: 'Прочее', child: Text('Прочее')),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setLocal(() => kind = v);
+                },
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: titleCtrl,
+                decoration: const InputDecoration(labelText: 'Название / зона', isDense: true),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: monthsCtrl,
+                decoration: const InputDecoration(labelText: 'Срок, мес.', isDense: true),
+                keyboardType: TextInputType.number,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Создать')),
+          ],
+        ),
+      ),
+    );
+    if (ok != true) return;
+    final months = int.tryParse(monthsCtrl.text.trim()) ?? 12;
+    await DatabaseHelper().addCarWarranty(
+      carId: carId,
+      orderId: widget.order['id'] as int,
+      kind: kind,
+      title: titleCtrl.text,
+      startedAt: DateTime.now(),
+      months: months,
+    );
+    if (!mounted) return;
+    showAppToast(context, 'Гарантия сохранена');
   }
 
   Widget _owMoneyLine(String label, double amount, {Color? color, bool muted = false}) {
@@ -4556,7 +4876,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             ),
             if (isNotify)
               IconButton(
-                tooltip: 'WhatsApp: готов к выдаче',
+                tooltip: 'Клиенту: готов к выдаче',
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
@@ -4860,148 +5180,139 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     );
   }
 
-  List<Map<String, dynamic>> _mastersInvolved() {
-    final ids = <int>{};
-    for (final w in _selectedWorks) {
-      final raw = w['master_ids']?.toString() ?? '';
-      for (final p in raw.split(',')) {
-        final id = int.tryParse(p.trim());
-        if (id != null) ids.add(id);
-      }
-    }
-    if (_selectedMasterId != null) ids.add(_selectedMasterId!);
-    if (_selectedReceptionistId != null) ids.add(_selectedReceptionistId!);
-    final list = _masters.where((m) => ids.contains((m['id'] as num?)?.toInt())).toList();
-    if (list.isNotEmpty) return list;
-    return _masters.take(4).toList();
+  List<Map<String, dynamic>> _mastersOnShiftRail() {
+    return OnShiftController.instance.onShiftMasters;
   }
 
   Widget _buildOrderWindowRail() {
-    final masters = _mastersInvolved();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _owPanel(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Мастера на смене',
-                style: GoogleFonts.manrope(
-                  color: AppColors.text,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 10),
-              if (masters.isEmpty)
-                Text(
-                  'Нет назначенных',
-                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
-                )
-              else
-                ...masters.take(4).map((m) {
-                  final name = m['name']?.toString() ?? '';
-                  final role = m['role']?.toString() ?? '';
-                  final shortRole = role.split(',').first.trim();
-                  final initials = name.trim().isEmpty
-                      ? '?'
-                      : name.trim().split(RegExp(r'\s+')).take(2).map((e) => e[0]).join().toUpperCase();
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Row(
-                      children: [
-                        Stack(
-                          clipBehavior: Clip.none,
+    return ListenableBuilder(
+      listenable: OnShiftController.instance,
+      builder: (context, _) {
+        final masters = _mastersOnShiftRail();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _owPanel(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Мастера на смене',
+                    style: GoogleFonts.manrope(
+                      color: AppColors.text,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (masters.isEmpty)
+                    Text(
+                      'Никого на смене',
+                      style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                    )
+                  else
+                    ...masters.take(8).map((m) {
+                      final name = m['name']?.toString() ?? '';
+                      final role = m['role']?.toString() ?? '';
+                      final shortRole = role.split(',').first.trim();
+                      final initials = name.trim().isEmpty
+                          ? '?'
+                          : name.trim().split(RegExp(r'\s+')).take(2).map((e) => e[0]).join().toUpperCase();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
                           children: [
-                            CircleAvatar(
-                              radius: 14,
-                              backgroundColor: AppColors.primary.withOpacity(0.2),
-                              child: Text(
-                                initials,
-                                style: GoogleFonts.manrope(
-                                  color: AppColors.primary,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w800,
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                CircleAvatar(
+                                  radius: 14,
+                                  backgroundColor: AppColors.primary.withOpacity(0.2),
+                                  child: Text(
+                                    initials,
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.primary,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                Positioned(
+                                  right: -1,
+                                  bottom: -1,
+                                  child: Container(
+                                    width: 9,
+                                    height: 9,
+                                    decoration: BoxDecoration(
+                                      color: AppColors.success,
+                                      shape: BoxShape.circle,
+                                      border: Border.all(color: AppColors.surface2, width: 1.5),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            Positioned(
-                              right: -1,
-                              bottom: -1,
-                              child: Container(
-                                width: 9,
-                                height: 9,
-                                decoration: BoxDecoration(
-                                  color: AppColors.success,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: AppColors.surface2, width: 1.5),
-                                ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _shortPersonName(name),
+                                    style: GoogleFonts.manrope(
+                                      color: AppColors.text,
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  if (shortRole.isNotEmpty)
+                                    Text(
+                                      shortRole,
+                                      style: GoogleFonts.manrope(
+                                        color: AppColors.textDim,
+                                        fontSize: 10.5,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _shortPersonName(name),
-                                style: GoogleFonts.manrope(
-                                  color: AppColors.text,
-                                  fontSize: 12.5,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              if (shortRole.isNotEmpty)
-                                Text(
-                                  shortRole,
-                                  style: GoogleFonts.manrope(
-                                    color: AppColors.textDim,
-                                    fontSize: 10.5,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                            ],
+                      );
+                    }),
+                  if (!_opsRestricted)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton(
+                        onPressed: _pickAdministrator,
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: Text(
+                          '+ Админ заказа',
+                          style: GoogleFonts.manrope(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12.5,
                           ),
                         ),
-                      ],
-                    ),
-                  );
-                }),
-              if (!_opsRestricted)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton(
-                    onPressed: _pickAdministrator,
-                    style: TextButton.styleFrom(
-                      padding: EdgeInsets.zero,
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                    child: Text(
-                      '+ Назначить',
-                      style: GoogleFonts.manrope(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12,
                       ),
                     ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 10),
-        Expanded(
-          child: _owPanel(
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: _owPanel(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
               Text(
                 'Файлы',
                 style: GoogleFonts.manrope(
@@ -5077,8 +5388,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             ],
           ),
         ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -5089,7 +5402,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            flex: 4,
+            flex: 5,
             child: KeyedSubtree(
               key: TourKeys.orderDetailsWorks,
               child: PulseAnchor(
@@ -5105,106 +5418,12 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           ),
           const SizedBox(width: 14),
           SizedBox(
-            width: 228,
+            width: 220,
             child: KeyedSubtree(
               key: TourKeys.orderDetailsNotes,
               child: _buildOrderWindowRail(),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    final mobile = _isMobileLayout;
-    final client = widget.order['client_name']?.toString() ?? '';
-    return Padding(
-      padding: EdgeInsets.fromLTRB(mobile ? 12 : 22, 16, mobile ? 8 : 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'ЗАКАЗ #${widget.order['id']}',
-                      style: AppTheme.sectionLabel,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      client.isEmpty ? 'Без клиента' : client,
-                      style: GoogleFonts.manrope(
-                        color: AppColors.text,
-                        fontSize: mobile ? 20 : 24,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.35,
-                        height: 1.15,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                tooltip: "Печать заказ-наряда",
-                onPressed: _printWorkOrder,
-                icon: const Icon(Icons.print_outlined, color: AppColors.textMuted),
-              ),
-              IconButton(
-                tooltip: 'Дефекты',
-                onPressed: () async {
-                  await _openDefectsSheet();
-                },
-                icon: const Icon(Icons.report_problem_outlined, color: AppColors.danger),
-              ),
-              _feedIconButton(),
-              IconButton(
-                tooltip: 'Закрыть',
-                onPressed: _closeDialog,
-                icon: const Icon(Icons.close, color: AppColors.textDim),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          if (mobile) ...[
-            _statusDropdown(),
-            const SizedBox(height: 10),
-            _staffAssignRow(),
-            const SizedBox(height: 10),
-            _carDropdown(),
-            const SizedBox(height: 10),
-            KeyedSubtree(key: TourKeys.orderDetailsSchedule, child: _buildScheduleRow()),
-          ] else ...[
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: _statusDropdown()),
-                const SizedBox(width: 12),
-                Expanded(flex: 2, child: _staffAssignRow()),
-                const SizedBox(width: 12),
-                Expanded(child: _carDropdown()),
-              ],
-            ),
-            const SizedBox(height: 10),
-            KeyedSubtree(key: TourKeys.orderDetailsSchedule, child: _buildScheduleRow()),
-          ],
-          _buildHandoverChecklist(),
-          // В полном заказе — только просмотр/правка; основное заполнение — в цехе Оклейка.
-          if ((!_opsRestricted || _editableWorkshops.contains('Оклейка')) &&
-              _selectedWorks.any((work) => work['workshop']?.toString() == 'Оклейка')) ...[
-            const SizedBox(height: 12),
-            OrderWrapFilmsPanel(
-              orderId: widget.order['id'] as int,
-              collapsible: true,
-              initiallyExpanded: false,
-              filmCategories: _orderFilmCategories(),
-            ),
-          ],
         ],
       ),
     );
@@ -6524,25 +6743,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     );
   }
 
-  Widget _buildFooter() {
-    final mobile = _isMobileLayout;
-    return Container(
-      padding: EdgeInsets.fromLTRB(mobile ? 12 : 22, 16, mobile ? 12 : 22, 16),
-      decoration: BoxDecoration(
-        color: AppColors.surface.withOpacity(0.98),
-        border: const Border(top: BorderSide(color: AppColors.borderSoft)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.22),
-            blurRadius: 20,
-            offset: const Offset(0, -6),
-          ),
-        ],
-      ),
-      child: mobile ? _buildMobileFooter() : _buildDesktopFooter(),
-    );
-  }
-
   Widget _buildMobileFooter() {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -7352,29 +7552,6 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         width: math.min(720, MediaQuery.sizeOf(context).width - 96),
         height: math.min(820, MediaQuery.sizeOf(context).height - 72),
         child: _workshopInner(),
-      ),
-    );
-  }
-
-  Widget _adminColumnsBody() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            flex: 5,
-            child: PulseAnchor(
-              active: isPulseActive('od_works') || isPulseActive('od_masters'),
-              child: KeyedSubtree(key: TourKeys.orderDetailsWorks, child: _buildWorksColumn()),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            flex: 2,
-            child: KeyedSubtree(key: TourKeys.orderDetailsNotes, child: _buildNotesColumn()),
-          ),
-        ],
       ),
     );
   }

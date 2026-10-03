@@ -24,6 +24,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool _loading = true;
   List<Map<String, dynamic>> _items = const [];
   List<Map<String, dynamic>> _debts = const [];
+  List<Map<String, dynamic>> _warranties = const [];
   bool _showDebts = true;
   bool _prefWorkshop = true;
   bool _prefReady = true;
@@ -52,6 +53,25 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       m['debt'] = ((m['price'] as num?)?.toDouble() ?? 0) - ((m['paid_amount'] as num?)?.toDouble() ?? 0);
       return m;
     }).toList();
+    final warranties = await DatabaseHelper().getUpcomingWarrantyReminders(withinDays: 14);
+    for (final w in warranties) {
+      final id = (w['id'] as num?)?.toInt();
+      final sent = (w['reminder_sent'] as num?)?.toInt() == 1 || w['reminder_sent'] == true;
+      if (id == null || sent) continue;
+      final kind = w['kind']?.toString() ?? 'Покрытие';
+      final ends = w['ends_at']?.toString() ?? '';
+      final client = w['client_name']?.toString() ?? '';
+      await AppNotifications.post(
+        type: 'warranty_due',
+        title: 'ТО покрытия · $kind',
+        body: [
+          if (client.isNotEmpty) client,
+          if ((w['make_model']?.toString() ?? '').isNotEmpty) w['make_model'],
+          if (ends.isNotEmpty) 'до $ends',
+        ].join(' · '),
+      );
+      await DatabaseHelper().markWarrantyReminderSent(id);
+    }
     await AppNotifications.refreshUnread();
     if (!mounted) return;
     setState(() {
@@ -60,6 +80,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       _prefReady = prefReady;
       _items = items;
       _debts = debts;
+      _warranties = warranties;
       _loading = false;
     });
   }
@@ -103,20 +124,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       plate: d['plate']?.toString(),
       car: d['make_model']?.toString(),
     );
-    final r = await DebtReminder.share(
+    if (!mounted) return;
+    final r = await DebtReminder.sharePickChannel(
+      context,
       phone: d['client_phone']?.toString(),
       text: text,
+      title: 'Напоминание о долге',
     );
-    if (!mounted) return;
-    if (r == 'opened') {
-      showAppToast(context, 'Открыт WhatsApp');
-    } else if (r == 'copied_link') {
-      showAppToast(context, 'Ссылка WhatsApp скопирована');
-    } else if (r == 'no_phone') {
-      showAppToast(context, 'Нет телефона — текст скопирован');
-    } else {
-      showAppToast(context, 'Текст скопирован');
-    }
+    if (!mounted || r == 'cancelled') return;
+    final msg = DebtReminder.toastForResult(r);
+    if (msg.isNotEmpty) showAppToast(context, msg);
   }
 
   String _fmtWhen(String? raw) {
@@ -208,6 +225,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           ..._debts.map(_debtTile),
                         const SizedBox(height: 22),
                       ],
+                      _sectionLabel('Гарантии · ТО (14 дней)'),
+                      const SizedBox(height: 8),
+                      if (_warranties.isEmpty)
+                        _emptyHint('Ближайших гарантий нет')
+                      else
+                        ..._warranties.map(_warrantyTile),
+                      const SizedBox(height: 22),
                       _sectionLabel('Лента'),
                       const SizedBox(height: 8),
                       if (_items.isEmpty)
@@ -220,6 +244,39 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       _prefsCard(),
                     ],
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _warrantyTile(Map<String, dynamic> w) {
+    final kind = w['kind']?.toString() ?? 'Покрытие';
+    final ends = w['ends_at']?.toString() ?? '';
+    final client = w['client_name']?.toString() ?? '';
+    final car = [
+      w['make_model']?.toString() ?? '',
+      w['plate']?.toString() ?? '',
+    ].where((s) => s.trim().isNotEmpty).join(' · ');
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface2,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderSoft),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$kind · до $ends',
+            style: GoogleFonts.manrope(fontWeight: FontWeight.w800, fontSize: 14, color: AppColors.text),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            [if (client.isNotEmpty) client, if (car.isNotEmpty) car].join(' · '),
+            style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 12.5),
           ),
         ],
       ),
@@ -313,7 +370,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Напомнить в WhatsApp',
+                  tooltip: 'Напомнить клиенту',
                   onPressed: () => _remindDebt(d),
                   icon: const Icon(Icons.chat_outlined, size: 20, color: AppColors.primary),
                 ),

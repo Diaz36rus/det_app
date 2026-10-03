@@ -6,7 +6,10 @@
   const year = document.querySelector("[data-year]");
   if (year) year.textContent = String(new Date().getFullYear());
 
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const topbar = document.getElementById("topbar");
+  const navToggle = document.getElementById("nav-toggle");
+  const siteNav = document.getElementById("site-nav");
   const onScroll = () => {
     if (!topbar) return;
     topbar.classList.toggle("is-solid", window.scrollY > 24);
@@ -14,9 +17,21 @@
   onScroll();
   window.addEventListener("scroll", onScroll, { passive: true });
 
-  const nodes = document.querySelectorAll(
-    ".showcase, .day, .screens, .roles, .panel, .faq"
-  );
+  if (navToggle && topbar && siteNav) {
+    navToggle.addEventListener("click", () => {
+      const open = !topbar.classList.contains("is-open");
+      topbar.classList.toggle("is-open", open);
+      navToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    siteNav.querySelectorAll("a").forEach((a) => {
+      a.addEventListener("click", () => {
+        topbar.classList.remove("is-open");
+        navToggle.setAttribute("aria-expanded", "false");
+      });
+    });
+  }
+
+  const nodes = document.querySelectorAll(".reveal");
   nodes.forEach((el) => el.classList.add("reveal"));
   if ("IntersectionObserver" in window) {
     const io = new IntersectionObserver(
@@ -32,19 +47,6 @@
     nodes.forEach((el) => io.observe(el));
   } else {
     nodes.forEach((el) => el.classList.add("is-in"));
-  }
-
-  // Soft parallax on hero image
-  const heroImg = document.querySelector(".hero__media img");
-  if (heroImg && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-    window.addEventListener(
-      "scroll",
-      () => {
-        const y = Math.min(window.scrollY, 480);
-        heroImg.style.transform = `scale(1.08) translate3d(0, ${y * 0.12}px, 0)`;
-      },
-      { passive: true }
-    );
   }
 
   function formatBytes(n) {
@@ -118,6 +120,8 @@
         meta.textContent = `Сборка ${ver}${m.db_version ? ` · схема БД ${m.db_version}` : ""}`;
       }
       if (foot) foot.textContent = ver;
+      const heroBuild = document.getElementById("hero-build");
+      if (heroBuild) heroBuild.textContent = ver;
       if (notes && m.notes) {
         notes.hidden = false;
         notes.textContent = String(m.notes);
@@ -128,11 +132,18 @@
           ? m.windows_setup_size
           : m.size;
         win.href = setupUrl;
-        win.textContent = formatBytes(setupSize)
-          ? `Windows Setup · ${formatBytes(setupSize)}`
-          : m.windows_setup_url
-            ? "Windows Setup"
-            : "Windows";
+        const name = win.querySelector(".dl-card__name");
+        if (name) {
+          name.textContent = formatBytes(setupSize)
+            ? `Setup · ${formatBytes(setupSize)}`
+            : "Setup";
+        } else {
+          win.textContent = formatBytes(setupSize)
+            ? `Windows Setup · ${formatBytes(setupSize)}`
+            : m.windows_setup_url
+              ? "Windows Setup"
+              : "Windows";
+        }
         setDisabled(win, false);
       }
       const winZip = document.getElementById("dl-windows-zip");
@@ -149,9 +160,16 @@
       const apkUrl = m.android_url || `${API_PUBLIC}/updates/android`;
       if (apk) {
         apk.href = apkUrl;
-        apk.textContent = formatBytes(m.android_size)
-          ? `Android APK · ${formatBytes(m.android_size)}`
-          : "Android APK";
+        const name = apk.querySelector(".dl-card__name");
+        if (name) {
+          name.textContent = formatBytes(m.android_size)
+            ? `APK · ${formatBytes(m.android_size)}`
+            : "APK";
+        } else {
+          apk.textContent = formatBytes(m.android_size)
+            ? `Android APK · ${formatBytes(m.android_size)}`
+            : "Android APK";
+        }
         setDisabled(apk, false);
       }
       drawQr(apkUrl);
@@ -185,7 +203,11 @@
   }
 
   function joinPage(slug) {
-    return `${API_PUBLIC}/join?slug=${encodeURIComponent(slug)}`;
+    return `/join.html?slug=${encodeURIComponent(slug)}`;
+  }
+
+  function bookPage(slug) {
+    return `/book.html?slug=${encodeURIComponent(slug)}`;
   }
 
   function setupInvite() {
@@ -202,6 +224,22 @@
     const params = new URLSearchParams(location.search);
     const preset = (params.get("slug") || params.get("invite") || "").trim();
     if (preset) input.value = preset;
+
+    const demoBtn = document.getElementById("invite-demo");
+    const copyBtn = document.getElementById("invite-copy");
+    const bookBtn = document.getElementById("invite-book");
+    demoBtn?.addEventListener("click", () => {
+      input.value = "demo";
+      form.requestSubmit();
+    });
+    copyBtn?.addEventListener("click", async () => {
+      try {
+        await copyText(input.value.trim());
+        markCopied(copyBtn);
+      } catch {
+        copyBtn.textContent = "Не скопировалось";
+      }
+    });
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -233,6 +271,20 @@
         const isAndroid = /Android/i.test(navigator.userAgent);
         openBtn.href = isAndroid ? intentLink(data.slug) : deepLink(data.slug);
         pageBtn.href = joinPage(data.slug);
+        if (bookBtn) {
+          bookBtn.hidden = true;
+          try {
+            const br = await fetch(`${API}/book/${encodeURIComponent(data.slug)}/api`, {
+              cache: "no-store",
+            });
+            if (br.ok) {
+              bookBtn.href = bookPage(data.slug);
+              bookBtn.hidden = false;
+            }
+          } catch {
+            /* no public booking */
+          }
+        }
         found.hidden = false;
         msg.classList.add("is-ok");
         msg.textContent = "Готово. Откройте приложение или страницу приглашения.";
@@ -311,9 +363,585 @@
     }
   }
 
+  const SCREENS = {
+    board: {
+      src: "assets/ui-board.jpg",
+      phone: "assets/ui-phone.jpg",
+      alt: "Доска заказов Det App",
+    },
+    calendar: {
+      src: "assets/ui-calendar.jpg",
+      phone: "assets/ui-phone-calendar.jpg",
+      alt: "Календарь Det App",
+    },
+    order: {
+      src: "assets/screen-orders.jpg",
+      phone: "assets/ui-order.jpg",
+      alt: "Новый заказ Det App",
+    },
+    cash: {
+      src: "assets/ui-cash.jpg",
+      phone: "assets/ui-phone-cash.jpg",
+      alt: "Касса Det App",
+    },
+  };
+  let heroMode = "pc";
+
+  function copyText(value) {
+    const text = String(value || "");
+    if (!text) return Promise.reject(new Error("empty"));
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text);
+    }
+    return new Promise((resolve, reject) => {
+      const el = document.createElement("textarea");
+      el.value = text;
+      el.setAttribute("readonly", "");
+      el.style.position = "fixed";
+      el.style.left = "-9999px";
+      document.body.appendChild(el);
+      el.select();
+      try {
+        document.execCommand("copy") ? resolve() : reject(new Error("copy"));
+      } catch (err) {
+        reject(err);
+      } finally {
+        el.remove();
+      }
+    });
+  }
+
+  function markCopied(btn) {
+    if (!btn) return;
+    const prev = btn.textContent;
+    btn.classList.add("is-ok");
+    btn.textContent = "Скопировано";
+    setTimeout(() => {
+      btn.classList.remove("is-ok");
+      btn.textContent = prev;
+    }, 1400);
+  }
+
+  function screenSrc(screen) {
+    return heroMode === "phone" && screen.phone ? screen.phone : screen.src;
+  }
+
+  function showScreen(id) {
+    const screen = SCREENS[id];
+    if (!screen) return;
+    const img = document.getElementById("hero-shot");
+    const win = document.getElementById("hero-window");
+    const shot = document.querySelector(".hero__shot");
+    const src = screenSrc(screen);
+    shot?.classList.toggle("is-phone", heroMode === "phone");
+    const apply = () => {
+      if (img) {
+        img.src = src;
+        img.alt = screen.alt;
+        img.classList.remove("is-out");
+      }
+      if (win) {
+        win.dataset.zoom = src;
+        win.dataset.zoomAlt = screen.alt;
+      }
+    };
+    if (img && !reduceMotion && img.getAttribute("src") !== src) {
+      img.classList.add("is-out");
+      setTimeout(apply, 180);
+    } else {
+      apply();
+    }
+    document.querySelectorAll(".hero__tab").forEach((tab) => {
+      const on = tab.dataset.screen === id;
+      tab.classList.toggle("is-on", on);
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    document.querySelectorAll(".handset[data-screen]").forEach((el) => {
+      el.classList.toggle("is-on", el.dataset.screen === id);
+    });
+    if (location.pathname === "/" || location.pathname.endsWith("index.html")) {
+      const url = new URL(location.href);
+      url.searchParams.set("screen", id);
+      history.replaceState(null, "", url);
+    }
+  }
+
+  function setupExplorer() {
+    const tabs = [...document.querySelectorAll(".hero__tab")];
+    if (!tabs.length) return;
+    Object.values(SCREENS).forEach((s) => {
+      const a = new Image();
+      a.src = s.src;
+      if (s.phone) {
+        const b = new Image();
+        b.src = s.phone;
+      }
+    });
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => showScreen(tab.dataset.screen));
+    });
+    document.querySelectorAll("#hero-mode [data-mode]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        heroMode = btn.dataset.mode === "phone" ? "phone" : "pc";
+        document.querySelectorAll("#hero-mode [data-mode]").forEach((el) => {
+          el.classList.toggle("is-on", el === btn);
+        });
+        const current = document.querySelector(".hero__tab.is-on")?.dataset.screen || "board";
+        showScreen(current);
+      });
+    });
+    document.querySelectorAll(".feat[data-screen]").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        if (e.target.closest("a,button")) return;
+        showScreen(el.dataset.screen);
+        document.querySelector(".hero")?.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
+      });
+    });
+    document.addEventListener("keydown", (e) => {
+      if (document.getElementById("zoom")?.open) return;
+      const tag = (e.target && e.target.tagName) || "";
+      if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+      const ids = Object.keys(SCREENS);
+      const current = document.querySelector(".hero__tab.is-on")?.dataset.screen;
+      const i = ids.indexOf(current);
+      if (i < 0) return;
+      if (e.key === "ArrowRight") showScreen(ids[(i + 1) % ids.length]);
+      if (e.key === "ArrowLeft") showScreen(ids[(i - 1 + ids.length) % ids.length]);
+    });
+    const start = new URLSearchParams(location.search).get("screen");
+    showScreen(SCREENS[start] ? start : "board");
+  }
+
+  function setupZoom() {
+    const dialog = document.getElementById("zoom");
+    const img = document.getElementById("zoom-img");
+    const cap = document.getElementById("zoom-cap");
+    const closeBtn = document.getElementById("zoom-close");
+    const prevBtn = document.getElementById("zoom-prev");
+    const nextBtn = document.getElementById("zoom-next");
+    if (!dialog || !img) return;
+    const items = [...document.querySelectorAll(".is-zoom")]
+      .map((el) => ({ src: el.dataset.zoom, alt: el.dataset.zoomAlt || "" }))
+      .filter((x) => x.src);
+    let idx = 0;
+    const paint = (i) => {
+      if (!items.length) return;
+      idx = (i + items.length) % items.length;
+      img.src = items[idx].src;
+      img.alt = items[idx].alt;
+      if (cap) cap.textContent = items[idx].alt;
+    };
+    const openAt = (i) => {
+      paint(i);
+      if (typeof dialog.showModal === "function") dialog.showModal();
+      else dialog.setAttribute("open", "");
+    };
+    const close = () => {
+      if (typeof dialog.close === "function") dialog.close();
+      else dialog.removeAttribute("open");
+    };
+    document.querySelectorAll(".is-zoom").forEach((el, i) => {
+      el.addEventListener("click", () => openAt(i));
+    });
+    prevBtn?.addEventListener("click", () => paint(idx - 1));
+    nextBtn?.addEventListener("click", () => paint(idx + 1));
+    closeBtn?.addEventListener("click", close);
+    dialog.addEventListener("click", (e) => {
+      if (e.target === dialog) close();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (!dialog.open) return;
+      if (e.key === "Escape") close();
+      if (e.key === "ArrowRight") paint(idx + 1);
+      if (e.key === "ArrowLeft") paint(idx - 1);
+    });
+  }
+
+  function setupCopies() {
+    document.querySelectorAll("[data-copy]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await copyText(btn.dataset.copy);
+          markCopied(btn);
+        } catch {
+          btn.textContent = "Не скопировалось";
+        }
+      });
+    });
+  }
+
+  async function setupDemo() {
+    const box = document.getElementById("demo-status");
+    const text = box?.querySelector(".status__text");
+    const openBtn = document.getElementById("demo-open");
+    const bookBtn = document.getElementById("demo-book");
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (openBtn) openBtn.href = isAndroid ? intentLink("demo") : deepLink("demo");
+    if (bookBtn) bookBtn.href = bookPage("demo");
+    const joinBtn = document.getElementById("demo-join");
+    if (joinBtn) joinBtn.href = joinPage("demo");
+    if (!box || !text) return;
+    try {
+      const r = await fetch(`${API}/auth/studio-lookup?slug=demo`, { cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error("offline");
+      box.dataset.state = "ok";
+      text.textContent = `Студия «${data.name || "Demo Detailing"}» в облаке · код ${data.slug || "demo"}`;
+    } catch {
+      box.dataset.state = "bad";
+      text.textContent = "Демо сейчас не отвечает — можно войти позже";
+    }
+    try {
+      const b = await fetch(`${API}/book/demo/api`, { cache: "no-store" });
+      if (!b.ok && bookBtn) bookBtn.hidden = true;
+    } catch {
+      /* branded booking page still works */
+    }
+  }
+
+  function setupDock() {
+    const dock = document.getElementById("dock");
+    if (!dock) return;
+    const onScroll = () => {
+      const y = window.scrollY;
+      const hideNear = document.getElementById("download");
+      const near = hideNear && hideNear.getBoundingClientRect().top < window.innerHeight * 0.7;
+      dock.hidden = y < 420 || !!near;
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+  }
+
+  function formatMoney(n) {
+    const num = Math.round(Number(n) || 0);
+    return `${num.toLocaleString("ru-RU")} ₽`;
+  }
+
+  function animateNum(el, to, money) {
+    if (!el) return;
+    const target = Math.round(Number(to) || 0);
+    const write = (v) => {
+      el.textContent = money ? formatMoney(v) : String(v);
+    };
+    if (reduceMotion) {
+      write(target);
+      return;
+    }
+    const startAt = performance.now();
+    const from = 0;
+    const dur = 720;
+    const step = (now) => {
+      const p = Math.min(1, (now - startAt) / dur);
+      write(Math.round(from + (target - from) * p));
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  function paintLanes(columns) {
+    const host = document.getElementById("live-lanes");
+    if (!host || !Array.isArray(columns) || !columns.length) return;
+    host.hidden = false;
+    host.innerHTML = columns
+      .map((col) => {
+        const n = Math.max(0, Number(col.count) || 0);
+        const ticks = Math.min(n, 12);
+        const dots = Array.from({ length: ticks }, () => "<i></i>").join("");
+        const name = String(col.name || "").replace(/</g, "&lt;");
+        return `<button type="button" class="lane__col" data-screen="board"><span>${name}</span><b>${n}</b><div class="lane__ticks">${dots}</div></button>`;
+      })
+      .join("");
+    if (!host.dataset.bound) {
+      host.dataset.bound = "1";
+      host.addEventListener("click", (e) => {
+        if (!e.target.closest(".lane__col")) return;
+        showScreen("board");
+        document.querySelector(".hero")?.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
+      });
+    }
+  }
+
+  async function setupPulse() {
+    const box = document.getElementById("pulse");
+    const demoLine = document.getElementById("demo-pulse");
+    const load = async (animate) => {
+      const r = await fetch(`${API}/public/demo`, { cache: "no-store" });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) throw new Error("no demo");
+      const shiftLabel = document.getElementById("pulse-shift-label");
+      const shiftVal = data.on_shift > 0 ? data.on_shift : data.masters_total || 0;
+      if (shiftLabel) {
+        shiftLabel.textContent = data.on_shift > 0 ? "на смене" : "мастеров";
+      }
+      if (animate) {
+        animateNum(document.getElementById("pulse-open"), data.open_orders);
+        animateNum(document.getElementById("pulse-shift"), shiftVal);
+        animateNum(document.getElementById("pulse-done"), data.done_orders);
+        animateNum(document.getElementById("pulse-pipe"), data.pipeline, true);
+      } else {
+        const openEl = document.getElementById("pulse-open");
+        const shiftEl = document.getElementById("pulse-shift");
+        const doneEl = document.getElementById("pulse-done");
+        const pipeEl = document.getElementById("pulse-pipe");
+        if (openEl) openEl.textContent = String(data.open_orders);
+        if (shiftEl) shiftEl.textContent = String(shiftVal);
+        if (doneEl) doneEl.textContent = String(data.done_orders);
+        if (pipeEl) pipeEl.textContent = formatMoney(data.pipeline);
+      }
+      paintLanes(data.columns || []);
+      if (box) box.hidden = false;
+      if (demoLine) {
+        demoLine.hidden = false;
+        demoLine.textContent = `Сейчас в демо: ${data.open_orders} в работе · ${formatMoney(data.pipeline)} в потоке`;
+      }
+    };
+    try {
+      await load(true);
+      setInterval(() => {
+        load(false).catch(() => {});
+      }, 45000);
+    } catch {
+      if (box) box.hidden = true;
+    }
+  }
+
+  function setupAtlas() {
+    const chips = document.getElementById("atlas-chips");
+    const grid = document.getElementById("atlas-grid");
+    if (!chips || !grid) return;
+    const items = [...grid.querySelectorAll("figure")];
+    const apply = (cat) => {
+      items.forEach((fig) => {
+        fig.classList.toggle("is-off", cat !== "all" && fig.dataset.cat !== cat);
+      });
+    };
+    apply(chips.querySelector("button.is-on")?.dataset.cat || "pc");
+    chips.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cat = btn.dataset.cat;
+        chips.querySelectorAll("button").forEach((el) => el.classList.toggle("is-on", el === btn));
+        apply(cat);
+      });
+    });
+  }
+
+  function setupSmartDownload() {
+    const hint = document.getElementById("dl-platform");
+    const win = document.getElementById("dl-windows");
+    const apk = document.getElementById("dl-android");
+    const store = document.querySelector(".dl-card--store");
+    const ua = navigator.userAgent || "";
+    const isAndroid = /Android/i.test(ua);
+    const isWin = /Windows/i.test(ua);
+    if (isAndroid) {
+      apk?.classList.add("is-rec");
+      store?.classList.add("is-rec");
+      if (hint) hint.textContent = "На этом телефоне удобнее RuStore или APK.";
+    } else if (isWin) {
+      win?.classList.add("is-rec");
+      if (hint) hint.textContent = "На этом ПК — Windows Setup, дальше обновления из приложения.";
+    } else if (hint) {
+      hint.textContent = "Windows Setup, Android APK или RuStore — ниже.";
+    }
+  }
+
+  function setupSpy() {
+    if (!siteNav) return;
+    const links = [...siteNav.querySelectorAll('a[href^="#"]')];
+    const secs = links
+      .map((a) => document.querySelector(a.getAttribute("href")))
+      .filter(Boolean);
+    if (!secs.length || !("IntersectionObserver" in window)) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          const id = `#${entry.target.id}`;
+          links.forEach((a) => a.classList.toggle("is-current", a.getAttribute("href") === id));
+        });
+      },
+      { rootMargin: "-42% 0px -50% 0px", threshold: 0.01 }
+    );
+    secs.forEach((s) => io.observe(s));
+  }
+
+  function setupRoles() {
+    document.querySelectorAll(".role[data-screen]").forEach((el) => {
+      const go = () => {
+        showScreen(el.dataset.screen);
+        document.querySelector(".hero")?.scrollIntoView({
+          behavior: reduceMotion ? "auto" : "smooth",
+        });
+      };
+      el.addEventListener("click", go);
+      el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          go();
+        }
+      });
+    });
+  }
+
+  function setupFaq() {
+    const items = document.querySelectorAll(".faq__list details");
+    items.forEach((d) => {
+      d.addEventListener("toggle", () => {
+        if (!d.open) return;
+        items.forEach((other) => {
+          if (other !== d) other.open = false;
+        });
+      });
+    });
+  }
+
+  function setupJoinPage() {
+    const page = document.getElementById("join-page");
+    if (!page) return;
+    const params = new URLSearchParams(location.search);
+    const slug = (params.get("slug") || params.get("invite") || "").trim().toLowerCase();
+    const status = document.getElementById("join-status");
+    const text = status?.querySelector(".status__text");
+    const title = document.getElementById("join-title");
+    const creds = document.getElementById("join-creds");
+    const slugEl = document.getElementById("join-slug");
+    const copyBtn = document.getElementById("join-copy");
+    const openBtn = document.getElementById("join-open");
+    const bookBtn = document.getElementById("join-book");
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (openBtn) openBtn.href = slug ? (isAndroid ? intentLink(slug) : deepLink(slug)) : "/#invite";
+    if (!slug) {
+      if (status) status.dataset.state = "bad";
+      if (text) text.textContent = "В ссылке нет кода студии";
+      return;
+    }
+    if (slugEl) slugEl.textContent = slug;
+    if (creds) creds.hidden = false;
+    copyBtn?.addEventListener("click", async () => {
+      try {
+        await copyText(slug);
+        markCopied(copyBtn);
+      } catch {
+        copyBtn.textContent = "Не скопировалось";
+      }
+    });
+    fetch(`${API}/auth/studio-lookup?slug=${encodeURIComponent(slug)}`, { cache: "no-store" })
+      .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.detail || "Студия не найдена");
+        if (status) status.dataset.state = "ok";
+        if (text) text.textContent = `Студия «${data.name}» · код ${data.slug}`;
+        if (title) title.textContent = data.name;
+        if (bookBtn) {
+          bookBtn.href = bookPage(data.slug);
+          bookBtn.hidden = false;
+        }
+        if (isAndroid && openBtn) setTimeout(() => { location.href = openBtn.href; }, 280);
+      })
+      .catch((err) => {
+        if (status) status.dataset.state = "bad";
+        if (text) text.textContent = err.message || "Студия не найдена";
+      });
+  }
+
+  function setupBookPage() {
+    const form = document.getElementById("book-form");
+    if (!form) return;
+    const params = new URLSearchParams(location.search);
+    const slug = (params.get("slug") || "demo").trim().toLowerCase();
+    const status = document.getElementById("book-status");
+    const text = status?.querySelector(".status__text");
+    const title = document.getElementById("book-title");
+    const msg = document.getElementById("book-msg");
+    const submit = document.getElementById("book-submit");
+    fetch(`${API}/book/${encodeURIComponent(slug)}/api`, { cache: "no-store" })
+      .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+      .then(({ ok, data }) => {
+        if (!ok) throw new Error(data.detail || "Запись недоступна");
+        if (status) status.dataset.state = "ok";
+        if (text) text.textContent = `Студия «${data.company_name}» принимает заявки`;
+        if (title) title.textContent = data.company_name;
+        form.hidden = false;
+      })
+      .catch((err) => {
+        if (status) status.dataset.state = "bad";
+        if (text) text.textContent = err.message || "Онлайн-запись выключена";
+      });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!msg || !submit) return;
+      msg.classList.remove("is-error", "is-ok");
+      const payload = {
+        name: document.getElementById("book-name")?.value.trim() || "",
+        phone: document.getElementById("book-phone")?.value.trim() || "",
+        car: document.getElementById("book-car")?.value.trim() || "",
+        note: document.getElementById("book-note")?.value.trim() || "",
+        preferred_date: document.getElementById("book-date")?.value || "",
+        preferred_time: document.getElementById("book-time")?.value || "",
+      };
+      if (payload.phone.length < 5) {
+        msg.classList.add("is-error");
+        msg.textContent = "Укажите телефон";
+        return;
+      }
+      submit.disabled = true;
+      msg.textContent = "Отправляем…";
+      try {
+        const r = await fetch(`${API}/book/${encodeURIComponent(slug)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          const detail = data.detail || "Не удалось отправить";
+          throw new Error(typeof detail === "string" ? detail : "Не удалось отправить");
+        }
+        form.reset();
+        msg.classList.add("is-ok");
+        msg.textContent = data.message || "Заявка принята. Студия свяжется с вами.";
+      } catch (err) {
+        msg.classList.add("is-error");
+        msg.textContent = err.message || "Ошибка отправки";
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  }
+
   loadCloudStatus();
-  loadRelease();
+  loadRelease().then((m) => {
+    const copyApk = document.getElementById("dl-copy-apk");
+    const apkUrl = m?.android_url || `${API_PUBLIC}/updates/android`;
+    if (!copyApk) return;
+    copyApk.hidden = false;
+    copyApk.addEventListener("click", async () => {
+      try {
+        await copyText(apkUrl);
+        markCopied(copyApk);
+      } catch {
+        copyApk.textContent = "Не скопировалось";
+      }
+    });
+  });
   setupInvite();
   setupLead();
   fillChangelogPage();
+  setupExplorer();
+  setupZoom();
+  setupCopies();
+  setupDemo();
+  setupDock();
+  setupSmartDownload();
+  setupSpy();
+  setupRoles();
+  setupFaq();
+  setupJoinPage();
+  setupBookPage();
+  setupPulse();
+  setupAtlas();
 })();

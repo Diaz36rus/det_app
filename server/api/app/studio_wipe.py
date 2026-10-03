@@ -14,6 +14,7 @@ from app.models import (
     CashShiftBalance,
     Company,
     CrmCar,
+    CrmCarWarranty,
     CrmClient,
     CrmDefect,
     CrmFilmRoll,
@@ -29,6 +30,7 @@ from app.models import (
     CrmPromocode,
     CrmService,
     CrmServiceRecipe,
+    CrmStudioLead,
     CrmWorkshopRole,
     Role,
     RolePermission,
@@ -104,6 +106,10 @@ def wipe_company_data(db: Session, company_id: int) -> dict[str, int]:
     stats["promocodes"] = int(n or 0)
     n = db.execute(delete(CrmDefect).where(CrmDefect.company_id == company_id)).rowcount
     stats["defects"] = int(n or 0)
+    n = db.execute(delete(CrmStudioLead).where(CrmStudioLead.company_id == company_id)).rowcount
+    stats["studio_leads"] = int(n or 0)
+    n = db.execute(delete(CrmCarWarranty).where(CrmCarWarranty.company_id == company_id)).rowcount
+    stats["car_warranties"] = int(n or 0)
 
     n = db.execute(delete(CrmCar).where(CrmCar.company_id == company_id)).rowcount
     stats["cars"] = int(n or 0)

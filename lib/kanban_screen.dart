@@ -606,7 +606,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                     ),
                   IconButton(
                     visualDensity: VisualDensity.compact,
-                    tooltip: 'WhatsApp: готов',
+                    tooltip: 'Клиенту: готов',
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                     icon: const Icon(Icons.chat_outlined, color: AppColors.success, size: 18),

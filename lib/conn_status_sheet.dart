@@ -2298,6 +2298,7 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
       context: context,
       builder: (ctx) => AssignUserDialog(user: u, accessToken: token),
     );
+    if (!mounted) return;
     if (ok == true) {
       showAppToast(context, 'Назначено: ${u.displayLabel}');
       await _loadPending(quiet: false);

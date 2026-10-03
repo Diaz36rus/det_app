@@ -6,17 +6,36 @@ import 'package:path_provider/path_provider.dart';
 
 import 'auth_models.dart';
 
-/// Локальное хранение сессии (файл в Documents). Для B достаточно.
+/// Локальное хранение сессии. Windows: AppData (Documents часто синкается в OneDrive).
 class AuthStore {
   static const _fileName = 'auth_session.json';
 
-  Future<File> _file() async {
+  Future<File> _legacyFile() async {
     final docs = await getApplicationDocumentsDirectory();
     return File(p.join(docs.path, _fileName));
   }
 
+  Future<File> _file() async {
+    if (!Platform.isWindows) return _legacyFile();
+    final dir = await getApplicationSupportDirectory();
+    return File(p.join(dir.path, _fileName));
+  }
+
+  /// Однократный перенос старой сессии из Documents (Windows).
+  Future<void> _migrateLegacy(File target) async {
+    if (!Platform.isWindows || await target.exists()) return;
+    try {
+      final old = await _legacyFile();
+      if (!await old.exists()) return;
+      await target.parent.create(recursive: true);
+      await target.writeAsString(await old.readAsString(), flush: true);
+      await old.delete();
+    } catch (_) {}
+  }
+
   Future<void> save(AuthTokens tokens, AuthUser user) async {
     final f = await _file();
+    await f.parent.create(recursive: true);
     final map = {
       'tokens': tokens.toJson(),
       'user': {
@@ -41,6 +60,7 @@ class AuthStore {
 
   Future<({AuthTokens tokens, AuthUser user})?> load() async {
     final f = await _file();
+    await _migrateLegacy(f);
     if (!await f.exists()) return null;
     try {
       final map = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
@@ -54,9 +74,10 @@ class AuthStore {
   }
 
   Future<void> clear() async {
-    final f = await _file();
-    if (await f.exists()) {
-      await f.delete();
+    for (final f in {await _file(), await _legacyFile()}) {
+      if (await f.exists()) {
+        await f.delete();
+      }
     }
   }
 }

@@ -1,5 +1,25 @@
 # RuStore — тексты и скрины
 
+Карточка для API лежит в `tools/rustore_listing.json` (этот файл — человекочитаемый дубль).
+`whatsNew` при каждом store-релизе собирается из `lib/patch_notes.dart`, поле «Что нового» ниже — только история первой витрины.
+
+## Выгрузка (не каждая правка)
+
+```powershell
+# префлайт, в магазин ничего не уходит
+powershell -ExecutionPolicy Bypass -File tools\ship_store.ps1 -DryRun
+
+# собрать AAB и отправить на модерацию
+powershell -ExecutionPolicy Bypass -File tools\ship_store.ps1
+
+powershell -ExecutionPolicy Bypass -File tools\ship_store.ps1 -Status
+powershell -ExecutionPolicy Bypass -File tools\ship_store.ps1 -Watch
+powershell -ExecutionPolicy Bypass -File tools\ship_store.ps1 -Resume
+powershell -ExecutionPolicy Bypass -File tools\ship_store.ps1 -Fresh
+```
+
+Ключ API + Telegram: скопировать `tools/rustore_key.example.json` → `tools/rustore_key.json` (в git не попадает).
+
 ## Название
 Det App
 

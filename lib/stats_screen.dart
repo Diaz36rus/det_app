@@ -37,6 +37,10 @@ class _StatsScreenState extends State<StatsScreen> {
   late DateTime _masterDayDate;
   bool _isLoading = true;
   String? _error;
+  double _marginPeriod = 0;
+  double _payrollDue = 0;
+  double _pulseRevenueToday = 0;
+  List<Map<String, dynamic>> _byLeadSource = [];
 
   final _money = NumberFormat('#,##0', 'ru_RU');
 
@@ -145,6 +149,15 @@ class _StatsScreenState extends State<StatsScreen> {
             .toList();
         _dayLabels = labels;
         _dayTotals = totals;
+        _marginPeriod = (s['margin_period'] as num?)?.toDouble() ?? 0;
+        final pulse = (s['owner_pulse'] as Map?) ?? const {};
+        _pulseRevenueToday = (pulse['revenue_today'] as num?)?.toDouble() ??
+            (s['revenue_today'] as num?)?.toDouble() ??
+            0;
+        _payrollDue = (pulse['payroll_due'] as num?)?.toDouble() ?? 0;
+        _byLeadSource = ((s['by_lead_source'] as List?) ?? const [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
         _isLoading = false;
       });
     } catch (e) {
@@ -316,6 +329,72 @@ class _StatsScreenState extends State<StatsScreen> {
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _ownerPulse() {
+    return _panel(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _sectionLabel('СЕГОДНЯ · ПУЛЬС'),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _kpi('ВЫРУЧКА', '${_money.format(_pulseRevenueToday)} ₽', AppColors.success),
+              const SizedBox(width: 10),
+              _kpi('ДОЛГ', '${_money.format(_openDebt)} ₽', AppColors.danger),
+              const SizedBox(width: 10),
+              _kpi('В РАБОТЕ', '${_openOrders.toInt()}', const Color(0xFFF59E0B)),
+              const SizedBox(width: 10),
+              _kpi('ЗП К ВЫПЛАТЕ', '${_money.format(_payrollDue)} ₽', AppColors.primary),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sourcesPanel() {
+    if (_byLeadSource.isEmpty) {
+      return Text(
+        'Нет завершённых заказов с источником за период',
+        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
+      );
+    }
+    return Column(
+      children: _byLeadSource.map((row) {
+        final name = row['name']?.toString() ?? '—';
+        final count = (row['count'] as num?)?.toInt() ?? 0;
+        final rev = (row['revenue'] as num?)?.toDouble() ?? 0;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  name,
+                  style: GoogleFonts.manrope(color: AppColors.text, fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+              ),
+              Text(
+                '$count',
+                style: GoogleFonts.manrope(color: AppColors.textMuted, fontWeight: FontWeight.w700, fontSize: 12),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 90,
+                child: Text(
+                  '${_money.format(rev)} ₽',
+                  textAlign: TextAlign.right,
+                  style: GoogleFonts.manrope(color: AppColors.text, fontWeight: FontWeight.w800, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -611,11 +690,11 @@ class _StatsScreenState extends State<StatsScreen> {
       children: [
         _kpi('ВЫРУЧКА', '${_money.format(_revPeriod)} ₽', AppColors.success),
         const SizedBox(width: 10),
-        _kpi('СРЕДНИЙ ЧЕК', '${_money.format(_avgCheck)} ₽', AppColors.primary),
+        _kpi('МАРЖА', '${_money.format(_marginPeriod)} ₽', AppColors.primary),
+        const SizedBox(width: 10),
+        _kpi('СРЕДНИЙ ЧЕК', '${_money.format(_avgCheck)} ₽', AppColors.textMuted),
         const SizedBox(width: 10),
         _kpi('ЗАКАЗОВ', '${_ordersPeriod.toInt()}', AppColors.textMuted),
-        const SizedBox(width: 10),
-        _kpi('В РАБОТЕ', '${_openOrders.toInt()}', const Color(0xFFF59E0B)),
         const SizedBox(width: 10),
         _kpi('ДОЛГ', '${_money.format(_openDebt)} ₽', AppColors.danger),
       ],
@@ -668,6 +747,17 @@ class _StatsScreenState extends State<StatsScreen> {
                 scrollDirection: Axis.horizontal,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(minWidth: 720),
+                  child: IntrinsicHeight(child: _ownerPulse()),
+                ),
+              )
+            else
+              _ownerPulse(),
+            const SizedBox(height: 14),
+            if (mobile)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 720),
                   child: IntrinsicHeight(child: kpiRow),
                 ),
               )
@@ -678,6 +768,10 @@ class _StatsScreenState extends State<StatsScreen> {
               _sectionLabel('ВЫРУЧКА · $_periodLabel'),
               const SizedBox(height: 8),
               _panel(child: _buildChart()),
+              const SizedBox(height: 14),
+              _sectionLabel('ИСТОЧНИКИ · $_periodLabel'),
+              const SizedBox(height: 8),
+              _panel(child: _sourcesPanel()),
               const SizedBox(height: 14),
               _sectionLabel('В РАБОТЕ СЕЙЧАС'),
               const SizedBox(height: 8),
@@ -720,6 +814,19 @@ class _StatsScreenState extends State<StatsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(child: _mastersPanel()),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: _panel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _sectionLabel('ИСТОЧНИКИ · $_periodLabel'),
+                          const SizedBox(height: 10),
+                          _sourcesPanel(),
+                        ],
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 14),
                   Expanded(child: _topsPanel()),
                 ],

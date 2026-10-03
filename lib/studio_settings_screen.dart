@@ -55,6 +55,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
   final _tplBookingCtrl = TextEditingController();
   final _tplDebtCtrl = TextEditingController();
   final _tplReadyCtrl = TextEditingController();
+  String _clientMsgChannel = 'ask';
 
   int _startHour = StudioPrefs.defaultStartHour;
   int _endHour = StudioPrefs.defaultEndHour;
@@ -96,6 +97,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
     final branchId = await StudioPrefs.loadDefaultBranchId();
     final cashId = await StudioPrefs.loadDefaultCashRegisterId();
     final tpls = await StudioPrefs.loadMessageTemplates();
+    final msgChannel = await StudioPrefs.loadClientMsgChannel();
     final menu = await DatabaseHelper().getAppSetting(AppMenuIds.settingKey);
     final regs = await DatabaseHelper().getCashRegisters();
     final backup = await BackupHelper.lastBackupAt();
@@ -113,6 +115,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
       _tplBookingCtrl.text = tpls['booking'] ?? '';
       _tplDebtCtrl.text = tpls['debt'] ?? '';
       _tplReadyCtrl.text = tpls['ready'] ?? '';
+      _clientMsgChannel = msgChannel;
       _mobileFull = menu == AppMenuIds.modeFull;
       _cashRegisters = regs;
       _lastBackup = backup;
@@ -289,9 +292,10 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
       debt: _tplDebtCtrl.text,
       ready: _tplReadyCtrl.text,
     );
+    await StudioPrefs.saveClientMsgChannel(_clientMsgChannel);
     if (!mounted) return;
     setState(() => _savingTemplates = false);
-    showAppToast(context, 'Шаблоны сохранены');
+    showAppToast(context, 'Шаблоны и канал сохранены');
   }
 
   Future<void> _setMobileFull(bool full) async {
@@ -473,7 +477,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
                   id: 'contacts',
                   icon: Icons.contact_phone_outlined,
                   title: 'Контакты',
-                  subtitle: 'Телефон, адрес, WhatsApp, сайт',
+                  subtitle: 'Телефон, адрес, мессенджер, сайт',
                   hint: (_phoneCtrl.text.trim().isNotEmpty)
                       ? _phoneCtrl.text.trim()
                       : 'не заданы',
@@ -536,8 +540,26 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
                   icon: Icons.chat_outlined,
                   title: 'Шаблоны сообщений',
                   subtitle: 'Запись, долг, «готово к выдаче»',
-                  hint: 'WhatsApp',
+                  hint: 'Telegram / WhatsApp / SMS',
                   body: _templatesBody(),
+                ),
+                const SizedBox(height: 12),
+                _section(
+                  id: 'payroll_rules',
+                  icon: Icons.calculate_outlined,
+                  title: 'Правила ЗП',
+                  subtitle: 'Для кнопки «Рассчитать» в заказе',
+                  hint: 'цех / %',
+                  body: _payrollRulesBody(),
+                ),
+                const SizedBox(height: 12),
+                _section(
+                  id: 'booking',
+                  icon: Icons.link_outlined,
+                  title: 'Онлайн-запись и API',
+                  subtitle: 'Публичная ссылка и webhooks',
+                  hint: 'R3 / R7',
+                  body: _bookingApiBody(),
                 ),
                 const SizedBox(height: 12),
                 _section(
@@ -850,7 +872,11 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
         TextField(
           controller: _waCtrl,
           keyboardType: TextInputType.phone,
-          decoration: const InputDecoration(labelText: 'WhatsApp', isDense: true),
+          decoration: const InputDecoration(
+            labelText: 'Публичный мессенджер студии',
+            hintText: 'Номер для клиентов (WA / MAX / …)',
+            isDense: true,
+          ),
         ),
         const SizedBox(height: 8),
         TextField(
@@ -1197,6 +1223,29 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
+          'Схема для РФ: сначала облачный Telegram-бот (клиент жмёт Start по ссылке), '
+          'если нет — SMS (если настроен на сервере), иначе ручной канал. '
+          'Ниже — канал для ручной отправки и шаблоны текста.',
+          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+        ),
+        const SizedBox(height: 10),
+        DropdownButtonFormField<String>(
+          value: _clientMsgChannel,
+          decoration: const InputDecoration(labelText: 'Канал клиенту', isDense: true),
+          dropdownColor: AppColors.surface2,
+          items: const [
+            DropdownMenuItem(value: 'ask', child: Text('Спрашивать каждый раз')),
+            DropdownMenuItem(value: 'telegram', child: Text('Telegram')),
+            DropdownMenuItem(value: 'whatsapp', child: Text('WhatsApp')),
+            DropdownMenuItem(value: 'sms', child: Text('SMS')),
+          ],
+          onChanged: (v) {
+            if (v == null) return;
+            setState(() => _clientMsgChannel = v);
+          },
+        ),
+        const SizedBox(height: 12),
+        Text(
           'Плейсхолдеры: {name} {order} {debt} {car}. Пустое поле = встроенный текст.',
           style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
         ),
@@ -1226,6 +1275,148 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
             child: _savingTemplates
                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                 : Text('Сохранить', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _payrollRulesBody() {
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: DatabaseHelper().getPayrollRules(),
+      builder: (ctx, snap) {
+        final rules = snap.data ?? const [];
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Режим percent = % от суммы работ цеха, fixed = фикс ₽. Кнопка «Рассчитать» в ЗП заказа.',
+              style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+            ),
+            const SizedBox(height: 10),
+            if (rules.isEmpty)
+              Text('Правил пока нет', style: GoogleFonts.manrope(color: AppColors.textMuted, fontSize: 13))
+            else
+              ...rules.map(
+                (r) => ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    '${r['workshop']?.toString().isNotEmpty == true ? r['workshop'] : 'Любой цех'}'
+                    ' · ${r['mode'] == 'fixed' ? '${r['value']} ₽' : '${r['value']} %'}',
+                    style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13),
+                  ),
+                  subtitle: (r['label']?.toString() ?? '').isEmpty
+                      ? null
+                      : Text(r['label'].toString(), style: GoogleFonts.manrope(fontSize: 12)),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    onPressed: () async {
+                      final id = (r['id'] as num?)?.toInt();
+                      if (id == null) return;
+                      await DatabaseHelper().deletePayrollRule(id);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final wsCtrl = TextEditingController();
+                final valCtrl = TextEditingController(text: '30');
+                var mode = 'percent';
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (dctx) => StatefulBuilder(
+                    builder: (dctx, setLocal) => AlertDialog(
+                      backgroundColor: AppColors.surface,
+                      title: Text('Правило ЗП', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
+                      content: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextField(
+                            controller: wsCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Цех (пусто = любой)',
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          DropdownButtonFormField<String>(
+                            value: mode,
+                            decoration: const InputDecoration(labelText: 'Режим', isDense: true),
+                            items: const [
+                              DropdownMenuItem(value: 'percent', child: Text('% от цеха')),
+                              DropdownMenuItem(value: 'fixed', child: Text('Фикс ₽')),
+                            ],
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setLocal(() => mode = v);
+                            },
+                          ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: valCtrl,
+                            decoration: const InputDecoration(labelText: 'Значение', isDense: true),
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          ),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(dctx, false), child: const Text('Отмена')),
+                        ElevatedButton(onPressed: () => Navigator.pop(dctx, true), child: const Text('Добавить')),
+                      ],
+                    ),
+                  ),
+                );
+                if (ok != true) return;
+                final v = double.tryParse(valCtrl.text.replaceAll(',', '.')) ?? 0;
+                await DatabaseHelper().addPayrollRule(
+                  workshop: wsCtrl.text,
+                  mode: mode,
+                  value: v,
+                );
+                if (mounted) setState(() {});
+              },
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Добавить правило'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _bookingApiBody() {
+    final slug = AuthController.instance.user?.companySlug?.trim() ?? '';
+    final bookUrl = slug.isEmpty
+        ? 'Войдите в облако — ссылка появится по slug студии'
+        : '${AuthApi.defaultBaseUrl}/book/$slug';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Публичная мини-запись создаёт лид (источник «Сайт»). API лида: POST /public/v1/leads с X-Api-Key.',
+          style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12, height: 1.35),
+        ),
+        const SizedBox(height: 10),
+        SelectableText(
+          bookUrl,
+          style: GoogleFonts.manrope(color: AppColors.primary, fontWeight: FontWeight.w700, fontSize: 13),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: slug.isEmpty
+                ? null
+                : () async {
+                    await Clipboard.setData(ClipboardData(text: bookUrl));
+                    if (mounted) showAppToast(context, 'Ссылка скопирована');
+                  },
+            icon: const Icon(Icons.copy, size: 16),
+            label: Text('Копировать', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 12)),
           ),
         ),
       ],

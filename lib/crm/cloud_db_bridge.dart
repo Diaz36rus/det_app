@@ -199,6 +199,8 @@ class CloudDbBridge {
       'discount_percent': o.discountPercent,
       'discount_fixed': o.discountFixed,
       'promo_code': o.promoCode,
+      'lead_source': o.leadSource,
+      'deposit_required': o.depositRequired,
       'client_notes': o.clientNotes,
       'client_visible_notes': o.clientVisibleNotes,
       'master_notes': o.masterNotes,
@@ -518,9 +520,35 @@ class CloudDbBridge {
             'name': m.name,
             'role': m.role,
             'is_active': m.isActive ? 1 : 0,
+            'on_shift': m.onShift ? 1 : 0,
           },
         )
         .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getMastersOnShift() async {
+    try {
+      final list = await _crm.listMastersOnShift();
+      return list
+          .map(
+            (m) => {
+              'id': m.id,
+              'name': m.name,
+              'role': m.role,
+              'is_active': m.isActive ? 1 : 0,
+              'on_shift': 1,
+            },
+          )
+          .toList();
+    } catch (_) {
+      final all = await getAllMastersFull();
+      return all.where((m) => (m['on_shift'] as num?)?.toInt() == 1).toList();
+    }
+  }
+
+  Future<void> setMasterOnShift(int id, bool onShift) async {
+    final m = await _crm.patchMaster(id, {'on_shift': onShift});
+    _masters = _masters.map((e) => e.id == id ? m : e).toList();
   }
 
   Future<void> addMaster(String name, String role) async {
@@ -528,10 +556,11 @@ class CloudDbBridge {
     _masters = [..._masters, m];
   }
 
-  Future<void> updateMaster(int id, {String? name, String? role}) async {
+  Future<void> updateMaster(int id, {String? name, String? role, bool? onShift}) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
     if (role != null) body['role'] = role;
+    if (onShift != null) body['on_shift'] = onShift;
     final m = await _crm.patchMaster(id, body);
     _masters = _masters.map((e) => e.id == id ? m : e).toList();
   }
@@ -695,6 +724,7 @@ class CloudDbBridge {
             'category': i.category,
             'min_qty': i.minQty,
             'meters_per_roll': i.metersPerRoll,
+            'unit_cost': i.unitCost,
           },
         )
         .toList();
@@ -707,6 +737,7 @@ class CloudDbBridge {
     double minQty = 0,
     String category = 'Прочее',
     double metersPerRoll = 0,
+    double unitCost = 0,
   }) async {
     final item = await _crm.createInventory(
       name: name,
@@ -715,6 +746,7 @@ class CloudDbBridge {
       category: category,
       minQty: minQty,
       metersPerRoll: metersPerRoll,
+      unitCost: unitCost,
     );
     _inventory = await _crm.listInventory();
     return item.id;
@@ -728,6 +760,7 @@ class CloudDbBridge {
     double? minQty,
     String? category,
     double? metersPerRoll,
+    double? unitCost,
   }) async {
     final body = <String, dynamic>{};
     if (name != null) body['name'] = name;
@@ -736,6 +769,7 @@ class CloudDbBridge {
     if (minQty != null) body['min_qty'] = minQty;
     if (category != null) body['category'] = category;
     if (metersPerRoll != null) body['meters_per_roll'] = metersPerRoll;
+    if (unitCost != null) body['unit_cost'] = unitCost;
     if (body.isEmpty) return;
     await _crm.patchInventory(id, body);
     _inventory = await _crm.listInventory();
@@ -1385,6 +1419,8 @@ class CloudDbBridge {
     String startTime = '',
     String endTime = '',
     String endDate = '',
+    String leadSource = '',
+    double depositRequired = 0,
   }) async {
     final crmItems = items
         .map(
@@ -1411,15 +1447,19 @@ class CloudDbBridge {
       notes: notes,
       dueDate: dueDate.isNotEmpty ? dueDate : DateTime.now().toIso8601String().substring(0, 10),
       masterIds: const [],
+      leadSource: leadSource,
+      depositRequired: depositRequired,
     );
     // start/end через patch
-    if (startTime.isNotEmpty || endTime.isNotEmpty || dueDate.isNotEmpty || endDate.isNotEmpty) {
-      final patched = await _crm.patchOrder(order.id, {
-        if (dueDate.isNotEmpty) 'due_date': dueDate,
-        if (startTime.isNotEmpty) 'start_time': startTime,
-        if (endTime.isNotEmpty) 'end_time': endTime,
-        if (endDate.isNotEmpty) 'end_date': endDate,
-      });
+    final patch = <String, dynamic>{};
+    if (dueDate.isNotEmpty) patch['due_date'] = dueDate;
+    if (startTime.isNotEmpty) patch['start_time'] = startTime;
+    if (endTime.isNotEmpty) patch['end_time'] = endTime;
+    if (endDate.isNotEmpty) patch['end_date'] = endDate;
+    if (leadSource.trim().isNotEmpty) patch['lead_source'] = leadSource.trim();
+    if (depositRequired > 0) patch['deposit_required'] = depositRequired;
+    if (patch.isNotEmpty) {
+      final patched = await _crm.patchOrder(order.id, patch);
       try {
         _orders[patched.id] = await _crm.getOrder(patched.id);
       } catch (_) {
@@ -2604,5 +2644,172 @@ class CloudDbBridge {
     final result = await _crm.importClients(clients);
     await refreshAll();
     return result;
+  }
+
+  Future<void> updateOrderLeadSource(int orderId, String leadSource) async {
+    final o = await _crm.patchOrder(orderId, {'lead_source': leadSource.trim()});
+    _orders[o.id] = o;
+  }
+
+  Future<void> updateOrderDepositRequired(int orderId, double amount) async {
+    final o = await _crm.patchOrder(orderId, {'deposit_required': amount < 0 ? 0 : amount});
+    _orders[o.id] = o;
+  }
+
+  Future<Map<String, dynamic>> getOrderMarginBreakdown(int orderId) async {
+    try {
+      return await _crm.getOrderMargin(orderId);
+    } catch (_) {
+      // Fallback: price − payroll only until API catches up.
+      final o = _orders[orderId] ?? await _crm.getOrder(orderId);
+      final payrollRows = await getOrderWorkshopPayroll(orderId);
+      final payroll = payrollRows.fold<double>(
+        0,
+        (s, r) => s + ((r['amount'] as num?)?.toDouble() ?? 0),
+      );
+      final price = o.price;
+      final margin = price - payroll;
+      return {
+        'price': price,
+        'materials': 0.0,
+        'payroll': payroll,
+        'outsource': 0.0,
+        'margin': margin,
+        'margin_pct': price > 0.01 ? (margin / price) * 100 : 0.0,
+      };
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getStudioLeads({String? status}) async {
+    try {
+      return await _crm.listStudioLeads(status: status);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<int> addStudioLead({
+    required String name,
+    String phone = '',
+    String carLabel = '',
+    String leadSource = '',
+    String note = '',
+  }) async {
+    return await _crm.createStudioLead(
+      name: name,
+      phone: phone,
+      carLabel: carLabel,
+      leadSource: leadSource,
+      note: note,
+    );
+  }
+
+  Future<void> updateStudioLead(
+    int id, {
+    String? name,
+    String? phone,
+    String? carLabel,
+    String? leadSource,
+    String? note,
+    String? status,
+    int? orderId,
+  }) async {
+    await _crm.patchStudioLead(id, {
+      if (name != null) 'name': name,
+      if (phone != null) 'phone': phone,
+      if (carLabel != null) 'car_label': carLabel,
+      if (leadSource != null) 'lead_source': leadSource,
+      if (note != null) 'note': note,
+      if (status != null) 'status': status,
+      if (orderId != null) 'order_id': orderId,
+    });
+  }
+
+  Future<void> deleteStudioLead(int id) async {
+    await _crm.deleteStudioLead(id);
+  }
+
+  Future<List<Map<String, dynamic>>> getCarWarranties(int carId) async {
+    try {
+      return await _crm.listCarWarranties(carId);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<int> addCarWarranty({
+    required int carId,
+    int? orderId,
+    String kind = 'Керамика',
+    String title = '',
+    String batch = '',
+    required DateTime startedAt,
+    int months = 12,
+    String note = '',
+  }) async {
+    return await _crm.createCarWarranty(
+      carId: carId,
+      orderId: orderId,
+      kind: kind,
+      title: title,
+      batch: batch,
+      startedAt: startedAt.toIso8601String().substring(0, 10),
+      months: months,
+      note: note,
+    );
+  }
+
+  Future<void> deleteCarWarranty(int id) async {
+    await _crm.deleteCarWarranty(id);
+  }
+
+  Future<List<Map<String, dynamic>>> getUpcomingWarrantyReminders({int withinDays = 14}) async {
+    try {
+      return await _crm.listUpcomingWarranties(withinDays: withinDays);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<void> markWarrantyReminderSent(int id) async {
+    await _crm.patchWarranty(id, {'reminder_sent': true});
+  }
+
+  Future<void> setFilmRollScrap(int rollId, bool isScrap) async {
+    // Cloud may not support yet — no-op.
+  }
+
+  Future<List<Map<String, dynamic>>> getPayrollRules() async {
+    try {
+      return await _crm.listPayrollRules();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<int> addPayrollRule({
+    required String workshop,
+    String serviceName = '',
+    String mode = 'percent',
+    required double value,
+    String label = '',
+  }) async {
+    try {
+      return await _crm.createPayrollRule(
+        workshop: workshop,
+        serviceName: serviceName,
+        mode: mode,
+        value: value,
+        label: label,
+      );
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<void> deletePayrollRule(int id) async {
+    try {
+      await _crm.deletePayrollRule(id);
+    } catch (_) {}
   }
 }

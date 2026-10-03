@@ -6,14 +6,18 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 
+from app.config import settings
 from app.db import Base, SessionLocal, engine
 from app.models import Company
-from app.routers import auth, bugs, cash, company, crm, crm_extra, platform, site, updates
+from app.routers import auth, bugs, cash, company, crm, crm_extra, platform, public, site, updates, webhooks, telegram_bot
 from app.seed import ensure_payroll_multi_master, ensure_user_phone_column, seed_database
+
+API_VERSION = "0.16.23"
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings.assert_safe_for_production()
     Base.metadata.create_all(bind=engine)
     ensure_user_phone_column()
     ensure_payroll_multi_master()
@@ -25,7 +29,15 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Det App API", version="0.16.19", lifespan=lifespan)
+_docs = settings.enable_docs or not settings.is_production
+app = FastAPI(
+    title="Det App API",
+    version=API_VERSION,
+    lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+)
 app.include_router(auth.router)
 app.include_router(platform.router)
 app.include_router(company.router)
@@ -35,18 +47,21 @@ app.include_router(cash.router)
 app.include_router(updates.router)
 app.include_router(bugs.router)
 app.include_router(site.router)
+app.include_router(public.router)
+app.include_router(webhooks.router)
+app.include_router(telegram_bot.router)
 
 
 @app.get("/health")
 def health():
-    return {"ok": True, "service": "det-app-api", "version": "0.16.19"}
+    return {"ok": True, "service": "det-app-api", "version": API_VERSION}
 
 
 @app.get("/")
 def root():
     return {
         "name": "Det App API",
-        "docs": "/docs",
+        "docs": "/docs" if _docs else None,
         "health": "/health",
         "auth": "/auth/login",
         "crm": "/crm/orders",
@@ -54,7 +69,13 @@ def root():
         "updates": "/updates/latest.json",
         "bugs": "/bugs",
         "join": "/join?slug=код-студии",
-        "version": "0.16.19",
+        "book": "/book/{slug}",
+        "demo": "/public/demo",
+        "public_leads": "/public/v1/leads",
+        "webhooks": "/crm/webhooks",
+        "telegram_webhook": "/telegram/webhook",
+        "notify_client": "/crm/orders/{id}/notify-client",
+        "version": API_VERSION,
     }
 
 
@@ -76,7 +97,7 @@ def cloud_join(slug: str = Query(default="", min_length=0)):
     intent = (
         f"intent://invite?slug={quote(s)}#Intent;scheme=detapp;"
         f"package=ru.detapp.app;"
-        f"S.browser_fallback_url={quote(f'https://api.det-app.ru/updates/android')};end"
+        f"S.browser_fallback_url={quote('https://api.det-app.ru/updates/android')};end"
     )
     title = escape(studio_name) if studio_name else "Det App"
     slug_safe = escape(s) if s else "—"

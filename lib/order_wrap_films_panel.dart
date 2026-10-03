@@ -37,11 +37,13 @@ class _FilmRow {
   int filmId;
   int? rollId;
   final TextEditingController metersCtrl;
+  final TextEditingController planCtrl;
   final FocusNode metersFocus;
   List<Map<String, dynamic>> rolls = [];
 
-  _FilmRow({required this.filmId, this.rollId, required String metersText})
+  _FilmRow({required this.filmId, this.rollId, required String metersText, String planText = ''})
       : metersCtrl = TextEditingController(text: metersText),
+        planCtrl = TextEditingController(text: planText),
         metersFocus = FocusNode();
 
   double get meters {
@@ -49,8 +51,14 @@ class _FilmRow {
     return double.tryParse(t) ?? 0;
   }
 
+  double get planMeters {
+    final t = planCtrl.text.trim().replaceAll(',', '.');
+    return double.tryParse(t) ?? 0;
+  }
+
   void dispose() {
     metersCtrl.dispose();
+    planCtrl.dispose();
     metersFocus.dispose();
   }
 
@@ -58,6 +66,7 @@ class _FilmRow {
         'filmId': filmId,
         'rollId': rollId,
         'meters': meters,
+        'plan_meters': planMeters,
       };
 }
 
@@ -145,10 +154,12 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
       _catalog = catalog;
       for (final r in current) {
         final meters = (r['meters'] as num?)?.toDouble() ?? 0;
+        final plan = (r['plan_meters'] as num?)?.toDouble() ?? 0;
         final row = _FilmRow(
           filmId: (r['film_id'] as num).toInt(),
           rollId: (r['roll_id'] as num?)?.toInt(),
           metersText: meters > 0 ? _fmtMeters(meters) : '',
+          planText: plan > 0 ? _fmtMeters(plan) : '',
         );
         row.metersFocus.addListener(() => _onMetersFocus(row));
         await _loadRolls(row);
@@ -581,6 +592,25 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
             children: [
               Expanded(
                 child: TextField(
+                  controller: row.planCtrl,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'План, м.п.',
+                    hintText: 'норма',
+                    isDense: true,
+                  ),
+                  onChanged: (_) {
+                    setState(() {});
+                    _scheduleSave();
+                  },
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
                   controller: row.metersCtrl,
                   focusNode: row.metersFocus,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -588,10 +618,13 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
                   ],
-                  decoration: const InputDecoration(
-                    labelText: 'Сколько ушло, м.п.',
+                  decoration: InputDecoration(
+                    labelText: 'Факт, м.п.',
                     hintText: '12.5',
                     isDense: true,
+                    errorText: row.planMeters > 0.001 && row.meters > row.planMeters * 1.1 + 0.001
+                        ? 'Перерасход'
+                        : null,
                   ),
                   onChanged: (_) {
                     setState(() {});
@@ -613,6 +646,31 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
               ),
             ],
           ),
+          if (rollValue != null)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: () async {
+                  final roll = row.rolls.cast<Map<String, dynamic>?>().firstWhere(
+                        (r) => (r?['id'] as num?)?.toInt() == rollValue,
+                        orElse: () => null,
+                      );
+                  final isScrap = ((roll?['is_scrap'] as num?)?.toInt() ?? 0) == 1;
+                  await DatabaseHelper().setFilmRollScrap(rollValue, !isScrap);
+                  await _loadRolls(row);
+                  if (!mounted) return;
+                  setState(() {});
+                  showAppToast(
+                    context,
+                    !isScrap ? 'Рулон помечен как обрезок' : 'Снят флаг обрезка',
+                  );
+                },
+                child: Text(
+                  'Обрезок / partial',
+                  style: GoogleFonts.manrope(fontSize: 11, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
         ],
       ),
     );

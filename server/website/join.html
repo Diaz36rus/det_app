@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#07040c" />
+  <meta name="description" content="Приглашение в студию Det App" />
+  <title>Приглашение — Det App</title>
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/site.css?v=20260915j" />
+</head>
+<body>
+  <header class="top is-solid">
+    <a class="top__brand" href="/">
+      <img src="assets/logo.png" alt="" width="32" height="32" />
+      <span>Det App</span>
+    </a>
+    <nav class="top__nav" style="display:flex">
+      <a href="/#demo">Демо</a>
+      <a class="top__cta" href="/#download">Скачать</a>
+    </nav>
+  </header>
+  <main class="panel" id="join-page">
+    <p class="eyebrow">Приглашение</p>
+    <h2 id="join-title">Код студии</h2>
+    <p class="panel__lead" id="join-lead">Откройте Det App и отправьте заявку на доступ. Должность назначит администратор.</p>
+    <div class="status" id="join-status" data-state="loading">
+      <span class="status__dot" aria-hidden="true"></span>
+      <span class="status__text">Ищем студию…</span>
+    </div>
+    <div class="cred" id="join-creds" hidden>
+      <div class="cred__row">
+        <span class="cred__k">Код</span>
+        <code id="join-slug">—</code>
+        <button type="button" class="cred__copy" id="join-copy">Копировать</button>
+      </div>
+    </div>
+    <div class="panel__actions">
+      <a class="btn btn--primary" id="join-open" href="#">Открыть в Det App</a>
+      <a class="btn btn--ghost" href="/#demo">Скачать приложение</a>
+      <a class="btn btn--ghost" id="join-book" href="/book.html" hidden>Запись для клиента</a>
+    </div>
+    <p class="panel__hint">Нет приложения? Сначала установка, затем снова «Открыть». Либо на экране входа: «Меня пригласили».</p>
+  </main>
+  <footer class="foot">
+    <div class="foot__links">
+      <a href="/">На главную</a>
+      <a href="/privacy.html">Политика</a>
+    </div>
+  </footer>
+  <script src="js/site.js?v=20260915j" defer></script>
+</body>
+</html>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 from pathlib import Path
@@ -30,7 +31,7 @@ def _require_token(token: str | None) -> None:
     expected = (settings.release_upload_token or "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail="RELEASE_UPLOAD_TOKEN не задан на сервере")
-    if not token or token.strip() != expected:
+    if not token or not hmac.compare_digest(token.strip(), expected):
         raise HTTPException(status_code=401, detail="Неверный токен выгрузки")
 
 

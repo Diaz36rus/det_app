@@ -220,7 +220,7 @@ class AppTourLauncher {
   static Future<void> _waitForTourTarget(GlobalKey key, {int tries = 40}) async {
     for (var i = 0; i < tries; i++) {
       final ctx = key.currentContext;
-      if (ctx != null) {
+      if (ctx != null && ctx.mounted) {
         final box = ctx.findRenderObject() as RenderBox?;
         if (box != null && box.hasSize && box.size.width > 0) {
           // Дать анимации открытия дорисоваться

@@ -4,18 +4,39 @@
 	email admin@det-app.ru
 }
 
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		-Server
+	}
+}
+
 det-app.ru {
+	import security_headers
+	header X-Frame-Options "SAMEORIGIN"
+	request_body {
+		max_size 1MB
+	}
 	handle_path /api/* {
 		reverse_proxy api:8000
 	}
 	handle {
 		root * /srv/website
 		encode gzip
+		rewrite /join /join.html
+		rewrite /join/ /join.html
+		rewrite /book /book.html
+		rewrite /book/ /book.html
 		try_files {path} /index.html
 		file_server
 	}
 }
 
+# /book/{slug} студии встраивают iframe'ом — X-Frame-Options здесь не ставим.
 api.det-app.ru {
+	import security_headers
 	reverse_proxy api:8000
 }

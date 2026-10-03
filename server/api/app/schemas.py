@@ -11,7 +11,7 @@ class TokenResponse(BaseModel):
 
 class LoginRequest(BaseModel):
     """login — email или телефон; email оставлен для совместимости."""
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=6, max_length=128)
     login: str | None = Field(default=None, min_length=3, max_length=255)
     email: EmailStr | None = None
 
@@ -67,18 +67,26 @@ class CompanyOut(BaseModel):
     name: str
     slug: str
     is_active: bool
+    booking_enabled: bool = True
+    booking_url: str = ""
+    api_key_set: bool = False
 
     model_config = {"from_attributes": True}
-
-
-class CompanyPatch(BaseModel):
-    is_active: bool | None = None
-    name: str | None = Field(default=None, min_length=2, max_length=200)
 
 
 class CompanyProfilePatch(BaseModel):
     """Правка профиля своей студии (владелец / с company.manage)."""
 
+    name: str | None = Field(default=None, min_length=2, max_length=200)
+    booking_enabled: bool | None = None
+
+
+class ApiKeyOut(BaseModel):
+    api_key: str
+
+
+class CompanyPatch(BaseModel):
+    is_active: bool | None = None
     name: str | None = Field(default=None, min_length=2, max_length=200)
 
 
@@ -108,7 +116,7 @@ class CompanyCreate(BaseModel):
     branch_name: str = Field(default="Основной филиал", min_length=2, max_length=200)
     ## Опционально сразу создать владельца студии (не platform admin).
     owner_email: EmailStr | None = None
-    owner_password: str | None = Field(default=None, min_length=6)
+    owner_password: str | None = Field(default=None, min_length=6, max_length=128)
     owner_full_name: str | None = Field(default=None, max_length=200)
     owner_phone: str | None = Field(default=None, max_length=32)
 
@@ -140,7 +148,7 @@ class UserOut(BaseModel):
 
 class UserCreate(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=6, max_length=128)
     full_name: str = Field(default="", max_length=200)
     phone: str | None = Field(default=None, max_length=32)
     role_ids: list[int] = []
@@ -165,7 +173,7 @@ class AccessRequest(BaseModel):
     """Самостоятельный запрос доступа к компании (ожидает назначение)."""
 
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=6, max_length=128)
     full_name: str = Field(min_length=1, max_length=200)
     phone: str | None = Field(default=None, max_length=32)
     company_slug: str = Field(default="demo", min_length=2, max_length=80)
@@ -179,7 +187,7 @@ class RegisterStudioRequest(BaseModel):
     branch_name: str = Field(default="Основной филиал", min_length=2, max_length=200)
     full_name: str = Field(min_length=1, max_length=200)
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=6, max_length=128)
     phone: str | None = Field(default=None, max_length=32)
 
 
@@ -211,6 +219,8 @@ class CrmClientOut(BaseModel):
     name: str
     phone: str
     is_vip: bool
+    telegram_linked: bool = False
+    telegram_chat_id: str = ""
 
     model_config = {"from_attributes": True}
 
@@ -304,6 +314,8 @@ class CrmOrderCreate(BaseModel):
     promo_code: str = Field(default="", max_length=80)
     master_ids: list[int] = []
     receptionist_id: int | None = None
+    lead_source: str = Field(default="", max_length=80)
+    deposit_required: float = 0
     items: list[CrmOrderItemIn] = []
 
 
@@ -334,6 +346,8 @@ class CrmOrderUpdate(BaseModel):
     car_id: int | None = None
     master_ids: list[int] | None = None
     receptionist_id: int | None = None
+    lead_source: str | None = Field(default=None, max_length=80)
+    deposit_required: float | None = None
     items: list[CrmOrderItemIn] | None = None
 
 
@@ -369,6 +383,8 @@ class CrmOrderOut(BaseModel):
     is_workshop_completed: bool = False
     master_ids: list[int] = []
     receptionist_id: int | None = None
+    lead_source: str = ""
+    deposit_required: float = 0
     items: list[CrmOrderItemOut] = []
     client_name: str | None = None
     car_label: str | None = None

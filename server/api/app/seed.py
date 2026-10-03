@@ -126,12 +126,20 @@ def ensure_user_phone_column() -> None:
             ("tech_wash_end", "VARCHAR(32) DEFAULT ''"),
             ("is_workshop_completed", "BOOLEAN DEFAULT FALSE"),
             ("receptionist_id", "INTEGER"),
+            ("lead_source", "VARCHAR(80) DEFAULT ''"),
+            ("deposit_required", "DOUBLE PRECISION DEFAULT 0"),
         ]:
             conn.execute(text(f"ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS {col} {typ}"))
         conn.execute(
             text(
                 "ALTER TABLE crm_inventory_items "
                 "ADD COLUMN IF NOT EXISTS meters_per_roll DOUBLE PRECISION DEFAULT 0"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE crm_inventory_items "
+                "ADD COLUMN IF NOT EXISTS unit_cost DOUBLE PRECISION DEFAULT 0"
             )
         )
         for col, typ in [
@@ -161,6 +169,33 @@ def ensure_user_phone_column() -> None:
                 "ON cash_registers (company_id, name)"
             )
         )
+        conn.execute(
+            text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS api_key VARCHAR(64) DEFAULT ''")
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE companies ADD COLUMN IF NOT EXISTS booking_enabled "
+                "BOOLEAN DEFAULT TRUE"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE crm_clients ADD COLUMN IF NOT EXISTS telegram_chat_id "
+                "VARCHAR(64) DEFAULT ''"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE crm_clients ADD COLUMN IF NOT EXISTS telegram_linked_at "
+                "VARCHAR(32) DEFAULT ''"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE crm_masters ADD COLUMN IF NOT EXISTS on_shift "
+                "BOOLEAN DEFAULT FALSE"
+            )
+        )
 
 
 def ensure_payroll_multi_master() -> None:
@@ -185,6 +220,25 @@ def ensure_payroll_multi_master() -> None:
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_order_workshop_payroll_master "
                 "ON crm_order_workshop_payroll (order_id, workshop, master_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE TABLE IF NOT EXISTS crm_payroll_rules ("
+                "id SERIAL PRIMARY KEY, "
+                "company_id INTEGER NOT NULL, "
+                "workshop VARCHAR(80) NOT NULL DEFAULT '', "
+                "service_name VARCHAR(300) NOT NULL DEFAULT '', "
+                "mode VARCHAR(20) NOT NULL DEFAULT 'percent', "
+                "value DOUBLE PRECISION NOT NULL DEFAULT 0, "
+                "label VARCHAR(200) NOT NULL DEFAULT '', "
+                "is_active BOOLEAN NOT NULL DEFAULT TRUE)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_crm_payroll_rules_company_id "
+                "ON crm_payroll_rules (company_id)"
             )
         )
         for col in ("price2", "price3", "price4", "fixed_price"):

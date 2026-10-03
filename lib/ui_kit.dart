@@ -171,8 +171,11 @@ class _CarBrandMarkState extends State<CarBrandMark> {
   Widget build(BuildContext context) {
     final size = widget.size;
     final asset = _asset;
-    final pad = size * 0.08;
+    final pad = size * 0.06;
     final isPng = asset != null && asset.endsWith('.png');
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    // Декодируем с запасом под retina — иначе мелкие PNG мылятся на 60–84px.
+    final cachePx = (size * dpr * 2.0).round().clamp(96, 512);
     // Единая светлая плитка под цветные эмблемы (и ч/б SVG fallback).
     const plate = Color(0xFFF2F4F7);
     return Container(
@@ -202,6 +205,8 @@ class _CarBrandMarkState extends State<CarBrandMark> {
                       asset,
                       fit: BoxFit.contain,
                       filterQuality: FilterQuality.high,
+                      isAntiAlias: true,
+                      cacheWidth: cachePx,
                       errorBuilder: (_, __, ___) {
                         final stem = asset.split('/').last.replaceAll('.png', '');
                         final svg = '${CarBrands.assetDir}/$stem.svg';
@@ -229,7 +234,7 @@ class _CarBrandMarkState extends State<CarBrandMark> {
                         width: size,
                         height: size,
                         fit: BoxFit.contain,
-                        // Исходные цвета SVG (часто ч/б), без перекраски в белый.
+                        allowDrawingOutsideViewBox: false,
                         placeholderBuilder: (_) => Text(
                           CarBrandMark.brandInitials(widget.makeModel),
                           style: GoogleFonts.manrope(

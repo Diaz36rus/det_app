@@ -4,6 +4,8 @@ class CrmClient {
   final String name;
   final String phone;
   final bool isVip;
+  final bool telegramLinked;
+  final String telegramChatId;
 
   const CrmClient({
     required this.id,
@@ -11,6 +13,8 @@ class CrmClient {
     required this.name,
     required this.phone,
     required this.isVip,
+    this.telegramLinked = false,
+    this.telegramChatId = '',
   });
 
   factory CrmClient.fromJson(Map<String, dynamic> j) => CrmClient(
@@ -19,6 +23,9 @@ class CrmClient {
         name: j['name']?.toString() ?? '',
         phone: j['phone']?.toString() ?? '',
         isVip: j['is_vip'] == true,
+        telegramLinked: j['telegram_linked'] == true ||
+            (j['telegram_chat_id']?.toString() ?? '').trim().isNotEmpty,
+        telegramChatId: j['telegram_chat_id']?.toString() ?? '',
       );
 }
 
@@ -159,6 +166,8 @@ class CrmOrder {
   final double discountPercent;
   final double discountFixed;
   final String promoCode;
+  final String leadSource;
+  final double depositRequired;
   final bool handoverReady;
   final bool handoverWorks;
   final bool handoverPayment;
@@ -195,6 +204,8 @@ class CrmOrder {
     this.discountPercent = 0,
     this.discountFixed = 0,
     this.promoCode = '',
+    this.leadSource = '',
+    this.depositRequired = 0,
     this.handoverReady = false,
     this.handoverWorks = false,
     this.handoverPayment = false,
@@ -234,6 +245,8 @@ class CrmOrder {
         discountPercent: (j['discount_percent'] as num?)?.toDouble() ?? 0,
         discountFixed: (j['discount_fixed'] as num?)?.toDouble() ?? 0,
         promoCode: j['promo_code']?.toString() ?? '',
+        leadSource: j['lead_source']?.toString() ?? '',
+        depositRequired: (j['deposit_required'] as num?)?.toDouble() ?? 0,
         handoverReady: j['handover_ready'] == true,
         handoverWorks: j['handover_works'] == true,
         handoverPayment: j['handover_payment'] == true,
@@ -259,12 +272,20 @@ class CrmMaster {
   final String name;
   final String role;
   final bool isActive;
-  const CrmMaster({required this.id, required this.name, required this.role, required this.isActive});
+  final bool onShift;
+  const CrmMaster({
+    required this.id,
+    required this.name,
+    required this.role,
+    required this.isActive,
+    this.onShift = false,
+  });
   factory CrmMaster.fromJson(Map<String, dynamic> j) => CrmMaster(
         id: (j['id'] as num).toInt(),
         name: j['name']?.toString() ?? '',
         role: j['role']?.toString() ?? '',
         isActive: j['is_active'] != false,
+        onShift: j['on_shift'] == true || j['on_shift'] == 1,
       );
 }
 
@@ -330,6 +351,7 @@ class CrmInventoryItem {
   final String category;
   final double minQty;
   final double metersPerRoll;
+  final double unitCost;
   const CrmInventoryItem({
     required this.id,
     required this.name,
@@ -338,6 +360,7 @@ class CrmInventoryItem {
     required this.category,
     this.minQty = 0,
     this.metersPerRoll = 0,
+    this.unitCost = 0,
   });
   factory CrmInventoryItem.fromJson(Map<String, dynamic> j) => CrmInventoryItem(
         id: (j['id'] as num).toInt(),
@@ -347,6 +370,7 @@ class CrmInventoryItem {
         category: j['category']?.toString() ?? '',
         minQty: (j['min_qty'] as num?)?.toDouble() ?? 0,
         metersPerRoll: (j['meters_per_roll'] as num?)?.toDouble() ?? 0,
+        unitCost: (j['unit_cost'] as num?)?.toDouble() ?? 0,
       );
 }
 

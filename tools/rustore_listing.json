@@ -1,0 +1,22 @@
+{
+  "package_name": "ru.detapp.app",
+  "app_name": "Det App",
+  "app_type": "MAIN",
+  "categories": ["business"],
+  "age_legal": "0+",
+  "short_description": "Заказы, клиенты и касса для детейлинг-студии — с телефона и с ПК.",
+  "full_description": "Det App — рабочее приложение для детейлинг-студии: заказы, клиенты, услуги и мастера в одном месте.\n\nНа доске видно, где какая машина и на каком этапе работа. В заказе — клиент, авто, услуги и кто делает. Рядом календарь, касса, склад и права по ролям: владелец видит всё, мастер — своё.\n\nМожно вести смену с телефона и с компьютера — данные студии общие. Коллегу добавляете кодом или QR.\n\nДля работы нужен вход в аккаунт студии.",
+  "moder_info": "Демо: owner@demo.det-app.ru / DetAppAdmin2026! Нужен вход в студию.",
+  "developer_contacts": {
+    "website": "https://det-app.ru"
+  },
+  "screenshots": [
+    "01_board.png",
+    "02_order.png",
+    "03_calendar.png",
+    "04_cash.png",
+    "05_clients.png",
+    "06_inventory.png"
+  ],
+  "icon": "app_icon_512.png"
+}

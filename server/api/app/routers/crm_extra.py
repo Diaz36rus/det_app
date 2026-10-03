@@ -7,6 +7,10 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.crm_extra_schemas import (
+    CrmCarWarrantyCreate,
+    CrmCarWarrantyOut,
+    CrmCarWarrantyUpcomingOut,
+    CrmCarWarrantyUpdate,
     CrmDefectCreate,
     CrmDefectOut,
     CrmFilmRollCreate,
@@ -18,11 +22,14 @@ from app.crm_extra_schemas import (
     CrmInventoryOut,
     CrmInventoryUpdate,
     CrmMasterCreate,
+    CrmMasterOnShiftIn,
     CrmMasterOut,
     CrmMasterUpdate,
     CrmOrderWrapFilmOut,
     CrmOrderWrapFilmsPut,
     CrmOrderWrapFilmsPutResult,
+    CrmPayrollRuleCreate,
+    CrmPayrollRuleOut,
     CrmPromocodeCreate,
     CrmPromocodeOut,
     CrmRecipeApply,
@@ -33,16 +40,21 @@ from app.crm_extra_schemas import (
     CrmServiceOut,
     CrmServiceUpdate,
     CrmStatsOut,
+    CrmStudioLeadCreate,
+    CrmStudioLeadOut,
+    CrmStudioLeadUpdate,
     CrmWorkshopRoleCreate,
     CrmWorkshopRoleOut,
     CrmWrapFilmOut,
 )
 from app.db import get_db
 from app.deps import require_permissions
+from app.lead_util import create_studio_lead
 from app.models import (
     Branch,
     CashFlow,
     CrmCar,
+    CrmCarWarranty,
     CrmClient,
     CrmDefect,
     CrmFilmRoll,
@@ -52,9 +64,11 @@ from app.models import (
     CrmOrder,
     CrmOrderWorkshopPayroll,
     CrmOrderWrapFilm,
+    CrmPayrollRule,
     CrmPromocode,
     CrmService,
     CrmServiceRecipe,
+    CrmStudioLead,
     CrmWorkshopRole,
     User,
 )
@@ -103,6 +117,54 @@ def create_master(
     return row
 
 
+@router.get("/masters/on-shift", response_model=list[CrmMasterOut])
+def list_masters_on_shift(
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    return list(
+        db.scalars(
+            select(CrmMaster)
+            .where(
+                CrmMaster.company_id == cid,
+                CrmMaster.is_active.is_(True),
+                CrmMaster.on_shift.is_(True),
+            )
+            .order_by(CrmMaster.name)
+        ).all()
+    )
+
+
+@router.put("/me/on-shift", response_model=CrmMasterOut)
+def set_my_on_shift(
+    body: CrmMasterOnShiftIn,
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    """Текущий пользователь (привязанный к мастеру) включает/выключает «На смене»."""
+    cid = _company_id(user)
+    mid = getattr(user, "master_id", None)
+    if mid is None:
+        raise HTTPException(
+            400,
+            "Аккаунт не привязан к мастеру — попросите админа связать профиль",
+        )
+    row = db.scalar(
+        select(CrmMaster).where(
+            CrmMaster.id == int(mid),
+            CrmMaster.company_id == cid,
+            CrmMaster.is_active.is_(True),
+        )
+    )
+    if row is None:
+        raise HTTPException(404, "Мастер не найден")
+    row.on_shift = bool(body.on_shift)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
 @router.patch("/masters/{master_id}", response_model=CrmMasterOut)
 def update_master(
     master_id: int,
@@ -120,6 +182,8 @@ def update_master(
         row.role = body.role
     if body.is_active is not None:
         row.is_active = body.is_active
+    if body.on_shift is not None:
+        row.on_shift = bool(body.on_shift)
     db.commit()
     db.refresh(row)
     return row
@@ -137,6 +201,7 @@ def delete_master(
     if row is None:
         raise HTTPException(404, "Мастер не найден")
     row.is_active = False
+    row.on_shift = False
     db.commit()
     db.refresh(row)
     return {"ok": True, "deleted": master_id, "is_active": False}
@@ -378,6 +443,7 @@ def create_inventory(
         category=category,
         min_qty=float(body.min_qty or 0),
         meters_per_roll=float(getattr(body, "meters_per_roll", 0) or 0),
+        unit_cost=float(getattr(body, "unit_cost", 0) or 0),
     )
     db.add(row)
     db.commit()
@@ -525,6 +591,8 @@ def update_inventory(
         item.min_qty = float(body.min_qty)
     if body.meters_per_roll is not None:
         item.meters_per_roll = float(body.meters_per_roll)
+    if body.unit_cost is not None:
+        item.unit_cost = float(body.unit_cost)
     if body.quantity is not None:
         item.quantity = float(body.quantity)
         delta = float(body.quantity) - old_qty
@@ -583,6 +651,14 @@ def list_inventory_moves(
     return list(rows)
 
 
+def _own_order_id(db: Session, cid: int, order_id: int | None) -> int | None:
+    """Ссылка на заказ только своей студии; иначе без привязки."""
+    if not order_id:
+        return None
+    hit = db.scalar(select(CrmOrder.id).where(CrmOrder.id == order_id, CrmOrder.company_id == cid))
+    return int(hit) if hit is not None else None
+
+
 @router.post("/inventory/moves", response_model=CrmInventoryMoveOut)
 def create_inventory_move(
     body: CrmInventoryMoveCreate,
@@ -605,7 +681,7 @@ def create_inventory_move(
         delta=delta,
         balance_after=float(item.quantity),
         reason=body.reason or "adjust",
-        order_id=body.order_id,
+        order_id=_own_order_id(db, cid, body.order_id),
         note=body.note or "",
     )
     db.add(move)
@@ -626,6 +702,7 @@ def _recipe_out(row: CrmServiceRecipe, inv: CrmInventoryItem | None) -> CrmRecip
         inventory_name=inv.name if inv else "",
         unit=(inv.unit if inv else "шт") or "шт",
         stock=float(inv.quantity) if inv else 0.0,
+        unit_cost=float(getattr(inv, "unit_cost", 0) or 0) if inv else 0.0,
     )
 
 
@@ -715,6 +792,7 @@ def deduct_recipe(
 ):
     cid = _company_id(user)
     name = body.service_name.strip()
+    order_id = _own_order_id(db, cid, body.order_id)
     warnings: list[str] = []
     rows = db.scalars(
         select(CrmServiceRecipe).where(
@@ -739,7 +817,7 @@ def deduct_recipe(
                 delta=-qty,
                 balance_after=float(inv.quantity),
                 reason="recipe_deduct",
-                order_id=body.order_id,
+                order_id=order_id,
                 note=f"Рецепт: {name}",
             )
         )
@@ -755,6 +833,7 @@ def restore_recipe(
 ):
     cid = _company_id(user)
     name = body.service_name.strip()
+    order_id = _own_order_id(db, cid, body.order_id)
     rows = db.scalars(
         select(CrmServiceRecipe).where(
             CrmServiceRecipe.company_id == cid, CrmServiceRecipe.service_name == name
@@ -775,7 +854,7 @@ def restore_recipe(
                 delta=qty,
                 balance_after=float(inv.quantity),
                 reason="recipe_restore",
-                order_id=body.order_id,
+                order_id=order_id,
                 note=f"Возврат рецепта: {name}",
             )
         )
@@ -1154,6 +1233,81 @@ def _day_key(dt: datetime | None) -> str:
     return dt.astimezone(timezone.utc).date().isoformat()
 
 
+def _order_activity_day(o: CrmOrder) -> str:
+    """День активности заказа: end → start → created_at."""
+    for raw in (o.end_time, o.start_time):
+        stamp = (raw or "").replace("T", " ").strip()
+        if len(stamp) >= 10:
+            return stamp[:10]
+    return _day_key(o.created_at)
+
+
+def _order_margin_breakdown(
+    order: CrmOrder,
+    recipes_by_service: dict[str, list[tuple[float, float]]],
+    inv_cost: dict[int, float],
+    wrap_by_order: dict[int, list[tuple[float, int]]],
+    payroll_by_order: dict[int, float],
+) -> dict[str, float]:
+    price = float(order.price or 0)
+    materials = 0.0
+    for it in order.items or []:
+        if not it.is_done:
+            continue
+        name = (it.name or "").strip().lower()
+        if not name:
+            continue
+        for qty, cost in recipes_by_service.get(name, []):
+            materials += float(qty or 0) * float(cost or 0)
+    for meters, film_id in wrap_by_order.get(int(order.id), []):
+        cost = float(inv_cost.get(film_id, 0) or 0)
+        materials += float(meters or 0) * cost
+    payroll = float(payroll_by_order.get(int(order.id), 0) or 0)
+    outsource = 0.0
+    margin = price - materials - payroll - outsource
+    return {
+        "price": price,
+        "materials": materials,
+        "payroll": payroll,
+        "outsource": outsource,
+        "margin": margin,
+    }
+
+
+def _lead_out(row: CrmStudioLead) -> CrmStudioLeadOut:
+    return CrmStudioLeadOut(
+        id=row.id,
+        company_id=row.company_id,
+        name=row.name or "",
+        phone=row.phone or "",
+        car_label=row.car_label or "",
+        lead_source=row.lead_source or "",
+        note=row.note or "",
+        status=row.status or "new",
+        order_id=row.order_id,
+        created_at=row.created_at.isoformat() if row.created_at else None,
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+    )
+
+
+def _warranty_out(row: CrmCarWarranty) -> CrmCarWarrantyOut:
+    return CrmCarWarrantyOut(
+        id=row.id,
+        company_id=row.company_id,
+        car_id=row.car_id,
+        order_id=row.order_id,
+        kind=row.kind or "",
+        title=row.title or "",
+        batch=row.batch or "",
+        started_at=row.started_at or "",
+        months=int(row.months or 0),
+        ends_at=row.ends_at or "",
+        note=row.note or "",
+        reminder_sent=bool(row.reminder_sent),
+        created_at=row.created_at.isoformat() if row.created_at else None,
+    )
+
+
 @router.get("/stats", response_model=CrmStatsOut)
 def company_stats(
     master_day: str | None = Query(default=None, description="YYYY-MM-DD"),
@@ -1330,6 +1484,97 @@ def company_stats(
         key=lambda r: (-int(r["orders_count"]), -float(r["payroll"]), -float(r["revenue"]), str(r["name"]))
     )
 
+    payroll_total_by_order: dict[int, float] = {}
+    for p in db.scalars(
+        select(CrmOrderWorkshopPayroll).where(CrmOrderWorkshopPayroll.company_id == cid)
+    ).all():
+        oid = int(p.order_id)
+        payroll_total_by_order[oid] = payroll_total_by_order.get(oid, 0.0) + float(p.amount or 0)
+
+    month_start = now.strftime("%Y-%m-01")
+    month_end = today
+    payroll_accrued = 0.0
+    orders_by_id = {int(o.id): o for o in orders}
+    for p in db.scalars(
+        select(CrmOrderWorkshopPayroll).where(CrmOrderWorkshopPayroll.company_id == cid)
+    ).all():
+        o = orders_by_id.get(int(p.order_id))
+        if o is None:
+            continue
+        act_day = _order_activity_day(o)
+        if act_day and month_start <= act_day <= month_end:
+            payroll_accrued += float(p.amount or 0)
+
+    payroll_paid = 0.0
+    for f in db.scalars(
+        select(CashFlow).where(CashFlow.company_id == cid, CashFlow.type == "Расход")
+    ).all():
+        if (f.category or "") not in ("Зарплата", "Аванс"):
+            continue
+        fday = _day_key(f.created_at)
+        if fday and month_start <= fday <= month_end:
+            payroll_paid += float(f.amount or 0)
+
+    if payroll_accrued > 0 or payroll_paid > 0:
+        payroll_due = max(0.0, payroll_accrued - payroll_paid)
+    else:
+        payroll_due = sum(
+            payroll_total_by_order.get(int(o.id), 0.0) for o in open_orders
+        )
+
+    by_lead_source_map: dict[str, dict] = {}
+    for o in completed_period:
+        src = (getattr(o, "lead_source", None) or "").strip() or "Не указан"
+        bucket = by_lead_source_map.setdefault(
+            src, {"name": src, "count": 0, "revenue": 0.0}
+        )
+        bucket["count"] += 1
+        bucket["revenue"] += float(o.paid_amount or 0)
+    by_lead_source = sorted(
+        by_lead_source_map.values(),
+        key=lambda r: (-float(r["revenue"]), -int(r["count"]), str(r["name"])),
+    )
+
+    inv_cost = {
+        int(i.id): float(i.unit_cost or 0)
+        for i in db.scalars(
+            select(CrmInventoryItem).where(CrmInventoryItem.company_id == cid)
+        ).all()
+    }
+    recipes_by_service: dict[str, list[tuple[float, float]]] = {}
+    for r in db.scalars(
+        select(CrmServiceRecipe).where(CrmServiceRecipe.company_id == cid)
+    ).all():
+        key = (r.service_name or "").strip().lower()
+        if not key:
+            continue
+        cost = inv_cost.get(int(r.inventory_id), 0.0)
+        recipes_by_service.setdefault(key, []).append((float(r.qty or 0), cost))
+
+    wrap_by_order: dict[int, list[tuple[float, int]]] = {}
+    for w in db.scalars(
+        select(CrmOrderWrapFilm).where(CrmOrderWrapFilm.company_id == cid)
+    ).all():
+        wrap_by_order.setdefault(int(w.order_id), []).append(
+            (float(w.meters or 0), int(w.film_id))
+        )
+
+    margin_period = materials_period = payroll_period = 0.0
+    for o in completed_period:
+        br = _order_margin_breakdown(
+            o, recipes_by_service, inv_cost, wrap_by_order, payroll_total_by_order
+        )
+        margin_period += br["margin"]
+        materials_period += br["materials"]
+        payroll_period += br["payroll"]
+
+    owner_pulse = {
+        "revenue_today": revenue_today,
+        "open_debt": open_debt,
+        "open_orders": float(len(open_orders)),
+        "payroll_due": payroll_due,
+    }
+
     return CrmStatsOut(
         revenue_today=revenue_today,
         revenue_month=revenue_month,
@@ -1347,7 +1592,396 @@ def company_stats(
         by_status=by_status,
         master_day=master_day_rows,
         master_day_date=day,
+        owner_pulse=owner_pulse,
+        by_lead_source=by_lead_source,
+        margin_period=margin_period,
+        materials_period=materials_period,
+        payroll_period=payroll_period,
     )
+
+
+@router.get("/orders/{order_id}/margin")
+def order_margin(
+    order_id: int,
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    order = db.scalar(
+        select(CrmOrder)
+        .where(CrmOrder.id == order_id, CrmOrder.company_id == cid)
+        .options(selectinload(CrmOrder.items))
+    )
+    if order is None:
+        raise HTTPException(404, "Заказ не найден")
+
+    inv_cost = {
+        int(i.id): float(i.unit_cost or 0)
+        for i in db.scalars(select(CrmInventoryItem).where(CrmInventoryItem.company_id == cid)).all()
+    }
+    recipes_by_service: dict[str, list[tuple[float, float]]] = {}
+    for r in db.scalars(select(CrmServiceRecipe).where(CrmServiceRecipe.company_id == cid)).all():
+        key = (r.service_name or "").strip().lower()
+        if not key:
+            continue
+        recipes_by_service.setdefault(key, []).append(
+            (float(r.qty or 0), float(inv_cost.get(int(r.inventory_id), 0)))
+        )
+    wrap_by_order: dict[int, list[tuple[float, int]]] = {int(order.id): []}
+    for wf in db.scalars(
+        select(CrmOrderWrapFilm).where(
+            CrmOrderWrapFilm.company_id == cid, CrmOrderWrapFilm.order_id == order_id
+        )
+    ).all():
+        wrap_by_order[int(order.id)].append((float(wf.meters or 0), int(wf.film_id)))
+    payroll_sum = 0.0
+    for p in db.scalars(
+        select(CrmOrderWorkshopPayroll).where(
+            CrmOrderWorkshopPayroll.company_id == cid,
+            CrmOrderWorkshopPayroll.order_id == order_id,
+        )
+    ).all():
+        payroll_sum += float(p.amount or 0)
+    br = _order_margin_breakdown(
+        order,
+        recipes_by_service,
+        inv_cost,
+        wrap_by_order,
+        {int(order.id): payroll_sum},
+    )
+    price = br["price"]
+    margin = br["margin"]
+    return {
+        **br,
+        "margin_pct": (margin / price * 100.0) if price > 0.01 else 0.0,
+    }
+
+
+# --- Studio leads ---
+
+
+@router.get("/leads", response_model=list[CrmStudioLeadOut])
+def list_studio_leads(
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    rows = list(
+        db.scalars(
+            select(CrmStudioLead)
+            .where(CrmStudioLead.company_id == cid)
+            .order_by(CrmStudioLead.id.desc())
+        ).all()
+    )
+    return [_lead_out(r) for r in rows]
+
+
+@router.post("/leads", response_model=CrmStudioLeadOut)
+def create_studio_lead_endpoint(
+    body: CrmStudioLeadCreate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    if body.order_id is not None:
+        order = db.scalar(
+            select(CrmOrder).where(CrmOrder.id == body.order_id, CrmOrder.company_id == cid)
+        )
+        if order is None:
+            raise HTTPException(404, "Заказ не найден")
+    row = create_studio_lead(
+        db,
+        company_id=cid,
+        name=body.name,
+        phone=body.phone,
+        car_label=body.car_label,
+        lead_source=body.lead_source,
+        note=body.note,
+        status=body.status or "new",
+        order_id=body.order_id,
+    )
+    return _lead_out(row)
+
+
+@router.patch("/leads/{lead_id}", response_model=CrmStudioLeadOut)
+def update_studio_lead(
+    lead_id: int,
+    body: CrmStudioLeadUpdate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmStudioLead).where(CrmStudioLead.id == lead_id, CrmStudioLead.company_id == cid)
+    )
+    if row is None:
+        raise HTTPException(404, "Лид не найден")
+    if body.name is not None:
+        row.name = body.name.strip()
+    if body.phone is not None:
+        row.phone = body.phone.strip()
+    if body.car_label is not None:
+        row.car_label = body.car_label.strip()
+    if body.lead_source is not None:
+        row.lead_source = body.lead_source.strip()
+    if body.note is not None:
+        row.note = body.note
+    if body.status is not None:
+        row.status = body.status.strip() or row.status
+    if "order_id" in body.model_fields_set:
+        if body.order_id is not None:
+            order = db.scalar(
+                select(CrmOrder).where(CrmOrder.id == body.order_id, CrmOrder.company_id == cid)
+            )
+            if order is None:
+                raise HTTPException(404, "Заказ не найден")
+        row.order_id = body.order_id
+    db.commit()
+    db.refresh(row)
+    return _lead_out(row)
+
+
+@router.delete("/leads/{lead_id}")
+def delete_studio_lead(
+    lead_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmStudioLead).where(CrmStudioLead.id == lead_id, CrmStudioLead.company_id == cid)
+    )
+    if row is None:
+        raise HTTPException(404, "Лид не найден")
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deleted": lead_id}
+
+
+# --- Car warranties ---
+
+
+@router.get("/warranties/upcoming", response_model=list[CrmCarWarrantyUpcomingOut])
+def list_upcoming_warranties(
+    within_days: int = Query(default=14, ge=1, le=365),
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    today = datetime.now(timezone.utc).date()
+    until = today + timedelta(days=within_days)
+    from_key = today.isoformat()
+    until_key = until.isoformat()
+    rows = db.execute(
+        select(CrmCarWarranty, CrmCar, CrmClient)
+        .join(CrmCar, CrmCar.id == CrmCarWarranty.car_id)
+        .join(CrmClient, CrmClient.id == CrmCar.client_id)
+        .where(
+            CrmCarWarranty.company_id == cid,
+            CrmCarWarranty.ends_at != "",
+            CrmCarWarranty.ends_at >= from_key,
+            CrmCarWarranty.ends_at <= until_key,
+        )
+        .order_by(CrmCarWarranty.ends_at)
+    ).all()
+    out: list[CrmCarWarrantyUpcomingOut] = []
+    for w, car, client in rows:
+        base = _warranty_out(w)
+        out.append(
+            CrmCarWarrantyUpcomingOut(
+                **base.model_dump(),
+                make_model=car.make_model or "",
+                plate=car.plate or "",
+                client_name=client.name or "",
+                client_phone=client.phone or "",
+            )
+        )
+    return out
+
+
+@router.get("/warranties", response_model=list[CrmCarWarrantyOut])
+def list_car_warranties(
+    car_id: int | None = None,
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    q = select(CrmCarWarranty).where(CrmCarWarranty.company_id == cid)
+    if car_id is not None:
+        q = q.where(CrmCarWarranty.car_id == car_id)
+    rows = list(db.scalars(q.order_by(CrmCarWarranty.id.desc())).all())
+    return [_warranty_out(r) for r in rows]
+
+
+@router.post("/warranties", response_model=CrmCarWarrantyOut)
+def create_car_warranty(
+    body: CrmCarWarrantyCreate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    car = db.scalar(
+        select(CrmCar).where(CrmCar.id == body.car_id, CrmCar.company_id == cid)
+    )
+    if car is None:
+        raise HTTPException(404, "Авто не найдено")
+    if body.order_id is not None:
+        order = db.scalar(
+            select(CrmOrder).where(CrmOrder.id == body.order_id, CrmOrder.company_id == cid)
+        )
+        if order is None:
+            raise HTTPException(404, "Заказ не найден")
+    row = CrmCarWarranty(
+        company_id=cid,
+        car_id=body.car_id,
+        order_id=body.order_id,
+        kind=(body.kind or "").strip(),
+        title=(body.title or "").strip(),
+        batch=(body.batch or "").strip(),
+        started_at=body.started_at or "",
+        months=int(body.months or 0),
+        ends_at=body.ends_at or "",
+        note=body.note or "",
+        reminder_sent=bool(body.reminder_sent),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _warranty_out(row)
+
+
+@router.patch("/warranties/{warranty_id}", response_model=CrmCarWarrantyOut)
+def update_car_warranty(
+    warranty_id: int,
+    body: CrmCarWarrantyUpdate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmCarWarranty).where(
+            CrmCarWarranty.id == warranty_id, CrmCarWarranty.company_id == cid
+        )
+    )
+    if row is None:
+        raise HTTPException(404, "Гарантия не найдена")
+    if body.car_id is not None:
+        car = db.scalar(
+            select(CrmCar).where(CrmCar.id == body.car_id, CrmCar.company_id == cid)
+        )
+        if car is None:
+            raise HTTPException(404, "Авто не найдено")
+        row.car_id = body.car_id
+    if "order_id" in body.model_fields_set:
+        if body.order_id is not None:
+            order = db.scalar(
+                select(CrmOrder).where(CrmOrder.id == body.order_id, CrmOrder.company_id == cid)
+            )
+            if order is None:
+                raise HTTPException(404, "Заказ не найден")
+        row.order_id = body.order_id
+    if body.kind is not None:
+        row.kind = body.kind.strip()
+    if body.title is not None:
+        row.title = body.title.strip()
+    if body.batch is not None:
+        row.batch = body.batch.strip()
+    if body.started_at is not None:
+        row.started_at = body.started_at
+    if body.months is not None:
+        row.months = int(body.months)
+    if body.ends_at is not None:
+        row.ends_at = body.ends_at
+    if body.note is not None:
+        row.note = body.note
+    if body.reminder_sent is not None:
+        row.reminder_sent = bool(body.reminder_sent)
+    db.commit()
+    db.refresh(row)
+    return _warranty_out(row)
+
+
+@router.delete("/warranties/{warranty_id}")
+def delete_car_warranty(
+    warranty_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmCarWarranty).where(
+            CrmCarWarranty.id == warranty_id, CrmCarWarranty.company_id == cid
+        )
+    )
+    if row is None:
+        raise HTTPException(404, "Гарантия не найдена")
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deleted": warranty_id}
+
+
+# --- Payroll rules ---
+
+_PAYROLL_MODES = frozenset({"percent", "fixed"})
+
+
+@router.get("/payroll-rules", response_model=list[CrmPayrollRuleOut])
+def list_payroll_rules(
+    user: User = Depends(require_permissions("orders.read")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    return list(
+        db.scalars(
+            select(CrmPayrollRule)
+            .where(CrmPayrollRule.company_id == cid, CrmPayrollRule.is_active.is_(True))
+            .order_by(CrmPayrollRule.id)
+        ).all()
+    )
+
+
+@router.post("/payroll-rules", response_model=CrmPayrollRuleOut)
+def create_payroll_rule(
+    body: CrmPayrollRuleCreate,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    mode = (body.mode or "percent").strip().lower()
+    if mode not in _PAYROLL_MODES:
+        raise HTTPException(status_code=422, detail="mode: percent или fixed")
+    row = CrmPayrollRule(
+        company_id=cid,
+        workshop=body.workshop.strip(),
+        service_name=(body.service_name or "").strip(),
+        mode=mode,
+        value=float(body.value or 0),
+        label=(body.label or "").strip(),
+        is_active=bool(body.is_active),
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/payroll-rules/{rule_id}")
+def delete_payroll_rule(
+    rule_id: int,
+    user: User = Depends(require_permissions("orders.write")),
+    db: Session = Depends(get_db),
+):
+    cid = _company_id(user)
+    row = db.scalar(
+        select(CrmPayrollRule).where(
+            CrmPayrollRule.id == rule_id, CrmPayrollRule.company_id == cid
+        )
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Правило не найдено")
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deleted": rule_id}
 
 
 # --- Workshop roles ---

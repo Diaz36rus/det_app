@@ -377,7 +377,7 @@ class DatabaseHelper {
   }
 
   Future<void> _onCreate(Database db, int version) async {
-    await db.execute('''CREATE TABLE clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT DEFAULT '', is_vip INTEGER DEFAULT 0)''');
+    await db.execute('''CREATE TABLE clients (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, phone TEXT DEFAULT '', is_vip INTEGER DEFAULT 0, telegram_chat_id TEXT DEFAULT '', telegram_linked_at TEXT DEFAULT '')''');
     await db.execute('''CREATE TABLE cars (id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL, make_model TEXT NOT NULL, plate TEXT DEFAULT '', vin TEXT DEFAULT '', category TEXT DEFAULT '1', year INTEGER DEFAULT 0)''');
     await db.execute('''CREATE TABLE orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT, client_id INTEGER NOT NULL, car_id INTEGER NOT NULL, 
@@ -399,9 +399,11 @@ class DatabaseHelper {
       handover_keys INTEGER DEFAULT 0,
       handover_inspect INTEGER DEFAULT 0,
       handover_notified INTEGER DEFAULT 0,
-      receptionist_id INTEGER DEFAULT NULL
+      receptionist_id INTEGER DEFAULT NULL,
+      lead_source TEXT DEFAULT '',
+      deposit_required REAL DEFAULT 0
     )''');
-    await db.execute('''CREATE TABLE masters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT DEFAULT 'Универсал')''');
+    await db.execute('''CREATE TABLE masters (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, role TEXT DEFAULT 'Универсал', on_shift INTEGER DEFAULT 0)''');
     await db.execute('''CREATE TABLE order_events (id INTEGER PRIMARY KEY AUTOINCREMENT, order_id INTEGER NOT NULL, event_text TEXT, created_at TEXT)''');
     await db.execute('''CREATE TABLE order_defects (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -426,7 +428,8 @@ class DatabaseHelper {
       order_id INTEGER NOT NULL,
       film_id INTEGER NOT NULL,
       roll_id INTEGER,
-      meters REAL DEFAULT 0
+      meters REAL DEFAULT 0,
+      plan_meters REAL DEFAULT 0
     )''');
     await db.execute('''CREATE TABLE payments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -496,6 +499,7 @@ class DatabaseHelper {
       min_qty REAL DEFAULT 0,
       category TEXT DEFAULT 'Прочее',
       meters_per_roll REAL DEFAULT 0,
+      unit_cost REAL DEFAULT 0,
       last_brand TEXT DEFAULT ''
     )''');
     await db.execute('''CREATE TABLE service_recipes (
@@ -531,6 +535,7 @@ class DatabaseHelper {
       roll_number TEXT NOT NULL,
       meters_initial REAL NOT NULL DEFAULT 0,
       meters_left REAL NOT NULL DEFAULT 0,
+      is_scrap INTEGER DEFAULT 0,
       created_at TEXT NOT NULL,
       UNIQUE(inventory_id, roll_number)
     )''');
@@ -571,6 +576,49 @@ class DatabaseHelper {
       updated_at TEXT,
       cloud_id INTEGER,
       sync_status TEXT DEFAULT 'pending'
+    )''');
+    await db.execute('''CREATE TABLE studio_leads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      phone TEXT DEFAULT '',
+      car_label TEXT DEFAULT '',
+      lead_source TEXT DEFAULT '',
+      note TEXT DEFAULT '',
+      status TEXT DEFAULT 'new',
+      order_id INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE car_warranties (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      car_id INTEGER NOT NULL,
+      order_id INTEGER,
+      kind TEXT NOT NULL DEFAULT 'Керамика',
+      title TEXT DEFAULT '',
+      batch TEXT DEFAULT '',
+      started_at TEXT NOT NULL,
+      months INTEGER NOT NULL DEFAULT 12,
+      ends_at TEXT NOT NULL,
+      note TEXT DEFAULT '',
+      reminder_sent INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE payroll_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workshop TEXT NOT NULL DEFAULT '',
+      service_name TEXT DEFAULT '',
+      mode TEXT NOT NULL DEFAULT 'percent',
+      value REAL NOT NULL DEFAULT 0,
+      label TEXT DEFAULT '',
+      is_active INTEGER DEFAULT 1
+    )''');
+    await db.execute('''CREATE TABLE webhook_endpoints (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      url TEXT NOT NULL,
+      secret TEXT DEFAULT '',
+      events TEXT DEFAULT 'order.created,order.status_changed,lead.created',
+      is_active INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL
     )''');
     await db.execute('''CREATE TABLE app_settings (
       key TEXT PRIMARY KEY,
@@ -1027,6 +1075,68 @@ class DatabaseHelper {
       await _ensureColumn(db, 'cars', 'year', 'INTEGER DEFAULT 0');
       await _ensureColumn(db, 'services', 'workshop', "TEXT DEFAULT ''");
       await _ensureColumn(db, 'services', 'is_active', 'INTEGER DEFAULT 1');
+    }
+    // --- Версия 34: R1 маржа/источник + R2 лиды/гарантии/депозит ---
+    if (oldVersion < 34) {
+      await _ensureColumn(db, 'orders', 'lead_source', "TEXT DEFAULT ''");
+      await _ensureColumn(db, 'orders', 'deposit_required', 'REAL DEFAULT 0');
+      await _ensureColumn(db, 'inventory', 'unit_cost', 'REAL DEFAULT 0');
+      await db.execute('''CREATE TABLE IF NOT EXISTS studio_leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL DEFAULT '',
+        phone TEXT DEFAULT '',
+        car_label TEXT DEFAULT '',
+        lead_source TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        status TEXT DEFAULT 'new',
+        order_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )''');
+      await db.execute('''CREATE TABLE IF NOT EXISTS car_warranties (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        car_id INTEGER NOT NULL,
+        order_id INTEGER,
+        kind TEXT NOT NULL DEFAULT 'Керамика',
+        title TEXT DEFAULT '',
+        batch TEXT DEFAULT '',
+        started_at TEXT NOT NULL,
+        months INTEGER NOT NULL DEFAULT 12,
+        ends_at TEXT NOT NULL,
+        note TEXT DEFAULT '',
+        reminder_sent INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL
+      )''');
+    }
+    // --- Версия 35: R5–R6 рулоны/ЗП правила + plan meters ---
+    if (oldVersion < 35) {
+      await _ensureColumn(db, 'film_rolls', 'is_scrap', 'INTEGER DEFAULT 0');
+      await _ensureColumn(db, 'order_wrap_films', 'plan_meters', 'REAL DEFAULT 0');
+      await db.execute('''CREATE TABLE IF NOT EXISTS payroll_rules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workshop TEXT NOT NULL DEFAULT '',
+        service_name TEXT DEFAULT '',
+        mode TEXT NOT NULL DEFAULT 'percent',
+        value REAL NOT NULL DEFAULT 0,
+        label TEXT DEFAULT '',
+        is_active INTEGER DEFAULT 1
+      )''');
+      await db.execute('''CREATE TABLE IF NOT EXISTS webhook_endpoints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL,
+        secret TEXT DEFAULT '',
+        events TEXT DEFAULT 'order.created,order.status_changed,lead.created',
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL
+      )''');
+    }
+    // --- Версия 36: Telegram привязка клиента ---
+    if (oldVersion < 36) {
+      await _ensureColumn(db, 'clients', 'telegram_chat_id', "TEXT DEFAULT ''");
+      await _ensureColumn(db, 'clients', 'telegram_linked_at', "TEXT DEFAULT ''");
+    }
+    if (oldVersion < 37) {
+      await _ensureColumn(db, 'masters', 'on_shift', 'INTEGER DEFAULT 0');
     }
   }
 
@@ -1635,6 +1745,8 @@ class DatabaseHelper {
     String startTime = "",
     String endTime = "",
     String endDate = "",
+    String leadSource = "",
+    double depositRequired = 0,
   }) async {
     if (CloudDbBridge.active) {
       final id = await CloudDbBridge.instance.addOrderWithItems(
@@ -1646,6 +1758,8 @@ class DatabaseHelper {
         startTime: startTime,
         endTime: endTime,
         endDate: endDate,
+        leadSource: leadSource,
+        depositRequired: depositRequired,
       );
       bumpDataRevision();
       return id;
@@ -1666,6 +1780,8 @@ class DatabaseHelper {
       'start_time': startTime,
       'end_time': endTime,
       'end_date': endDate,
+      'lead_source': leadSource.trim(),
+      'deposit_required': depositRequired < 0 ? 0 : depositRequired,
     });
     for (var item in items) {
       final name = item['name'] as String;
@@ -3013,11 +3129,21 @@ class DatabaseHelper {
           : double.tryParse('$metersRaw'.replaceAll(',', '.')) ?? 0;
       final rawRoll = film['rollId'] ?? film['roll_id'];
       final rollId = (rawRoll is num) ? rawRoll.toInt() : int.tryParse('$rawRoll');
+      final planRaw = film['plan_meters'] ?? film['planMeters'];
+      final planMeters = planRaw is num
+          ? planRaw.toDouble()
+          : double.tryParse('$planRaw'.replaceAll(',', '.')) ?? 0;
+      if (planMeters > 0.001 && meters > planMeters * 1.1 + 0.001) {
+        warnings.add(
+          'Перерасход плёнки: факт ${meters.toStringAsFixed(1)} м при плане ${planMeters.toStringAsFixed(1)} м',
+        );
+      }
       await db.insert('order_wrap_films', {
         'order_id': orderId,
         'film_id': id,
         'roll_id': rollId,
         'meters': meters,
+        'plan_meters': planMeters,
       });
     }
     bumpDataRevision();
@@ -3446,6 +3572,16 @@ class DatabaseHelper {
     return await db.query('masters', orderBy: 'id ASC');
   }
 
+  Future<List<Map<String, dynamic>>> getMastersOnShift() async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getMastersOnShift();
+    final db = await database;
+    return await db.query(
+      'masters',
+      where: 'on_shift = 1',
+      orderBy: 'name COLLATE NOCASE ASC',
+    );
+  }
+
   Future<List<String>> getMastersList({String? roleFilter}) async {
     final db = await database;
     final res = await db.query('masters', columns: ['name', 'role'], orderBy: 'id ASC');
@@ -3456,6 +3592,22 @@ class DatabaseHelper {
     return ["Не назначен", ...names];
   }
 
+  Future<void> setMasterOnShift(int id, bool onShift) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.setMasterOnShift(id, onShift);
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    await db.update(
+      'masters',
+      {'on_shift': onShift ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    bumpDataRevision();
+  }
+
   Future<void> addMaster(String name, String role) async {
     if (CloudDbBridge.active) {
       await CloudDbBridge.instance.addMaster(name, role);
@@ -3463,12 +3615,12 @@ class DatabaseHelper {
       return;
     }
     final db = await database;
-    await db.insert('masters', {'name': name, 'role': role});
+    await db.insert('masters', {'name': name, 'role': role, 'on_shift': 0});
   }
 
-  Future<void> updateMaster(int id, {String? name, String? role}) async {
+  Future<void> updateMaster(int id, {String? name, String? role, bool? onShift}) async {
     if (CloudDbBridge.active) {
-      await CloudDbBridge.instance.updateMaster(id, name: name, role: role);
+      await CloudDbBridge.instance.updateMaster(id, name: name, role: role, onShift: onShift);
       bumpDataRevision();
       return;
     }
@@ -3476,6 +3628,7 @@ class DatabaseHelper {
     final data = <String, dynamic>{};
     if (name != null) data['name'] = name;
     if (role != null) data['role'] = role;
+    if (onShift != null) data['on_shift'] = onShift ? 1 : 0;
     if (data.isEmpty) return;
     await db.update('masters', data, where: 'id = ?', whereArgs: [id]);
   }
@@ -4700,6 +4853,7 @@ class DatabaseHelper {
     double minQty = 0,
     String category = InventoryCategories.other,
     double metersPerRoll = 0,
+    double unitCost = 0,
   }) async {
     if (CloudDbBridge.active) {
       final id = await CloudDbBridge.instance.addInventoryItem(
@@ -4709,6 +4863,7 @@ class DatabaseHelper {
         minQty: minQty,
         category: category,
         metersPerRoll: metersPerRoll,
+        unitCost: unitCost,
       );
       bumpDataRevision();
       return id;
@@ -4725,6 +4880,7 @@ class DatabaseHelper {
       'min_qty': minQty < 0 ? 0 : minQty,
       'category': cat,
       'meters_per_roll': metersPerRoll < 0 ? 0 : metersPerRoll,
+      'unit_cost': unitCost < 0 ? 0 : unitCost,
     });
     if (quantity.abs() > 0.0001 && !InventoryCategories.isFilm(cat)) {
       await _insertInventoryMove(
@@ -4750,6 +4906,7 @@ class DatabaseHelper {
     double? minQty,
     String? category,
     double? metersPerRoll,
+    double? unitCost,
   }) async {
     if (CloudDbBridge.active) {
       await CloudDbBridge.instance.updateInventoryItem(
@@ -4760,6 +4917,7 @@ class DatabaseHelper {
         minQty: minQty,
         category: category,
         metersPerRoll: metersPerRoll,
+        unitCost: unitCost,
       );
       bumpDataRevision();
       return;
@@ -4784,6 +4942,7 @@ class DatabaseHelper {
           : InventoryCategories.other;
     }
     if (metersPerRoll != null) data['meters_per_roll'] = metersPerRoll < 0 ? 0 : metersPerRoll;
+    if (unitCost != null) data['unit_cost'] = unitCost < 0 ? 0 : unitCost;
     if (quantity != null && !InventoryCategories.isFilm(nextCat)) {
       data['quantity'] = quantity;
       final delta = quantity - oldQty;
@@ -5230,7 +5389,9 @@ class DatabaseHelper {
     if (CloudDbBridge.active) return CloudDbBridge.instance.getRecipesForService(serviceName);
     final db = await database;
     return await db.rawQuery('''
-      SELECT r.id, r.service_name, r.inventory_id, r.qty, i.name as inventory_name, i.unit, i.quantity as stock
+      SELECT r.id, r.service_name, r.inventory_id, r.qty,
+             i.name as inventory_name, i.unit, i.quantity as stock,
+             COALESCE(i.unit_cost, 0) as unit_cost
       FROM service_recipes r
       LEFT JOIN inventory i ON i.id = r.inventory_id
       WHERE r.service_name = ?
@@ -5552,6 +5713,110 @@ class DatabaseHelper {
     await db.update('orders', {'payment_method': method}, where: 'id = ?', whereArgs: [orderId]);
   }
 
+  Future<void> updateOrderLeadSource(int orderId, String leadSource) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderLeadSource(orderId, leadSource);
+      return;
+    }
+    final db = await database;
+    await db.update(
+      'orders',
+      {'lead_source': leadSource.trim()},
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
+    bumpDataRevision();
+  }
+
+  Future<void> updateOrderDepositRequired(int orderId, double amount) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateOrderDepositRequired(orderId, amount);
+      return;
+    }
+    final db = await database;
+    await db.update(
+      'orders',
+      {'deposit_required': amount < 0 ? 0 : amount},
+      where: 'id = ?',
+      whereArgs: [orderId],
+    );
+    bumpDataRevision();
+  }
+
+  /// Маржа заказа: цена − материалы (рецепты done + плёнка) − ЗП − аутсорс.
+  Future<Map<String, dynamic>> getOrderMarginBreakdown(int orderId) async {
+    if (CloudDbBridge.active) {
+      return CloudDbBridge.instance.getOrderMarginBreakdown(orderId);
+    }
+    final db = await database;
+    final orders = await db.query('orders', where: 'id = ?', whereArgs: [orderId], limit: 1);
+    if (orders.isEmpty) {
+      return {
+        'price': 0.0,
+        'materials': 0.0,
+        'payroll': 0.0,
+        'outsource': 0.0,
+        'margin': 0.0,
+        'margin_pct': 0.0,
+      };
+    }
+    final price = (orders.first['price'] as num?)?.toDouble() ?? 0;
+
+    double materials = 0;
+    final items = await db.query(
+      'order_items',
+      where: 'order_id = ? AND is_done = 1',
+      whereArgs: [orderId],
+    );
+    for (final it in items) {
+      final name = it['name']?.toString() ?? '';
+      if (name.trim().isEmpty) continue;
+      final recipes = await getRecipesForService(name);
+      for (final r in recipes) {
+        final qty = (r['qty'] as num?)?.toDouble() ?? 0;
+        final cost = (r['unit_cost'] as num?)?.toDouble() ?? 0;
+        materials += qty * cost;
+      }
+    }
+
+    final wrap = await db.rawQuery('''
+      SELECT COALESCE(SUM(owf.meters * COALESCE(i.unit_cost, 0)), 0) AS c
+      FROM order_wrap_films owf
+      INNER JOIN wrap_films wf ON wf.id = owf.film_id
+      LEFT JOIN inventory i ON i.id = wf.inventory_id
+      WHERE owf.order_id = ?
+    ''', [orderId]);
+    materials += (wrap.first['c'] as num?)?.toDouble() ?? 0;
+
+    final payrollRows = await db.rawQuery(
+      'SELECT COALESCE(SUM(amount), 0) AS s FROM order_workshop_payroll WHERE order_id = ?',
+      [orderId],
+    );
+    final payroll = (payrollRows.first['s'] as num?)?.toDouble() ?? 0;
+
+    double outsource = 0;
+    try {
+      final ox = await db.rawQuery('''
+        SELECT COALESCE(SUM(io.cost), 0) AS s
+        FROM item_outsource io
+        INNER JOIN order_items oi ON oi.id = io.order_item_id
+        WHERE oi.order_id = ?
+      ''', [orderId]);
+      outsource = (ox.first['s'] as num?)?.toDouble() ?? 0;
+    } catch (_) {}
+
+    final margin = price - materials - payroll - outsource;
+    final marginPct = price > 0.01 ? (margin / price) * 100 : 0.0;
+    return {
+      'price': price,
+      'materials': materials,
+      'payroll': payroll,
+      'outsource': outsource,
+      'margin': margin,
+      'margin_pct': marginPct,
+    };
+  }
+
   Future<void> reassignOrderCar(int orderId, int carId) async {
     if (CloudDbBridge.active) {
       await CloudDbBridge.instance.reassignOrderCar(orderId, carId);
@@ -5662,6 +5927,55 @@ class DatabaseHelper {
 
     final masterDayRows = await getMasterDayStats(day);
 
+    // Owner pulse / R1 extras
+    final monthStart = DateFormat('yyyy-MM-01').format(now);
+    final monthEnd = todayKey;
+    double payrollAccrued = 0;
+    final pr = await db.rawQuery('''
+      SELECT COALESCE(SUM(p.amount), 0) AS s
+      FROM order_workshop_payroll p
+      INNER JOIN orders o ON o.id = p.order_id
+      WHERE date(replace(coalesce(nullif(o.start_time, ''), o.created_at), 'T', ' ')) >= date(?)
+        AND date(replace(coalesce(nullif(o.start_time, ''), o.created_at), 'T', ' ')) <= date(?)
+    ''', [monthStart, monthEnd]);
+    payrollAccrued = (pr.first['s'] as num?)?.toDouble() ?? 0;
+    final paidRows = await db.rawQuery('''
+      SELECT COALESCE(SUM(amount), 0) AS s
+      FROM cash_flow
+      WHERE type = 'Расход'
+        AND category IN ('Зарплата', 'Аванс')
+        AND date(replace(created_at, 'T', ' ')) >= date(?)
+        AND date(replace(created_at, 'T', ' ')) <= date(?)
+    ''', [monthStart, monthEnd]);
+    final payrollPaid = (paidRows.first['s'] as num?)?.toDouble() ?? 0;
+    final payrollDue = (payrollAccrued - payrollPaid).clamp(0.0, double.infinity);
+
+    final sourceRows = await db.rawQuery('''
+      SELECT
+        CASE WHEN TRIM(COALESCE(lead_source, '')) = '' THEN 'Не указан' ELSE lead_source END AS name,
+        COUNT(*) AS count,
+        COALESCE(SUM(paid_amount), 0) AS revenue
+      FROM orders
+      WHERE is_completed = 1 AND date(created_at) >= date(?)
+      GROUP BY name
+      ORDER BY revenue DESC, count DESC
+    ''', [sinceKey]);
+
+    double marginPeriod = 0;
+    double materialsPeriod = 0;
+    double payrollPeriod = 0;
+    final completedIds = await db.rawQuery('''
+      SELECT id FROM orders
+      WHERE is_completed = 1 AND date(created_at) >= date(?)
+    ''', [sinceKey]);
+    for (final row in completedIds) {
+      final oid = (row['id'] as num).toInt();
+      final m = await getOrderMarginBreakdown(oid);
+      marginPeriod += (m['margin'] as num?)?.toDouble() ?? 0;
+      materialsPeriod += (m['materials'] as num?)?.toDouble() ?? 0;
+      payrollPeriod += (m['payroll'] as num?)?.toDouble() ?? 0;
+    }
+
     return {
       'revenue_today': revToday,
       'revenue_month': revMonth,
@@ -5679,6 +5993,16 @@ class DatabaseHelper {
       'by_status': statusRows,
       'master_day': masterDayRows,
       'master_day_date': day,
+      'owner_pulse': {
+        'revenue_today': revToday,
+        'open_debt': kpis['open_debt'] ?? 0,
+        'open_orders': openOrders,
+        'payroll_due': payrollDue,
+      },
+      'by_lead_source': sourceRows,
+      'margin_period': marginPeriod,
+      'materials_period': materialsPeriod,
+      'payroll_period': payrollPeriod,
     };
   }
 
@@ -6051,6 +6375,330 @@ class DatabaseHelper {
       {'key': key, 'value': value},
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+  }
+
+  // --- R2: студийные лиды ---
+  Future<List<Map<String, dynamic>>> getStudioLeads({String? status}) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getStudioLeads(status: status);
+    final db = await database;
+    if (status != null && status.isNotEmpty) {
+      return await db.query(
+        'studio_leads',
+        where: 'status = ?',
+        whereArgs: [status],
+        orderBy: 'id DESC',
+      );
+    }
+    return await db.query('studio_leads', orderBy: 'id DESC');
+  }
+
+  Future<int> addStudioLead({
+    required String name,
+    String phone = '',
+    String carLabel = '',
+    String leadSource = '',
+    String note = '',
+  }) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addStudioLead(
+        name: name,
+        phone: phone,
+        carLabel: carLabel,
+        leadSource: leadSource,
+        note: note,
+      );
+      bumpDataRevision();
+      return id;
+    }
+    final db = await database;
+    final now = DateTime.now().toIso8601String().substring(0, 19);
+    final id = await db.insert('studio_leads', {
+      'name': name.trim(),
+      'phone': phone.trim(),
+      'car_label': carLabel.trim(),
+      'lead_source': leadSource.trim(),
+      'note': note.trim(),
+      'status': 'new',
+      'created_at': now,
+      'updated_at': now,
+    });
+    bumpDataRevision();
+    return id;
+  }
+
+  Future<void> updateStudioLead(
+    int id, {
+    String? name,
+    String? phone,
+    String? carLabel,
+    String? leadSource,
+    String? note,
+    String? status,
+    int? orderId,
+  }) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.updateStudioLead(
+        id,
+        name: name,
+        phone: phone,
+        carLabel: carLabel,
+        leadSource: leadSource,
+        note: note,
+        status: status,
+        orderId: orderId,
+      );
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    final data = <String, dynamic>{
+      'updated_at': DateTime.now().toIso8601String().substring(0, 19),
+    };
+    if (name != null) data['name'] = name.trim();
+    if (phone != null) data['phone'] = phone.trim();
+    if (carLabel != null) data['car_label'] = carLabel.trim();
+    if (leadSource != null) data['lead_source'] = leadSource.trim();
+    if (note != null) data['note'] = note.trim();
+    if (status != null) data['status'] = status.trim();
+    if (orderId != null) data['order_id'] = orderId;
+    await db.update('studio_leads', data, where: 'id = ?', whereArgs: [id]);
+    bumpDataRevision();
+  }
+
+  Future<void> deleteStudioLead(int id) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteStudioLead(id);
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    await db.delete('studio_leads', where: 'id = ?', whereArgs: [id]);
+    bumpDataRevision();
+  }
+
+  // --- R2/R4: гарантии на авто ---
+  Future<List<Map<String, dynamic>>> getCarWarranties(int carId) async {
+    if (CloudDbBridge.active) return CloudDbBridge.instance.getCarWarranties(carId);
+    final db = await database;
+    return await db.query(
+      'car_warranties',
+      where: 'car_id = ?',
+      whereArgs: [carId],
+      orderBy: 'ends_at DESC',
+    );
+  }
+
+  Future<int> addCarWarranty({
+    required int carId,
+    int? orderId,
+    String kind = 'Керамика',
+    String title = '',
+    String batch = '',
+    required DateTime startedAt,
+    int months = 12,
+    String note = '',
+  }) async {
+    if (CloudDbBridge.active) {
+      final id = await CloudDbBridge.instance.addCarWarranty(
+        carId: carId,
+        orderId: orderId,
+        kind: kind,
+        title: title,
+        batch: batch,
+        startedAt: startedAt,
+        months: months,
+        note: note,
+      );
+      bumpDataRevision();
+      return id;
+    }
+    final db = await database;
+    final ends = DateTime(startedAt.year, startedAt.month + months, startedAt.day);
+    final now = DateTime.now().toIso8601String().substring(0, 19);
+    final id = await db.insert('car_warranties', {
+      'car_id': carId,
+      'order_id': orderId,
+      'kind': kind.trim().isEmpty ? 'Керамика' : kind.trim(),
+      'title': title.trim(),
+      'batch': batch.trim(),
+      'started_at': startedAt.toIso8601String().substring(0, 10),
+      'months': months < 1 ? 1 : months,
+      'ends_at': ends.toIso8601String().substring(0, 10),
+      'note': note.trim(),
+      'reminder_sent': 0,
+      'created_at': now,
+    });
+    bumpDataRevision();
+    return id;
+  }
+
+  Future<void> deleteCarWarranty(int id) async {
+    if (CloudDbBridge.active) {
+      await CloudDbBridge.instance.deleteCarWarranty(id);
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    await db.delete('car_warranties', where: 'id = ?', whereArgs: [id]);
+    bumpDataRevision();
+  }
+
+  /// Гарантии, у которых ends_at в ближайшие [withinDays] дней (для inbox ТО).
+  Future<List<Map<String, dynamic>>> getUpcomingWarrantyReminders({int withinDays = 14}) async {
+    if (CloudDbBridge.active) {
+      try {
+        return await CloudDbBridge.instance.getUpcomingWarrantyReminders(withinDays: withinDays);
+      } catch (_) {
+        return const [];
+      }
+    }
+    final db = await database;
+    final now = DateTime.now();
+    final until = now.add(Duration(days: withinDays));
+    final fromKey = now.toIso8601String().substring(0, 10);
+    final untilKey = until.toIso8601String().substring(0, 10);
+    return await db.rawQuery('''
+      SELECT w.*, c.make_model, c.plate, cl.name AS client_name, cl.phone AS client_phone
+      FROM car_warranties w
+      INNER JOIN cars c ON c.id = w.car_id
+      INNER JOIN clients cl ON cl.id = c.client_id
+      WHERE date(w.ends_at) >= date(?) AND date(w.ends_at) <= date(?)
+      ORDER BY w.ends_at ASC
+    ''', [fromKey, untilKey]);
+  }
+
+  Future<void> markWarrantyReminderSent(int id) async {
+    if (CloudDbBridge.active) {
+      try {
+        await CloudDbBridge.instance.markWarrantyReminderSent(id);
+      } catch (_) {}
+      return;
+    }
+    final db = await database;
+    await db.update('car_warranties', {'reminder_sent': 1}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> setFilmRollScrap(int rollId, bool isScrap) async {
+    if (CloudDbBridge.active) {
+      try {
+        await CloudDbBridge.instance.setFilmRollScrap(rollId, isScrap);
+      } catch (_) {}
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    await db.update(
+      'film_rolls',
+      {'is_scrap': isScrap ? 1 : 0},
+      where: 'id = ?',
+      whereArgs: [rollId],
+    );
+    bumpDataRevision();
+  }
+
+  Future<List<Map<String, dynamic>>> getPayrollRules() async {
+    if (CloudDbBridge.active) {
+      try {
+        return await CloudDbBridge.instance.getPayrollRules();
+      } catch (_) {
+        return const [];
+      }
+    }
+    final db = await database;
+    return await db.query('payroll_rules', where: 'is_active = 1', orderBy: 'id ASC');
+  }
+
+  Future<int> addPayrollRule({
+    required String workshop,
+    String serviceName = '',
+    String mode = 'percent',
+    required double value,
+    String label = '',
+  }) async {
+    if (CloudDbBridge.active) {
+      try {
+        return await CloudDbBridge.instance.addPayrollRule(
+          workshop: workshop,
+          serviceName: serviceName,
+          mode: mode,
+          value: value,
+          label: label,
+        );
+      } catch (_) {
+        return 0;
+      }
+    }
+    final db = await database;
+    final id = await db.insert('payroll_rules', {
+      'workshop': workshop.trim(),
+      'service_name': serviceName.trim(),
+      'mode': mode == 'fixed' ? 'fixed' : 'percent',
+      'value': value,
+      'label': label.trim(),
+      'is_active': 1,
+    });
+    bumpDataRevision();
+    return id;
+  }
+
+  Future<void> deletePayrollRule(int id) async {
+    if (CloudDbBridge.active) {
+      try {
+        await CloudDbBridge.instance.deletePayrollRule(id);
+      } catch (_) {}
+      bumpDataRevision();
+      return;
+    }
+    final db = await database;
+    await db.delete('payroll_rules', where: 'id = ?', whereArgs: [id]);
+    bumpDataRevision();
+  }
+
+  /// Рассчитать ЗП по правилам для цеха: percent от суммы работ цеха или fixed.
+  Future<List<Map<String, dynamic>>> calculateWorkshopPayrollSuggestion({
+    required int orderId,
+    required String workshop,
+    List<int>? masterIds,
+  }) async {
+    final rules = await getPayrollRules();
+    final ws = workshop.trim();
+    final matching = rules.where((r) {
+      final rw = (r['workshop']?.toString() ?? '').trim();
+      return rw.isEmpty || rw.toLowerCase() == ws.toLowerCase();
+    }).toList();
+    if (matching.isEmpty) return const [];
+
+    final items = await getOrderItems(orderId);
+    double workshopRevenue = 0;
+    for (final it in items) {
+      final itemWs = (it['workshop']?.toString() ?? '').trim();
+      if (itemWs.toLowerCase() != ws.toLowerCase()) continue;
+      workshopRevenue += (it['price'] as num?)?.toDouble() ?? 0;
+    }
+
+    double total = 0;
+    for (final r in matching) {
+      final mode = r['mode']?.toString() ?? 'percent';
+      final value = (r['value'] as num?)?.toDouble() ?? 0;
+      if (mode == 'fixed') {
+        total += value;
+      } else {
+        total += workshopRevenue * (value / 100.0);
+      }
+    }
+    if (total <= 0) return const [];
+    final mids = (masterIds == null || masterIds.isEmpty)
+        ? <int>[]
+        : List<int>.from(masterIds);
+    if (mids.isEmpty) {
+      return [
+        {'master_id': null, 'amount': total},
+      ];
+    }
+    final each = total / mids.length;
+    return [
+      for (final mid in mids) {'master_id': mid, 'amount': each},
+    ];
   }
 
   Future<void> addAppErrorLog({

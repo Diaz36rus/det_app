@@ -17,12 +17,17 @@ import 'service_category_gallery.dart';
 import 'tour_keys.dart';
 import 'ui_kit.dart';
 import 'vin_utils.dart';
+import 'order_lead_source.dart';
 import 'order_templates.dart';
 import 'wrap_catalog.dart';
 
 class OrdersScreen extends StatefulWidget {
   final DateTime? initialDate;
   final TimeOfDay? initialTime;
+  final String? initialClientName;
+  final String? initialClientPhone;
+  final String? initialCarLabel;
+  final String? initialLeadSource;
   final ValueChanged<int>? onNavigateMenu;
   final VoidCallback? onOrderCreated;
 
@@ -30,6 +35,10 @@ class OrdersScreen extends StatefulWidget {
     super.key,
     this.initialDate,
     this.initialTime,
+    this.initialClientName,
+    this.initialClientPhone,
+    this.initialCarLabel,
+    this.initialLeadSource,
     this.onNavigateMenu,
     this.onOrderCreated,
   });
@@ -55,6 +64,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   late TimeOfDay _selectedTime;
   late DateTime _endDate;
   late TimeOfDay _endTime;
+  String _leadSource = OrderLeadSources.unset;
 
   final List<Map<String, dynamic>> _cart = [];
   double _total = 0;
@@ -166,6 +176,15 @@ class _OrdersScreenState extends State<OrdersScreen> {
     _ensureEndAfterStart();
     _vinController.addListener(_onVinChanged);
     _plateController.addListener(_onPlateChanged);
+    final name = widget.initialClientName?.trim();
+    if (name != null && name.isNotEmpty) _nameController.text = name;
+    final phone = widget.initialClientPhone?.trim();
+    if (phone != null && phone.isNotEmpty) {
+      _phoneController.text = phone.startsWith('+') ? phone : PhonePlus7Formatter.prefix + phone.replaceAll(RegExp(r'\D'), '');
+    }
+    final car = widget.initialCarLabel?.trim();
+    if (car != null && car.isNotEmpty) _carMakeModel = car;
+    _leadSource = OrderLeadSources.normalize(widget.initialLeadSource);
     _loadServices();
     _loadCarCatalogExtras();
   }
@@ -533,6 +552,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       startTime: startTimeStr,
       endTime: endTimeStr,
       endDate: endDateStr,
+      leadSource: _leadSource,
     );
 
     if (mounted) {
@@ -555,6 +575,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       _plateController.clear();
       _vinController.clear();
       _yearController.clear();
+      _leadSource = OrderLeadSources.unset;
       _vinWarning = null;
       _priceController.text = "0";
       _cart.clear();
@@ -767,6 +788,22 @@ class _OrdersScreenState extends State<OrdersScreen> {
         textInputAction: TextInputAction.next,
       );
 
+  Widget _leadSourceField() {
+    final value = _leadSource.isEmpty ? null : _leadSource;
+    return DropdownButtonFormField<String?>(
+      value: value,
+      decoration: const InputDecoration(labelText: 'Источник', isDense: true),
+      dropdownColor: AppColors.surface2,
+      items: [
+        const DropdownMenuItem<String?>(value: null, child: Text('Не указан')),
+        ...OrderLeadSources.all.map(
+          (s) => DropdownMenuItem<String?>(value: s, child: Text(s)),
+        ),
+      ],
+      onChanged: (v) => setState(() => _leadSource = v ?? OrderLeadSources.unset),
+    );
+  }
+
   Widget _carField({bool stacked = false}) => CarMakeModelFields(
         key: _carFieldsKey,
         initialMakeModel: _carMakeModel,
@@ -941,7 +978,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
               _phoneField(),
               const SizedBox(height: 10),
               _nameField(),
-            ] else
+              const SizedBox(height: 10),
+              _leadSourceField(),
+            ] else ...[
               Row(
                 children: [
                   Expanded(child: _phoneField()),
@@ -949,6 +988,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   Expanded(child: _nameField()),
                 ],
               ),
+              const SizedBox(height: 10),
+              _leadSourceField(),
+            ],
             if (_clientCars.isNotEmpty) ...[
               const SizedBox(height: 10),
               _clientCarsDropdown(),

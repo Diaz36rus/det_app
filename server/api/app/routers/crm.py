@@ -2,12 +2,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session, selectinload
 
+import secrets
+
 from app.db import get_db
 from app.deps import require_permissions, user_permission_codes
 from app.models import (
     Branch,
     CashFlow,
     CashPayment,
+    Company,
     CrmCar,
     CrmClient,
     CrmDefect,
@@ -22,6 +25,7 @@ from app.models import (
     User,
 )
 from app.schemas import (
+    ApiKeyOut,
     CrmCarCreate,
     CrmCarOut,
     CrmCarUpdate,
@@ -39,6 +43,7 @@ from app.schemas import (
     CrmOrderWorkshopPayrollOut,
     CrmOrderWorkshopPayrollPut,
 )
+from app.webhooks import fire_webhooks
 
 router = APIRouter(prefix="/crm", tags=["crm"])
 
@@ -113,16 +118,51 @@ def _item_out(it: CrmOrderItem) -> CrmOrderItemOut:
     )
 
 
-def _fill_item_from_in(row: CrmOrderItem, body: CrmOrderItemIn) -> None:
+def _company_master_ids(db: Session, company_id: int, ids) -> list[int]:
+    """Только мастера этой студии; чужие/удалённые id отбрасываются."""
+    uniq: list[int] = []
+    for raw in ids or []:
+        try:
+            mid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if mid > 0 and mid not in uniq:
+            uniq.append(mid)
+    if not uniq:
+        return []
+    found = set(
+        db.scalars(
+            select(CrmMaster.id).where(CrmMaster.id.in_(uniq), CrmMaster.company_id == company_id)
+        ).all()
+    )
+    return [m for m in uniq if m in found]
+
+
+def _company_master_csv(db: Session, company_id: int, raw: str | None) -> str:
+    parts = [p.strip() for p in (raw or "").split(",") if p.strip()]
+    return ",".join(str(m) for m in _company_master_ids(db, company_id, parts))
+
+
+def _checked_parent_id(order: CrmOrder, parent_id: int | None, self_id: int | None = None) -> int | None:
+    if parent_id is None or parent_id == 0:
+        return None
+    if parent_id == self_id or not any(it.id == parent_id for it in order.items):
+        raise HTTPException(status_code=422, detail="Родительская позиция не из этого заказа")
+    return parent_id
+
+
+def _fill_item_from_in(
+    db: Session, order: CrmOrder, row: CrmOrderItem, body: CrmOrderItemIn
+) -> None:
     row.name = body.name.strip()
     row.price = float(body.price or 0)
     row.workshop = body.workshop or ""
     row.is_done = bool(body.is_done)
     row.comment = body.comment or ""
-    row.master_ids = body.master_ids or ""
+    row.master_ids = _company_master_csv(db, order.company_id, body.master_ids)
     row.start_time = body.start_time or ""
     row.end_time = body.end_time or ""
-    row.parent_id = body.parent_id
+    row.parent_id = _checked_parent_id(order, body.parent_id, row.id)
 
 
 def _purge_orders_by_ids(db: Session, ids: list[int]) -> int:
@@ -197,6 +237,19 @@ def _default_branch_id(db: Session, user: User, company_id: int) -> int:
     return branch.id
 
 
+def _client_out(row: CrmClient) -> CrmClientOut:
+    chat = (getattr(row, "telegram_chat_id", None) or "").strip()
+    return CrmClientOut(
+        id=row.id,
+        company_id=row.company_id,
+        name=row.name,
+        phone=row.phone or "",
+        is_vip=bool(row.is_vip),
+        telegram_linked=bool(chat),
+        telegram_chat_id=chat,
+    )
+
+
 def _order_out(order: CrmOrder, client: CrmClient | None = None, car: CrmCar | None = None) -> CrmOrderOut:
     master_ids = [m.master_id for m in (getattr(order, "master_links", None) or [])]
     return CrmOrderOut(
@@ -231,6 +284,8 @@ def _order_out(order: CrmOrder, client: CrmClient | None = None, car: CrmCar | N
         is_workshop_completed=bool(getattr(order, "is_workshop_completed", False)),
         master_ids=master_ids,
         receptionist_id=getattr(order, "receptionist_id", None),
+        lead_source=getattr(order, "lead_source", None) or "",
+        deposit_required=float(getattr(order, "deposit_required", 0) or 0),
         items=[_item_out(it) for it in (order.items or [])],
         client_name=client.name if client else None,
         car_label=(f"{car.make_model} {car.plate}".strip() if car else None),
@@ -246,7 +301,7 @@ def list_clients(
     rows = db.scalars(
         select(CrmClient).where(CrmClient.company_id == company_id).order_by(CrmClient.id.desc())
     ).all()
-    return rows
+    return [_client_out(r) for r in rows]
 
 
 @router.post("/clients", response_model=CrmClientOut)
@@ -265,7 +320,7 @@ def create_client(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return row
+    return _client_out(row)
 
 
 @router.patch("/clients/{client_id}", response_model=CrmClientOut)
@@ -289,7 +344,7 @@ def update_client(
         row.is_vip = body.is_vip
     db.commit()
     db.refresh(row)
-    return row
+    return _client_out(row)
 
 
 @router.delete("/clients/{client_id}")
@@ -553,6 +608,8 @@ def create_order(
         discount_percent=float(getattr(body, "discount_percent", 0) or 0),
         discount_fixed=float(getattr(body, "discount_fixed", 0) or 0),
         promo_code=getattr(body, "promo_code", None) or "",
+        lead_source=(getattr(body, "lead_source", None) or "").strip(),
+        deposit_required=float(getattr(body, "deposit_required", 0) or 0),
         price=total,
         paid_amount=0,
     )
@@ -560,14 +617,29 @@ def create_order(
     db.flush()
     for it in body.items:
         row = CrmOrderItem(order_id=order.id)
-        _fill_item_from_in(row, it)
+        _fill_item_from_in(db, order, row, it)
         db.add(row)
-    for mid in getattr(body, "master_ids", None) or []:
-        db.add(CrmOrderMaster(order_id=order.id, master_id=int(mid)))
+    for mid in _company_master_ids(db, company_id, getattr(body, "master_ids", None)):
+        db.add(CrmOrderMaster(order_id=order.id, master_id=mid))
     db.flush()
     db.refresh(order)
     _recalc_order_price(order)
     db.commit()
+    fire_webhooks(
+        db,
+        company_id,
+        "order.created",
+        {
+            "id": order.id,
+            "status": order.status,
+            "client_id": order.client_id,
+            "car_id": order.car_id,
+            "branch_id": order.branch_id,
+            "lead_source": order.lead_source,
+            "due_date": order.due_date,
+            "start_time": order.start_time,
+        },
+    )
     order = db.scalar(
         select(CrmOrder)
         .where(CrmOrder.id == order.id)
@@ -591,6 +663,7 @@ def update_order(
     )
     if order is None:
         raise HTTPException(status_code=404, detail="Заказ не найден")
+    old_status = order.status
     if _is_studio_master(user):
         # Мастер: только заметки мастера; даты/статус/скидки/выдача — нет.
         if (
@@ -604,6 +677,8 @@ def update_order(
             or body.promo_code is not None
             or body.payment_method is not None
             or body.car_id is not None
+            or body.lead_source is not None
+            or body.deposit_required is not None
             or any(
                 getattr(body, k, None) is not None
                 for k in (
@@ -648,6 +723,10 @@ def update_order(
         discount_changed = True
     if body.promo_code is not None:
         order.promo_code = body.promo_code
+    if body.lead_source is not None:
+        order.lead_source = body.lead_source.strip()
+    if body.deposit_required is not None:
+        order.deposit_required = float(body.deposit_required)
     for hand_key in (
         "handover_ready",
         "handover_works",
@@ -682,21 +761,24 @@ def update_order(
         for old in list(order.master_links):
             db.delete(old)
         db.flush()
-        for mid in body.master_ids:
-            db.add(CrmOrderMaster(order_id=order.id, master_id=int(mid)))
+        for mid in _company_master_ids(db, company_id, body.master_ids):
+            db.add(CrmOrderMaster(order_id=order.id, master_id=mid))
     if "receptionist_id" in body.model_fields_set:
-        order.receptionist_id = body.receptionist_id
+        rid = body.receptionist_id
+        if rid and not _company_master_ids(db, company_id, [rid]):
+            raise HTTPException(status_code=404, detail="Приёмщик не найден")
+        order.receptionist_id = rid or None
     if body.items is not None:
         existing = {it.id: it for it in list(order.items)}
         keep: set[int] = set()
         for it in body.items:
             if it.id is not None and it.id in existing:
                 row = existing[it.id]
-                _fill_item_from_in(row, it)
+                _fill_item_from_in(db, order, row, it)
                 keep.add(it.id)
             else:
                 row = CrmOrderItem(order_id=order.id)
-                _fill_item_from_in(row, it)
+                _fill_item_from_in(db, order, row, it)
                 db.add(row)
                 db.flush()
                 keep.add(row.id)
@@ -709,6 +791,19 @@ def update_order(
     elif discount_changed:
         _recalc_order_price(order)
     db.commit()
+    if body.status is not None and order.status != old_status:
+        fire_webhooks(
+            db,
+            company_id,
+            "order.status_changed",
+            {
+                "id": order.id,
+                "old_status": old_status,
+                "status": order.status,
+                "client_id": order.client_id,
+                "car_id": order.car_id,
+            },
+        )
     order = db.scalar(
         select(CrmOrder)
         .where(CrmOrder.id == order_id)
@@ -778,7 +873,7 @@ def create_order_item(
         _forbid_master_order_meta(user)
     order = _get_company_order(db, order_id, company_id)
     row = CrmOrderItem(order_id=order.id)
-    _fill_item_from_in(row, body)
+    _fill_item_from_in(db, order, row, body)
     db.add(row)
     db.flush()
     db.refresh(order)
@@ -816,13 +911,13 @@ def patch_order_item(
     if body.comment is not None:
         row.comment = body.comment
     if body.master_ids is not None:
-        row.master_ids = body.master_ids
+        row.master_ids = _company_master_csv(db, company_id, body.master_ids)
     if body.start_time is not None:
         row.start_time = body.start_time
     if body.end_time is not None:
         row.end_time = body.end_time
     if body.parent_id is not None:
-        row.parent_id = body.parent_id
+        row.parent_id = _checked_parent_id(order, body.parent_id, row.id)
     db.flush()
     _recalc_order_price(order)
     db.commit()
@@ -1015,3 +1110,18 @@ def create_order_event(
         event_text=row.event_text,
         created_at=row.created_at,
     )
+
+
+@router.post("/company/api-key", response_model=ApiKeyOut)
+def regenerate_company_api_key(
+    user: User = Depends(require_permissions("company.manage")),
+    db: Session = Depends(get_db),
+):
+    company_id = _company_id(user)
+    company = db.get(Company, company_id)
+    if company is None:
+        raise HTTPException(status_code=404, detail="Студия не найдена")
+    company.api_key = secrets.token_urlsafe(32)[:64]
+    db.commit()
+    db.refresh(company)
+    return ApiKeyOut(api_key=company.api_key)

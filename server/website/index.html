@@ -3,202 +3,284 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Det App — CRM для детейлинг-студии. Скачать Windows и Android, приглашение в студию, закрытый тест." />
-  <meta name="theme-color" content="#0B0614" />
-  <meta property="og:title" content="Det App — CRM для детейлинг-студии" />
-  <meta property="og:description" content="Заказы, цеха, касса и склад в одном ритме. Закрытый тест." />
+  <meta name="description" content="Det App — рабочее приложение для детейлинг-студии. Заказы, цеха, касса и склад на Windows и Android. Закрытый тест." />
+  <meta name="theme-color" content="#07040c" />
+  <meta property="og:title" content="Det App — смена студии на одном экране" />
+  <meta property="og:description" content="Доска, календарь, карточка заказа и касса. Windows и Android, одни данные." />
   <meta property="og:image" content="https://det-app.ru/assets/ui-board.jpg" />
   <meta property="og:url" content="https://det-app.ru/" />
   <meta property="og:type" content="website" />
-  <title>Det App — CRM для детейлинг-студии</title>
+  <meta property="og:locale" content="ru_RU" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Det App — смена студии на одном экране" />
+  <meta name="twitter:description" content="Доска, календарь, карточка заказа и касса. Windows и Android, одни данные." />
+  <meta name="twitter:image" content="https://det-app.ru/assets/ui-board.jpg" />
+  <title>Det App — смена студии на одном экране</title>
   <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="apple-touch-icon" href="assets/logo.png" />
+  <link rel="preload" as="image" href="assets/ui-board.jpg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/site.css" />
+  <link rel="stylesheet" href="css/site.css?v=20260915j" />
 </head>
 <body>
-  <div class="grain" aria-hidden="true"></div>
+  <a class="skip" href="#day">К содержанию</a>
+  <div class="orb orb--a" aria-hidden="true"></div>
+  <div class="orb orb--b" aria-hidden="true"></div>
+
   <header class="top" id="topbar">
     <a class="top__brand" href="/">
       <img src="assets/logo.png" alt="" width="36" height="36" />
       <span>Det App</span>
     </a>
-    <nav class="top__nav" aria-label="Разделы">
-      <a href="#showcase">Интерфейс</a>
-      <a href="#day">День студии</a>
+    <button class="top__burger" id="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">
+      <span></span><span></span>
+    </button>
+    <nav class="top__nav" id="site-nav" aria-label="Разделы">
+      <a href="#day">Смена</a>
+      <a href="#screens">Экраны</a>
+      <a href="#demo">Демо</a>
       <a href="#download">Скачать</a>
       <a href="#invite">Приглашение</a>
-      <a href="#request">Заявка</a>
-      <a href="#faq">FAQ</a>
+      <a class="top__cta" href="#request">В тест</a>
     </nav>
   </header>
 
   <main>
     <section class="hero" aria-label="Det App">
-      <div class="hero__media" aria-hidden="true">
-        <img src="assets/hero.jpg" alt="" fetchpriority="high" />
-        <div class="hero__veil"></div>
-        <div class="hero__glow"></div>
-      </div>
-      <div class="hero__content">
-        <img class="hero__mark" src="assets/logo.png" alt="Det App" width="104" height="104" />
-        <p class="hero__brand">Det App</p>
-        <h1 class="hero__headline">CRM под ритм детейлинг-студии</h1>
-        <p class="hero__lead">Заказы, цеха, касса и склад — без лишнего шума, в одном рабочем контуре.</p>
+      <div class="hero__intro">
+        <p class="hero__kicker">Закрытый тест · Windows · Android · RuStore · <span id="hero-build">сборка…</span></p>
+        <h1 class="hero__headline">Смена студии —<br />на одном экране</h1>
+        <p class="hero__lead">
+          Доска, календарь, заказ и касса. Машина едет по цехам,
+          а не по чатам и таблицам.
+        </p>
         <div class="hero__actions">
           <a class="btn btn--primary" href="#download">Скачать</a>
-          <a class="btn btn--ghost" href="#invite">Меня пригласили</a>
+          <a class="btn btn--ghost" href="#demo">Открыть демо</a>
         </div>
       </div>
-      <a class="hero__scroll" href="#showcase" aria-label="Дальше">↓</a>
-    </section>
-
-    <section class="showcase" id="showcase" aria-label="Интерфейс">
-      <div class="showcase__copy">
-        <p class="eyebrow">Интерфейс</p>
-        <h2>Студия на экране — как в зале</h2>
-        <p class="showcase__text">
-          Живая доска заказов на ПК и телефоне: машины, цеха, мастера и суммы —
-          в одном рабочем контуре, без «админской» серости.
-        </p>
+      <div class="hero__tabs" id="hero-tabs" role="tablist" aria-label="Экраны приложения">
+        <button type="button" class="hero__tab is-on" role="tab" aria-selected="true" data-screen="board">Доска</button>
+        <button type="button" class="hero__tab" role="tab" aria-selected="false" data-screen="calendar">Календарь</button>
+        <button type="button" class="hero__tab" role="tab" aria-selected="false" data-screen="order">Заказ</button>
+        <button type="button" class="hero__tab" role="tab" aria-selected="false" data-screen="cash">Касса</button>
       </div>
-      <div class="showcase__stage">
-        <div class="device device--laptop float-soft">
-          <div class="device__bezel">
-            <img src="assets/ui-board.jpg" alt="Доска заказов Det App на Windows" width="1600" height="875" loading="lazy" />
-          </div>
-          <div class="device__base" aria-hidden="true"></div>
-        </div>
-        <div class="device device--phone float-soft-delay">
-          <div class="device__bezel device__bezel--phone">
-            <img src="assets/ui-phone.jpg" alt="Доска заказов Det App на Android" width="720" height="1600" loading="lazy" />
-          </div>
-        </div>
+      <div class="hero__mode" id="hero-mode" role="group" aria-label="ПК или телефон">
+        <button type="button" class="hero__mode-btn is-on" data-mode="pc">ПК</button>
+        <button type="button" class="hero__mode-btn" data-mode="phone">Телефон</button>
+      </div>
+      <div class="hero__shot">
+        <figure class="window is-zoom" id="hero-window" data-zoom="assets/ui-board.jpg" data-zoom-alt="Доска заказов Det App">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img id="hero-shot" class="hero__img" src="assets/ui-board.jpg" alt="Доска заказов Det App" width="1600" height="875" />
+        </figure>
       </div>
     </section>
 
-    <section class="day" id="day" aria-label="День студии">
-      <div class="day__head">
-        <p class="eyebrow">День студии</p>
+    <section class="pulse" id="pulse" hidden>
+      <div class="pulse__grid">
+        <div><strong id="pulse-open">—</strong><span>в работе</span></div>
+        <div><strong id="pulse-shift">—</strong><span id="pulse-shift-label">на смене</span></div>
+        <div><strong id="pulse-done">—</strong><span>выдано</span></div>
+        <div><strong id="pulse-pipe">—</strong><span>в потоке</span></div>
+      </div>
+      <div class="lane" id="live-lanes" hidden></div>
+      <p class="pulse__note">Живая доска демо-студии. Нажмите цех — откроется доска. Без имён и номеров.</p>
+    </section>
+
+    <section class="story" id="day" aria-label="Смена">
+      <div class="story__head reveal">
+        <p class="eyebrow">Смена</p>
         <h2>От записи до выдачи</h2>
-        <p class="day__lead">Один поток на ПК и телефоне — без прыжков между таблицами и чатами.</p>
+        <p class="story__lead">Один поток на ПК. Телефон — тот же контур, ниже.</p>
       </div>
-      <ol class="day__steps">
-        <li class="day__step">
-          <span class="day__num">01</span>
-          <div>
-            <h3>Запись</h3>
-            <p>Клиент, авто, услуги и слот в календаре — сразу в системе.</p>
-          </div>
-          <div class="pair">
-            <div class="frame frame--desk"><img src="assets/ui-calendar.jpg" alt="Календарь на ПК" loading="lazy" /></div>
-            <div class="frame frame--phone"><img src="assets/ui-phone-calendar.jpg" alt="Календарь на телефоне" loading="lazy" /></div>
-          </div>
-        </li>
-        <li class="day__step">
-          <span class="day__num">02</span>
-          <div>
-            <h3>Доска</h3>
-            <p>Заказы по этапам цехов. Мастер видит свой поток и задачи.</p>
-          </div>
-          <div class="pair">
-            <div class="frame frame--desk"><img src="assets/ui-board.jpg" alt="Доска на ПК" loading="lazy" /></div>
-            <div class="frame frame--phone"><img src="assets/ui-phone.jpg" alt="Доска на телефоне" loading="lazy" /></div>
-          </div>
-        </li>
-        <li class="day__step">
-          <span class="day__num">03</span>
-          <div>
-            <h3>Карточка заказа</h3>
-            <p>Работы, мастера, материалы и ЗП — рядом с машиной, не в Excel.</p>
-          </div>
-          <div class="pair pair--order">
-            <div class="frame frame--phone frame--order">
-              <img src="assets/ui-order.jpg" alt="Карточка заказа на телефоне" loading="lazy" />
-            </div>
-          </div>
-        </li>
-        <li class="day__step">
-          <span class="day__num">04</span>
-          <div>
-            <h3>Касса и выдача</h3>
-            <p>Оплата, смена, выдача клиенту — закрытие дня без хаоса.</p>
-          </div>
-          <div class="pair">
-            <div class="frame frame--desk"><img src="assets/ui-cash.jpg" alt="Касса на ПК" loading="lazy" /></div>
-            <div class="frame frame--phone"><img src="assets/ui-phone-cash.jpg" alt="Касса на телефоне" loading="lazy" /></div>
-          </div>
-        </li>
-      </ol>
+      <article class="feat reveal" data-screen="calendar">
+        <div class="feat__copy">
+          <span class="story__num">01</span>
+          <h3>Запись</h3>
+          <p>Клиент, авто, услуги и слот — сразу в календаре, не в блокноте.</p>
+        </div>
+        <figure class="window is-zoom" data-zoom="assets/ui-calendar.jpg" data-zoom-alt="Календарь на ПК">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/ui-calendar.jpg" alt="Календарь на ПК" loading="lazy" />
+        </figure>
+      </article>
+      <article class="feat feat--flip reveal" data-screen="board">
+        <div class="feat__copy">
+          <span class="story__num">02</span>
+          <h3>Доска</h3>
+          <p>Заказы по цехам. Мастер видит свой поток, владелец — всю смену.</p>
+        </div>
+        <figure class="window is-zoom" data-zoom="assets/ui-board.jpg" data-zoom-alt="Доска на ПК">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/ui-board.jpg" alt="Доска на ПК" loading="lazy" />
+        </figure>
+      </article>
+      <article class="feat reveal" data-screen="order">
+        <div class="feat__copy">
+          <span class="story__num">03</span>
+          <h3>Карточка</h3>
+          <p>Работы, мастера, материалы и ЗП рядом с машиной — не в Excel.</p>
+        </div>
+        <figure class="window is-zoom" data-zoom="assets/screen-orders.jpg" data-zoom-alt="Новый заказ на ПК">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/screen-orders.jpg" alt="Новый заказ на ПК" loading="lazy" />
+        </figure>
+      </article>
+      <article class="feat feat--flip reveal" data-screen="cash">
+        <div class="feat__copy">
+          <span class="story__num">04</span>
+          <h3>Касса</h3>
+          <p>Оплата, смена, выдача. День закрывается без хаоса в мессенджере.</p>
+        </div>
+        <figure class="window is-zoom" data-zoom="assets/ui-cash.jpg" data-zoom-alt="Касса на ПК">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/ui-cash.jpg" alt="Касса на ПК" loading="lazy" />
+        </figure>
+      </article>
     </section>
 
-    <section class="screens" id="screens" aria-label="Возможности">
-      <div class="screens__head">
-        <p class="eyebrow">Возможности</p>
-        <h2>Что видит студия</h2>
+    <section class="phones" id="screens" aria-label="Телефон">
+      <div class="phones__head reveal">
+        <p class="eyebrow">Телефон</p>
+        <h2>Тот же контур в кармане</h2>
+        <p>Windows и Android смотрят одни данные. Без отдельной «мобильной админки».</p>
       </div>
-      <div class="screens__rail">
-        <figure class="screens__item">
-          <div class="frame frame--rail"><img src="assets/ui-board.jpg" alt="Доска заказов" loading="lazy" /></div>
-          <figcaption>Доска · ПК</figcaption>
+      <div class="phones__rail atlas__phones">
+        <figure class="handset is-zoom" data-screen="calendar" data-zoom="assets/ui-phone-calendar.jpg" data-zoom-alt="Календарь на телефоне">
+          <img src="assets/ui-phone-calendar.jpg" alt="Календарь на телефоне" loading="lazy" />
+          <figcaption>Календарь</figcaption>
         </figure>
-        <figure class="screens__item screens__item--phone">
-          <div class="frame frame--rail frame--rail-phone"><img src="assets/ui-phone.jpg" alt="Доска на телефоне" loading="lazy" /></div>
-          <figcaption>Доска · телефон</figcaption>
+        <figure class="handset is-zoom" data-screen="board" data-zoom="assets/ui-phone.jpg" data-zoom-alt="Доска на телефоне">
+          <img src="assets/ui-phone.jpg" alt="Доска на телефоне" loading="lazy" />
+          <figcaption>Доска</figcaption>
         </figure>
-        <figure class="screens__item">
-          <div class="frame frame--rail"><img src="assets/ui-calendar.jpg" alt="Календарь" loading="lazy" /></div>
-          <figcaption>Календарь · ПК</figcaption>
+        <figure class="handset is-zoom" data-screen="order" data-zoom="assets/ui-order.jpg" data-zoom-alt="Заказ на телефоне">
+          <img src="assets/ui-order.jpg" alt="Заказ на телефоне" loading="lazy" />
+          <figcaption>Заказ</figcaption>
         </figure>
-        <figure class="screens__item screens__item--phone">
-          <div class="frame frame--rail frame--rail-phone"><img src="assets/ui-phone-calendar.jpg" alt="Календарь на телефоне" loading="lazy" /></div>
-          <figcaption>Календарь · телефон</figcaption>
+        <figure class="handset is-zoom" data-screen="cash" data-zoom="assets/ui-phone-cash.jpg" data-zoom-alt="Касса на телефоне">
+          <img src="assets/ui-phone-cash.jpg" alt="Касса на телефоне" loading="lazy" />
+          <figcaption>Касса</figcaption>
         </figure>
-        <figure class="screens__item">
-          <div class="frame frame--rail"><img src="assets/ui-cash.jpg" alt="Касса" loading="lazy" /></div>
-          <figcaption>Касса · ПК</figcaption>
+        <figure class="handset is-zoom" data-zoom="assets/ui-phone-clients.jpg" data-zoom-alt="Клиенты на телефоне">
+          <img src="assets/ui-phone-clients.jpg" alt="Клиенты на телефоне" loading="lazy" />
+          <figcaption>Клиенты</figcaption>
         </figure>
-        <figure class="screens__item screens__item--phone">
-          <div class="frame frame--rail frame--rail-phone"><img src="assets/ui-phone-cash.jpg" alt="Касса на телефоне" loading="lazy" /></div>
-          <figcaption>Касса · телефон</figcaption>
+        <figure class="handset is-zoom" data-zoom="assets/ui-phone-inventory.jpg" data-zoom-alt="Склад на телефоне">
+          <img src="assets/ui-phone-inventory.jpg" alt="Склад на телефоне" loading="lazy" />
+          <figcaption>Склад</figcaption>
         </figure>
-        <figure class="screens__item">
-          <div class="frame frame--rail"><img src="assets/screen-clients.jpg" alt="Клиенты" loading="lazy" /></div>
-          <figcaption>Клиенты · ПК</figcaption>
+      </div>
+    </section>
+
+    <section class="gallery" id="atlas" aria-label="Ещё экраны">
+      <div class="gallery__head reveal">
+        <p class="eyebrow">Ещё на ПК</p>
+        <h2>Клиенты, склад, аналитика</h2>
+      </div>
+      <div class="gallery__grid" id="atlas-pc">
+        <figure class="window is-zoom" data-zoom="assets/screen-clients.jpg" data-zoom-alt="Клиенты">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/screen-clients.jpg" alt="Клиенты" loading="lazy" />
+          <figcaption>Клиенты</figcaption>
         </figure>
-        <figure class="screens__item screens__item--phone">
-          <div class="frame frame--rail frame--rail-phone"><img src="assets/ui-order.jpg" alt="Заказ на телефоне" loading="lazy" /></div>
-          <figcaption>Заказ · телефон</figcaption>
+        <figure class="window is-zoom" data-zoom="assets/screen-stats.jpg" data-zoom-alt="Аналитика">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/screen-stats.jpg" alt="Аналитика" loading="lazy" />
+          <figcaption>Аналитика</figcaption>
+        </figure>
+        <figure class="window is-zoom" data-zoom="assets/screen-inventory.jpg" data-zoom-alt="Склад">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/screen-inventory.jpg" alt="Склад" loading="lazy" />
+          <figcaption>Склад</figcaption>
+        </figure>
+        <figure class="window is-zoom" data-zoom="assets/screen-masters.jpg" data-zoom-alt="Сотрудники">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/screen-masters.jpg" alt="Сотрудники" loading="lazy" />
+          <figcaption>Сотрудники</figcaption>
+        </figure>
+        <figure class="window is-zoom" data-zoom="assets/screen-done.jpg" data-zoom-alt="Выдача">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/screen-done.jpg" alt="Выдача" loading="lazy" />
+          <figcaption>Выдача</figcaption>
+        </figure>
+        <figure class="window is-zoom" data-zoom="assets/screen-cash.jpg" data-zoom-alt="Касса · другой кадр">
+          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
+          <img src="assets/screen-cash.jpg" alt="Касса · другой кадр" loading="lazy" />
+          <figcaption>Касса</figcaption>
         </figure>
       </div>
     </section>
 
     <section class="roles" id="roles">
-      <div class="roles__inner">
+      <div class="roles__inner reveal">
         <p class="eyebrow">Роли</p>
         <h2>Каждому — свой контур</h2>
         <div class="roles__grid">
-          <article>
+          <article class="role" data-screen="cash" tabindex="0">
+            <span class="roles__mark">01</span>
             <h3>Владелец</h3>
             <p>Касса, склад, прайс, доступы и картина по студии целиком.</p>
+            <span class="role__go">Смотреть кассу</span>
           </article>
-          <article>
-            <h3>Админ / ресепшн</h3>
-            <p>Запись, клиенты, статусы, выдача и общение с залом.</p>
+          <article class="role" data-screen="calendar" tabindex="0">
+            <span class="roles__mark">02</span>
+            <h3>Ресепшн</h3>
+            <p>Запись, клиенты, статусы, выдача и зал — без чужих настроек склада.</p>
+            <span class="role__go">Смотреть календарь</span>
           </article>
-          <article>
+          <article class="role" data-screen="board" tabindex="0">
+            <span class="roles__mark">03</span>
             <h3>Мастер</h3>
-            <p>Свой цех, задачи, время и ЗП — без чужих настроек.</p>
+            <p>Свой цех, задачи, смена и ЗП. Кнопка «На смене» — настоящая.</p>
+            <span class="role__go">Смотреть доску</span>
           </article>
         </div>
       </div>
     </section>
 
-    <section class="panel" id="download">
+    <section class="panel panel--wide" id="demo">
+      <p class="eyebrow">Демо</p>
+      <h2>Зайти в живую студию</h2>
+      <p class="panel__lead">Облачная Demo Detailing. Скачай приложение и войди этими данными — без заявки.</p>
+      <div class="status" id="demo-status" data-state="loading">
+        <span class="status__dot" aria-hidden="true"></span>
+        <span class="status__text">Проверяем студию…</span>
+      </div>
+      <p class="panel__hint" id="demo-pulse" hidden></p>
+      <div class="cred" id="demo-creds">
+        <div class="cred__row">
+          <span class="cred__k">Код</span>
+          <code>demo</code>
+          <button type="button" class="cred__copy" data-copy="demo">Копировать</button>
+        </div>
+        <div class="cred__row">
+          <span class="cred__k">Логин</span>
+          <code>owner@demo.det-app.ru</code>
+          <button type="button" class="cred__copy" data-copy="owner@demo.det-app.ru">Копировать</button>
+        </div>
+        <div class="cred__row">
+          <span class="cred__k">Пароль</span>
+          <code>DetAppAdmin2026!</code>
+          <button type="button" class="cred__copy" data-copy="DetAppAdmin2026!">Копировать</button>
+        </div>
+      </div>
+      <div class="panel__actions">
+        <a class="btn btn--primary" id="demo-open" href="detapp://invite?slug=demo">Открыть в Det App</a>
+        <a class="btn btn--ghost" id="demo-join" href="/join.html?slug=demo">Приглашение</a>
+        <a class="btn btn--ghost" id="demo-book" href="/book.html?slug=demo">Запись глазами клиента</a>
+      </div>
+      <p class="panel__hint">Клиент студии видит отдельную страницу записи — не CRM.</p>
+    </section>
+
+    <section class="panel panel--wide" id="download">
       <p class="eyebrow">Скачать</p>
-      <h2>Windows и Android</h2>
-      <p class="panel__lead">Актуальная сборка с облачного канала. Без оплаты — закрытый тест.</p>
+      <h2>Windows, Android, RuStore</h2>
+      <p class="panel__lead">Актуальная сборка с облака. Закрытый тест — без оплаты. iPhone в браузере появится отдельно, не в этом релизе.</p>
+      <p class="panel__hint" id="dl-platform"></p>
       <div class="status" id="cloud-status" data-state="loading">
         <span class="status__dot" aria-hidden="true"></span>
         <span class="status__text">Проверяем облако…</span>
@@ -207,12 +289,28 @@
       <p class="release-notes" id="release-notes" hidden></p>
       <div class="download-grid">
         <div class="download-main">
-          <div class="panel__actions">
-            <a class="btn btn--primary" id="dl-windows" href="#" aria-disabled="true">Windows Setup</a>
-            <a class="btn btn--ghost" id="dl-windows-zip" href="#" aria-disabled="true" hidden>Windows zip</a>
-            <a class="btn btn--ghost" id="dl-android" href="#" aria-disabled="true">Android APK</a>
+          <div class="dl-cards">
+            <a class="dl-card" id="dl-windows" href="#" aria-disabled="true">
+              <span class="dl-card__os">Windows</span>
+              <span class="dl-card__name">Setup</span>
+              <span class="dl-card__hint">Установка в профиль, дальше — обновления из приложения</span>
+            </a>
+            <a class="dl-card" id="dl-android" href="#" aria-disabled="true">
+              <span class="dl-card__os">Android</span>
+              <span class="dl-card__name">APK</span>
+              <span class="dl-card__hint">Прямая сборка с облака</span>
+            </a>
+            <a class="dl-card dl-card--store" href="https://www.rustore.ru/catalog/app/ru.detapp.app" target="_blank" rel="noopener">
+              <span class="dl-card__os">Магазин</span>
+              <span class="dl-card__name">RuStore</span>
+              <span class="dl-card__hint">Обновления через магазин</span>
+            </a>
           </div>
-          <p class="panel__hint">Setup ставит в профиль Windows; дальше обновления — из меню приложения. На телефоне: «Меня пригласили» или раздел ниже.</p>
+          <div class="panel__actions">
+            <a class="btn btn--ghost" id="dl-windows-zip" href="#" aria-disabled="true" hidden>Windows zip</a>
+            <button class="btn btn--ghost" type="button" id="dl-copy-apk" hidden>Копировать ссылку на APK</button>
+          </div>
+          <p class="panel__hint">На телефоне без магазина: «Меня пригласили» или QR на APK.</p>
         </div>
         <div class="qr-box" id="qr-box" hidden>
           <canvas id="apk-qr" width="160" height="160" aria-label="QR для скачивания APK"></canvas>
@@ -225,19 +323,22 @@
     <section class="panel" id="invite">
       <p class="eyebrow">Приглашение</p>
       <h2>Код студии</h2>
-      <p class="panel__lead">Введите код от владельца — проверим студию и откроем Det App.</p>
+      <p class="panel__lead">Код от владельца — проверим студию и откроем Det App.</p>
       <form class="invite" id="invite-form" novalidate>
         <label class="invite__label" for="studio-slug">Код студии</label>
         <div class="invite__row">
           <input class="invite__input" id="studio-slug" name="slug" type="text" autocomplete="off" spellcheck="false" maxlength="64" placeholder="например demo" required />
           <button class="btn btn--primary" type="submit" id="invite-submit">Найти</button>
+          <button class="btn btn--ghost" type="button" id="invite-demo">Подставить demo</button>
         </div>
         <p class="invite__msg" id="invite-msg" role="status" aria-live="polite"></p>
         <div class="invite__found" id="invite-found" hidden>
           <p class="invite__studio" id="invite-studio"></p>
           <div class="panel__actions">
             <a class="btn btn--primary" id="invite-open" href="#">Открыть в Det App</a>
-            <a class="btn btn--ghost" id="invite-page" href="#" target="_blank" rel="noopener">Страница приглашения</a>
+            <a class="btn btn--ghost" id="invite-page" href="/join.html">Страница приглашения</a>
+            <a class="btn btn--ghost" id="invite-book" href="/book.html" hidden>Онлайн-запись</a>
+            <button class="btn btn--ghost" type="button" id="invite-copy">Копировать код</button>
           </div>
         </div>
       </form>
@@ -246,7 +347,7 @@
     <section class="panel" id="request">
       <p class="eyebrow">Заявка</p>
       <h2>Хочу в закрытый тест</h2>
-      <p class="panel__lead">Оставьте контакт — ответим, когда будем готовы подключить студию.</p>
+      <p class="panel__lead">Контакт — ответим, когда будем готовы подключить студию.</p>
       <form class="lead" id="lead-form" novalidate>
         <div class="lead__grid">
           <label>
@@ -271,35 +372,49 @@
         </div>
         <p class="invite__msg" id="lead-msg" role="status" aria-live="polite"></p>
       </form>
-      <p class="access__stub" style="margin-top:1.5rem" aria-label="Заглушка тарифов">
-        Тарифы и оплата — скоро. Сейчас тест бесплатный, без публичных продаж.
-      </p>
+      <p class="access__stub">Тарифы — скоро. Сейчас тест бесплатный, без публичных продаж.</p>
     </section>
 
     <section class="faq" id="faq">
-      <div class="faq__inner">
+      <div class="faq__inner reveal">
         <p class="eyebrow">FAQ</p>
         <h2>Частые вопросы</h2>
         <div class="faq__list">
           <details>
             <summary>Это платно?</summary>
-            <p>Сейчас нет. Закрытый тест для ограниченного круга студий. Тарифы появятся позже — на сайте будет заглушка, пока не откроем.</p>
+            <p>Сейчас нет. Закрытый тест для ограниченного круга студий. Тарифы появятся позже.</p>
+          </details>
+          <details>
+            <summary>Чем это лучше чатов и Excel?</summary>
+            <p>Слот сразу в календаре, заказы едут по цехам на доске, оплата закрывается в кассе. Windows и Android видят одни данные — не блокнот, не WhatsApp и не «вечером посчитаем».</p>
+          </details>
+          <details>
+            <summary>Как открыть демо?</summary>
+            <p>Скачай Windows или Android, код студии <b>demo</b>, логин <b>owner@demo.det-app.ru</b>. Пароль на странице в блоке «Демо».</p>
           </details>
           <details>
             <summary>Как попасть в студию?</summary>
-            <p>Владелец даёт код студии. На сайте: «Приглашение» → код → открыть приложение. Или в приложении: «Меня пригласили».</p>
+            <p>Владелец даёт код. На сайте: «Приглашение» → код → открыть приложение. Или в приложении: «Меня пригласили».</p>
           </details>
           <details>
             <summary>Windows и телефон видят одни данные?</summary>
-            <p>Да, в облачном режиме через api.det-app.ru. LAN-режим — запасной офлайн в локальной сети.</p>
+            <p>Да, в облаке через api.det-app.ru. LAN — запасной офлайн в локальной сети.</p>
+          </details>
+          <details>
+            <summary>Где взять Android?</summary>
+            <p>RuStore или APK с этой страницы. Сборки из магазина обновляются через RuStore, не облачным APK.</p>
+          </details>
+          <details>
+            <summary>Есть iPhone?</summary>
+            <p>Нативного приложения в App Store пока нет. Веб-версия для iPhone — отдельным этапом, не в этом запуске.</p>
           </details>
           <details>
             <summary>Как обновиться?</summary>
-            <p>В приложении: меню → «Обновить». Канал по умолчанию — облако. С этой страницы тоже можно скачать свежую сборку.</p>
+            <p>В приложении: меню → «Обновить» (облако). С этой страницы тоже можно скачать свежую сборку. RuStore — через магазин.</p>
           </details>
           <details>
-            <summary>Где политика конфиденциальности?</summary>
-            <p><a href="/privacy.html">det-app.ru/privacy.html</a> — для сторов и спокойствия.</p>
+            <summary>Где политика?</summary>
+            <p><a href="/privacy.html">det-app.ru/privacy.html</a></p>
           </details>
         </div>
       </div>
@@ -314,13 +429,29 @@
     <div class="foot__links">
       <a href="/privacy.html">Политика</a>
       <a href="/changelog.html">Changelog</a>
+      <a href="https://www.rustore.ru/catalog/app/ru.detapp.app" target="_blank" rel="noopener">RuStore</a>
       <a href="#download">Скачать</a>
       <a href="mailto:hello@det-app.ru">hello@det-app.ru</a>
     </div>
     <p class="foot__note">© <span data-year></span> Det App · тестовый режим · <span id="foot-build">…</span></p>
   </footer>
 
+  <dialog class="zoom" id="zoom" aria-label="Кадр крупно">
+    <div class="zoom__bar">
+      <button type="button" id="zoom-prev">Назад</button>
+      <p class="zoom__cap" id="zoom-cap"></p>
+      <button type="button" id="zoom-close">Закрыть</button>
+    </div>
+    <img id="zoom-img" alt="" />
+    <button class="zoom__next" type="button" id="zoom-next">Дальше</button>
+  </dialog>
+  <nav class="dock" id="dock" hidden>
+    <a href="#download">Скачать</a>
+    <a href="#demo">Демо</a>
+    <a href="#invite">Код</a>
+  </nav>
+
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js" defer></script>
-  <script src="js/site.js" defer></script>
+  <script src="js/site.js?v=20260915j" defer></script>
 </body>
 </html>

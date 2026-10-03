@@ -1,0 +1,6 @@
+{
+  "key_id": "ID ключа из RuStore Консоль → API",
+  "private_key": "Base64 PKCS8 приватного ключа (одна строка, без BEGIN/END)",
+  "telegram_bot_token": "123456:AA....",
+  "telegram_chat_id": "ваш chat_id"
+}

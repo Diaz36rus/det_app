@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.config import settings
 from app.db import get_db
 from app.models import SiteLead, User
+from app.rate_limit import limit_by_ip
 from app.security import decode_token
 
 router = APIRouter(prefix="/site", tags=["site"])
@@ -65,12 +67,12 @@ def _require_leads_access(
     if user is not None and user.is_platform_admin:
         return True
     expected = (settings.release_upload_token or "").strip()
-    if expected and x_release_token and x_release_token.strip() == expected:
+    if expected and x_release_token and hmac.compare_digest(x_release_token.strip(), expected):
         return True
     raise HTTPException(status_code=403, detail="Нужен platform admin или X-Release-Token")
 
 
-@router.post("/leads", response_model=LeadOut)
+@router.post("/leads", response_model=LeadOut, dependencies=[Depends(limit_by_ip("site-leads", 5, 600))])
 def create_lead(body: LeadCreate, db: Session = Depends(get_db)):
     contact = body.contact.strip()
     if len(contact) < 3:

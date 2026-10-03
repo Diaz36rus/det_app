@@ -1,0 +1,17 @@
+* text=auto
+
+# Linux-скрипты и конфиги сервера — только LF (CRLF ломает sh/Caddy на хосте)
+*.sh text eol=lf
+server/Caddyfile text eol=lf
+server/**/Dockerfile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Бинарные ассеты
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.jks binary

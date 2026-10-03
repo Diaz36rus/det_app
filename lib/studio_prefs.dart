@@ -21,6 +21,8 @@ class StudioPrefs {
   static const tplBooking = 'msg_tpl_booking';
   static const tplDebt = 'msg_tpl_debt';
   static const tplReady = 'msg_tpl_ready';
+  /// telegram | whatsapp | sms | ask (спрашивать каждый раз)
+  static const clientMsgChannel = 'client_msg_channel';
   static const logoPathKey = 'studio_logo_path';
 
   static const defaultStartHour = 8;
@@ -150,6 +152,17 @@ class StudioPrefs {
     await db.setAppSetting(tplBooking, booking.trim());
     await db.setAppSetting(tplDebt, debt.trim());
     await db.setAppSetting(tplReady, ready.trim());
+  }
+
+  /// Канал клиенту: `telegram` (по умолчанию для РФ), `whatsapp`, `sms`, `ask`.
+  static Future<String> loadClientMsgChannel() async {
+    final v = ((await DatabaseHelper().getAppSetting(clientMsgChannel)) ?? '').trim().toLowerCase();
+    if (v.isEmpty) return 'ask';
+    return v;
+  }
+
+  static Future<void> saveClientMsgChannel(String channel) async {
+    await DatabaseHelper().setAppSetting(clientMsgChannel, channel.trim().toLowerCase());
   }
 
   /// Подстановка плейсхолдеров: {name} {order} {debt} {car}

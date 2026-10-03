@@ -175,8 +175,9 @@ class UpdateChannel {
         final path = u.path.contains('latest.json')
             ? u.path
             : '/updates/latest.json';
+        final ownDomain = host == 'det-app.ru' || host.endsWith('.det-app.ru');
         return Uri(
-          scheme: u.scheme.isEmpty ? 'http' : u.scheme,
+          scheme: ownDomain ? 'https' : (u.scheme.isEmpty ? 'http' : u.scheme),
           host: u.host,
           port: u.hasPort && u.port != 80 && u.port != 443 ? u.port : null,
           path: path,
