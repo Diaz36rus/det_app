@@ -245,7 +245,7 @@ class _CreateStaffDialogState extends State<CreateStaffDialog> {
                 )
               else
                 DropdownButtonFormField<int>(
-                  value: _branchId,
+                  initialValue: _branchId,
                   items: _branches
                       .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
                       .toList(),
@@ -443,7 +443,7 @@ class _AssignUserDialogState extends State<AssignUserDialog> {
                 ),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<int>(
-                  value: _branchId,
+                  initialValue: _branchId,
                   items: _branches
                       .map((b) => DropdownMenuItem(value: b.id, child: Text(b.name)))
                       .toList(),

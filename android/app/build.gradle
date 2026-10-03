@@ -13,8 +13,8 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "ru.detapp.app"
-    compileSdk = 35
-    ndkVersion = "27.0.12077973"
+    compileSdk = 36
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -25,10 +25,18 @@ android {
         jvmTarget = JavaVersion.VERSION_17
     }
 
+    // Без этого AGP кладёт .so несжатыми: APK 140 МБ вместо ~95 (облако и RuStore качают APK целиком).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     defaultConfig {
         applicationId = "ru.detapp.app"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        // 35+ включает принудительный edge-to-edge — сначала проверить вёрстку под статус-баром.
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }

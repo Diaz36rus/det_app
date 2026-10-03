@@ -136,7 +136,7 @@ class _PaymentEditDialogState extends State<PaymentEditDialog> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Нет')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withValues(alpha: 0.9)),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Отменить оплату'),
           ),
@@ -183,7 +183,7 @@ class _PaymentEditDialogState extends State<PaymentEditDialog> {
             const SizedBox(height: 10),
             if (_registers.isNotEmpty)
               DropdownButtonFormField<int>(
-                value: _registers.any((r) => (r['id'] as num).toInt() == _registerId)
+                initialValue: _registers.any((r) => (r['id'] as num).toInt() == _registerId)
                     ? _registerId
                     : (_registers.first['id'] as num).toInt(),
                 decoration: const InputDecoration(labelText: 'Касса', isDense: true),
@@ -211,7 +211,7 @@ class _PaymentEditDialogState extends State<PaymentEditDialog> {
               )
             else
               DropdownButtonFormField<String>(
-                value: CashMethods.all.contains(_method) ? _method : CashMethods.cash,
+                initialValue: CashMethods.all.contains(_method) ? _method : CashMethods.cash,
                 decoration: const InputDecoration(labelText: 'Способ', isDense: true),
                 dropdownColor: AppColors.surface2,
                 items: CashMethods.all.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),

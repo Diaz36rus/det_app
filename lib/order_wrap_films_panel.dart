@@ -242,7 +242,7 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: category,
+                  initialValue: category,
                   decoration: const InputDecoration(labelText: 'Категория', isDense: true),
                   items: [
                     if (allowedCats.isEmpty || allowedCats.contains(InventoryCategories.filmWrap))
@@ -263,7 +263,7 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: unit,
+                  initialValue: unit,
                   decoration: const InputDecoration(
                     labelText: 'Единица учёта на складе',
                     helperText: 'Расход в заказе — всегда м.п.',
@@ -515,7 +515,7 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           DropdownButtonFormField<int>(
-            value: filmValue,
+            initialValue: filmValue,
             isDense: true,
             isExpanded: true,
             decoration: InputDecoration(
@@ -552,7 +552,7 @@ class _OrderWrapFilmsPanelState extends State<OrderWrapFilmsPanel> {
             children: [
               Expanded(
                 child: DropdownButtonFormField<int?>(
-                  value: rollValue,
+                  initialValue: rollValue,
                   isDense: true,
                   isExpanded: true,
                   decoration: const InputDecoration(

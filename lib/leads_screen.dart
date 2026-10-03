@@ -73,7 +73,7 @@ class _LeadsScreenState extends State<LeadsScreen> {
                   ),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
-                    value: source,
+                    initialValue: source,
                     decoration: const InputDecoration(labelText: 'Источник', isDense: true),
                     dropdownColor: AppColors.surface2,
                     items: OrderLeadSources.all
@@ -227,7 +227,7 @@ class _LeadsScreenState extends State<LeadsScreen> {
                           IconButton(
                             tooltip: 'Удалить',
                             onPressed: () => _delete(l),
-                            icon: Icon(Icons.delete_outline, size: 20, color: AppColors.danger.withOpacity(0.85)),
+                            icon: Icon(Icons.delete_outline, size: 20, color: AppColors.danger.withValues(alpha: 0.85)),
                           ),
                         ],
                       ),

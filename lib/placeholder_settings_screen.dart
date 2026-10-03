@@ -34,7 +34,7 @@ class PlaceholderSettingsScreen extends StatelessWidget {
                     width: 56,
                     height: 56,
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.16),
+                      color: AppColors.primary.withValues(alpha: 0.16),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Icon(icon, size: 28, color: AppColors.primary),

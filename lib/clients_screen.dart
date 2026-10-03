@@ -277,7 +277,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                       ),
                       const SizedBox(height: 8),
                       DropdownButtonFormField<String>(
-                        value: selectedCategory,
+                        initialValue: selectedCategory,
                         decoration: const InputDecoration(labelText: "Класс авто", isDense: true),
                         dropdownColor: AppColors.surface,
                         items: ['1', '2', '3', '4']
@@ -630,7 +630,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                value: _newCarCategory,
+                initialValue: _newCarCategory,
                 decoration: const InputDecoration(labelText: "Класс", isDense: true),
                 dropdownColor: AppColors.surface2,
                 items: ['1', '2', '3', '4']
@@ -712,7 +712,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                 const SizedBox(width: 10),
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: _newCarCategory,
+                    initialValue: _newCarCategory,
                     decoration: const InputDecoration(labelText: "Класс", isDense: true),
                     dropdownColor: AppColors.surface2,
                     items: ['1', '2', '3', '4']
@@ -878,7 +878,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: _vipAccent.withOpacity(0.15),
+                          color: _vipAccent.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
@@ -933,7 +933,7 @@ class _ClientsScreenState extends State<ClientsScreen> with DbRefreshMixin, Puls
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             decoration: BoxDecoration(
-                              color: AppColors.bg.withOpacity(0.45),
+                              color: AppColors.bg.withValues(alpha: 0.45),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(

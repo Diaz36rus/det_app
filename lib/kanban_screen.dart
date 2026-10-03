@@ -318,7 +318,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide(color: AppColors.primary.withOpacity(0.55)),
+            borderSide: BorderSide(color: AppColors.primary.withValues(alpha: 0.55)),
           ),
         ),
         style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14, fontWeight: FontWeight.w600),
@@ -486,7 +486,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
           border: Border.all(color: AppColors.borderSoft),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.22),
+              color: Colors.black.withValues(alpha: 0.22),
               blurRadius: 12,
               offset: const Offset(0, 5),
             ),
@@ -517,7 +517,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                               icon: Icon(
                                 Icons.delete_outline_rounded,
                                 size: 18,
-                                color: AppColors.danger.withOpacity(0.85),
+                                color: AppColors.danger.withValues(alpha: 0.85),
                               ),
                               onPressed: () => _confirmDeleteOrder(o),
                             ),
@@ -581,7 +581,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                   _cardMetaRow(
                     icon: Icons.handyman_outlined,
                     iconColor: (kOrderStatusColors[row.workshop] ?? AppColors.primary)
-                        .withOpacity(0.95),
+                        .withValues(alpha: 0.95),
                     text: row.names.join(', '),
                   ),
               ],
@@ -650,7 +650,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                     onPressed: () => _changeOrderStatus(o),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: accent,
-                      side: BorderSide(color: accent.withOpacity(0.5)),
+                      side: BorderSide(color: accent.withValues(alpha: 0.5)),
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       visualDensity: VisualDensity.compact,
                     ),
@@ -683,9 +683,9 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
     );
 
     // Стеклянная колонка: лёгкий цвет сверху → почти прозрачно вниз, фон доски читается.
-    final topTint = accent.withOpacity(hovering ? 0.10 : 0.055);
-    final midTint = accent.withOpacity(hovering ? 0.035 : 0.018);
-    final base = AppColors.surface.withOpacity(hovering ? 0.10 : 0.06);
+    final topTint = accent.withValues(alpha: hovering ? 0.10 : 0.055);
+    final midTint = accent.withValues(alpha: hovering ? 0.035 : 0.018);
+    final base = AppColors.surface.withValues(alpha: hovering ? 0.10 : 0.06);
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
@@ -695,7 +695,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: hovering ? accent.withOpacity(0.75) : accent.withOpacity(0.45),
+          color: hovering ? accent.withValues(alpha: 0.75) : accent.withValues(alpha: 0.45),
           width: hovering ? 1.55 : 1.25,
         ),
         gradient: LinearGradient(
@@ -706,7 +706,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
         ),
         boxShadow: [
           BoxShadow(
-            color: accent.withOpacity(hovering ? 0.14 : 0.04),
+            color: accent.withValues(alpha: hovering ? 0.14 : 0.04),
             blurRadius: hovering ? 16 : 10,
             offset: const Offset(0, 4),
           ),
@@ -725,7 +725,7 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                   color: accent,
                   shape: BoxShape.circle,
                   boxShadow: [
-                    BoxShadow(color: accent.withOpacity(0.45), blurRadius: 6),
+                    BoxShadow(color: accent.withValues(alpha: 0.45), blurRadius: 6),
                   ],
                 ),
               ),
@@ -745,9 +745,9 @@ class _KanbanScreenState extends State<KanbanScreen> with DbRefreshMixin, PulseH
                 padding: const EdgeInsets.symmetric(horizontal: 7),
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: accent.withOpacity(0.18),
+                  color: accent.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: accent.withOpacity(0.4)),
+                  border: Border.all(color: accent.withValues(alpha: 0.4)),
                 ),
                 child: Text(
                   '${colOrders.length}',

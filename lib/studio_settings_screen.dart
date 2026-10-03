@@ -657,7 +657,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
     return Container(
       decoration: AppTheme.panelDecoration.copyWith(
         border: Border.all(
-          color: danger ? AppColors.danger.withOpacity(0.35) : AppColors.borderSoft,
+          color: danger ? AppColors.danger.withValues(alpha: 0.35) : AppColors.borderSoft,
         ),
       ),
       child: Column(
@@ -679,7 +679,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: accent.withOpacity(0.14),
+                        color: accent.withValues(alpha: 0.14),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(icon, size: 20, color: accent),
@@ -720,7 +720,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
             ),
           ),
           if (open) ...[
-            Divider(height: 1, color: AppColors.borderSoft.withOpacity(0.9)),
+            Divider(height: 1, color: AppColors.borderSoft.withValues(alpha: 0.9)),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               child: body,
@@ -745,7 +745,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: AppColors.bg.withOpacity(0.55),
+                color: AppColors.bg.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: AppColors.borderSoft),
               ),
@@ -914,7 +914,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
           ),
           const SizedBox(height: 6),
           DropdownButtonFormField<int>(
-            value: _defaultBranchId != null && _branches.any((b) => b.id == _defaultBranchId)
+            initialValue: _defaultBranchId != null && _branches.any((b) => b.id == _defaultBranchId)
                 ? _defaultBranchId
                 : (_branches.isNotEmpty ? _branches.first.id : null),
             items: _branches
@@ -1088,7 +1088,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
       child: Material(
-        color: AppColors.bg.withOpacity(0.45),
+        color: AppColors.bg.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
@@ -1138,7 +1138,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
           children: [
             Expanded(
               child: DropdownButtonFormField<int>(
-                value: _startHour,
+                initialValue: _startHour,
                 decoration: const InputDecoration(labelText: 'Начало', isDense: true),
                 items: [
                   for (var h = 0; h <= 22; h++)
@@ -1156,7 +1156,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
             const SizedBox(width: 12),
             Expanded(
               child: DropdownButtonFormField<int>(
-                value: _endHour,
+                initialValue: _endHour,
                 decoration: const InputDecoration(labelText: 'Конец', isDense: true),
                 items: [
                   for (var h = _startHour; h <= 23; h++)
@@ -1230,7 +1230,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
         ),
         const SizedBox(height: 10),
         DropdownButtonFormField<String>(
-          value: _clientMsgChannel,
+          initialValue: _clientMsgChannel,
           decoration: const InputDecoration(labelText: 'Канал клиенту', isDense: true),
           dropdownColor: AppColors.surface2,
           items: const [
@@ -1344,7 +1344,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
                           ),
                           const SizedBox(height: 8),
                           DropdownButtonFormField<String>(
-                            value: mode,
+                            initialValue: mode,
                             decoration: const InputDecoration(labelText: 'Режим', isDense: true),
                             items: const [
                               DropdownMenuItem(value: 'percent', child: Text('% от цеха')),
@@ -1449,7 +1449,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
       );
     }
     return DropdownButtonFormField<int>(
-      value: _defaultCashId != null && _cashRegisters.any((r) => (r['id'] as num?)?.toInt() == _defaultCashId)
+      initialValue: _defaultCashId != null && _cashRegisters.any((r) => (r['id'] as num?)?.toInt() == _defaultCashId)
           ? _defaultCashId
           : (_cashRegisters.first['id'] as num?)?.toInt(),
       decoration: const InputDecoration(labelText: 'Касса', isDense: true),
@@ -1484,7 +1484,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
             style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
           ),
           value: _mobileFull,
-          activeColor: AppColors.primary,
+          activeThumbColor: AppColors.primary,
           onChanged: _setMobileFull,
         ),
       ],
@@ -1567,7 +1567,7 @@ class _StudioSettingsScreenState extends State<StudioSettingsScreen> {
             onPressed: _wipeDb,
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.danger,
-              side: BorderSide(color: AppColors.danger.withOpacity(0.5)),
+              side: BorderSide(color: AppColors.danger.withValues(alpha: 0.5)),
             ),
             icon: const Icon(Icons.delete_forever_outlined, size: 18),
             label: Text('Очистить базу…', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),

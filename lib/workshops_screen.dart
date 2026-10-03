@@ -228,11 +228,11 @@ class _WorkshopsScreenState extends State<WorkshopsScreen> with DbRefreshMixin, 
           margin: const EdgeInsets.only(bottom: 12),
           decoration: BoxDecoration(
             color: isDone
-                ? AppColors.success.withOpacity(0.08)
-                : AppColors.surface2.withOpacity(0.92),
+                ? AppColors.success.withValues(alpha: 0.08)
+                : AppColors.surface2.withValues(alpha: 0.92),
             borderRadius: BorderRadius.circular(AppTheme.radiusLg),
             border: Border.all(
-              color: (isDone ? AppColors.success : AppColors.primary).withOpacity(0.45),
+              color: (isDone ? AppColors.success : AppColors.primary).withValues(alpha: 0.45),
             ),
           ),
           child: Column(

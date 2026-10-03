@@ -67,7 +67,7 @@ class _SedanPlaceholderPainter extends CustomPainter {
 
     // Тень
     final shadow = Paint()
-      ..color = Colors.black.withOpacity(0.35)
+      ..color = Colors.black.withValues(alpha: 0.35)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 18);
     canvas.drawOval(
       Rect.fromCenter(center: Offset(0, scale * 0.28), width: scale * 0.85, height: scale * 0.08),
@@ -97,7 +97,7 @@ class _SedanPlaceholderPainter extends CustomPainter {
     canvas.drawPath(
       bodyPath,
       Paint()
-        ..color = Colors.white.withOpacity(0.08)
+        ..color = Colors.white.withValues(alpha: 0.08)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.2,
     );
@@ -109,7 +109,7 @@ class _SedanPlaceholderPainter extends CustomPainter {
       ..lineTo(scale * 0.16, -scale * 0.18)
       ..lineTo(scale * 0.26, -scale * 0.06)
       ..close();
-    canvas.drawPath(glassPath, Paint()..color = glass.withOpacity(0.92));
+    canvas.drawPath(glassPath, Paint()..color = glass.withValues(alpha: 0.92));
 
     // Колёса
     final tire = Paint()..color = const Color(0xFF0A0A0B);
@@ -165,8 +165,8 @@ class _SedanPlaceholderPainter extends CustomPainter {
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          Colors.white.withOpacity(0.22),
-          Colors.white.withOpacity(0.0),
+          Colors.white.withValues(alpha: 0.22),
+          Colors.white.withValues(alpha: 0.0),
         ],
       ).createShader(Rect.fromLTWH(-scale * 0.4, -scale * 0.22, scale * 0.8, scale * 0.2));
     canvas.drawPath(bodyPath, gloss);

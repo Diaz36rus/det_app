@@ -44,12 +44,12 @@ class OnShiftChip extends StatelessWidget {
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(20),
                     color: on
-                        ? AppColors.success.withOpacity(0.18)
-                        : AppColors.surface2.withOpacity(0.9),
+                        ? AppColors.success.withValues(alpha: 0.18)
+                        : AppColors.surface2.withValues(alpha: 0.9),
                     border: Border.all(
                       color: on
-                          ? AppColors.success.withOpacity(0.65)
-                          : AppColors.border.withOpacity(0.9),
+                          ? AppColors.success.withValues(alpha: 0.65)
+                          : AppColors.border.withValues(alpha: 0.9),
                     ),
                   ),
                   child: Row(

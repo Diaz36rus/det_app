@@ -631,7 +631,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.14),
+                      color: AppColors.primary.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(icon, size: 20, color: AppColors.primary),
@@ -685,7 +685,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 width: 34,
                 height: 34,
                 decoration: BoxDecoration(
-                  color: accent.withOpacity(0.14),
+                  color: accent.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(icon, color: accent, size: 18),
@@ -730,7 +730,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
         child: Container(
           padding: const EdgeInsets.fromLTRB(10, 7, 12, 7),
           decoration: BoxDecoration(
-            color: AppColors.bg.withOpacity(0.55),
+            color: AppColors.bg.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(color: AppColors.border),
           ),
@@ -791,7 +791,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   Widget _leadSourceField() {
     final value = _leadSource.isEmpty ? null : _leadSource;
     return DropdownButtonFormField<String?>(
-      value: value,
+      initialValue: value,
       decoration: const InputDecoration(labelText: 'Источник', isDense: true),
       dropdownColor: AppColors.surface2,
       items: [
@@ -850,7 +850,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
       );
 
   Widget _classField() => DropdownButtonFormField<String>(
-        value: _selectedCarCategory,
+        initialValue: _selectedCarCategory,
         decoration: const InputDecoration(labelText: "Класс", isDense: true),
         dropdownColor: AppColors.surface2,
         items: ['1', '2', '3', '4'].map((v) => DropdownMenuItem(value: v, child: Text("$v кл."))).toList(),
@@ -881,7 +881,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
   }
 
   Widget _clientCarsDropdown() => DropdownButtonFormField<int>(
-        value: _selectedClientCarId,
+        initialValue: _selectedClientCarId,
         decoration: const InputDecoration(labelText: "Авто клиента", isDense: true),
         dropdownColor: AppColors.surface2,
         items: _clientCars.map((car) {
@@ -929,7 +929,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 decoration: BoxDecoration(
-                  color: AppColors.bg.withOpacity(0.45),
+                  color: AppColors.bg.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(AppTheme.radius),
                   border: Border.all(color: AppColors.borderSoft),
                 ),
@@ -1070,7 +1070,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.bg.withOpacity(0.4),
+                    color: AppColors.bg.withValues(alpha: 0.4),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(color: AppColors.borderSoft),
                   ),
@@ -1358,7 +1358,7 @@ class _OrdersScreenState extends State<OrdersScreen> {
                           constraints: BoxConstraints(maxWidth: isWrapPkg ? 280 : 220),
                           padding: const EdgeInsets.fromLTRB(12, 10, 4, 10),
                           decoration: AppTheme.listTileDecoration(
-                            accent: AppColors.primary.withOpacity(0.55),
+                            accent: AppColors.primary.withValues(alpha: 0.55),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1483,9 +1483,9 @@ class _OrdersScreenState extends State<OrdersScreen> {
         margin: EdgeInsets.only(bottom: mobile ? 12 : 0),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: (ok ? AppColors.success : AppColors.danger).withOpacity(0.12),
+          color: (ok ? AppColors.success : AppColors.danger).withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(AppTheme.radius),
-          border: Border.all(color: (ok ? AppColors.success : AppColors.danger).withOpacity(0.35)),
+          border: Border.all(color: (ok ? AppColors.success : AppColors.danger).withValues(alpha: 0.35)),
         ),
         child: Text(
           _statusMessage,

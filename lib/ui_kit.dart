@@ -53,7 +53,7 @@ class PremiumCheck extends StatelessWidget {
               boxShadow: value
                   ? [
                       BoxShadow(
-                        color: AppColors.primary.withOpacity(0.35),
+                        color: AppColors.primary.withValues(alpha: 0.35),
                         blurRadius: 10,
                         spreadRadius: 0,
                       ),
@@ -85,7 +85,7 @@ class PlateBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFF3F0F7),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
       ),
       child: Text(
         t.toUpperCase(),
@@ -266,9 +266,9 @@ class StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.16),
+        color: color.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.4)),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
       child: Text(
         label,
@@ -308,12 +308,12 @@ class MasterPill extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(4, 4, 10, 4),
           decoration: BoxDecoration(
             color: hasValue
-                ? AppColors.primary.withOpacity(enabled ? 0.18 : 0.1)
-                : AppColors.bg.withOpacity(0.55),
+                ? AppColors.primary.withValues(alpha: enabled ? 0.18 : 0.1)
+                : AppColors.bg.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(999),
             border: Border.all(
               color: hasValue
-                  ? AppColors.primary.withOpacity(enabled ? 0.55 : 0.28)
+                  ? AppColors.primary.withValues(alpha: enabled ? 0.55 : 0.28)
                   : AppColors.border,
             ),
           ),

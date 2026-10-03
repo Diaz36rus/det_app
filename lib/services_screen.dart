@@ -543,7 +543,7 @@ class _ServiceEditorDialogState extends State<_ServiceEditorDialog> {
               ),
               const SizedBox(height: 10),
               DropdownButtonFormField<String>(
-                value: workshopItems.contains(_workshop) ? _workshop : '',
+                initialValue: workshopItems.contains(_workshop) ? _workshop : '',
                 decoration: const InputDecoration(labelText: 'Цех', isDense: true),
                 dropdownColor: AppColors.surface2,
                 items: workshopItems
@@ -563,7 +563,7 @@ class _ServiceEditorDialogState extends State<_ServiceEditorDialog> {
                 contentPadding: EdgeInsets.zero,
                 title: Text('Фиксированная цена', style: GoogleFonts.manrope(fontSize: 13)),
                 value: _useFixed,
-                activeColor: AppColors.primary,
+                activeThumbColor: AppColors.primary,
                 onChanged: (v) => setState(() => _useFixed = v),
               ),
               if (_useFixed)
@@ -739,7 +739,7 @@ class _RecipeEditorDialogState extends State<_RecipeEditorDialog> {
                       builder: (context) {
                         final mobile = AppResponsive.isMobile(context);
                         final materialField = DropdownButtonFormField<int>(
-                          value: available.any((i) => (i['id'] as num).toInt() == _selectedInvId)
+                          initialValue: available.any((i) => (i['id'] as num).toInt() == _selectedInvId)
                               ? _selectedInvId
                               : null,
                           decoration: const InputDecoration(labelText: "Материал", isDense: true),

@@ -75,7 +75,7 @@ class OrderDetailsDialog extends StatefulWidget {
       useRootNavigator: true,
       barrierDismissible: true,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black.withOpacity(0.55),
+      barrierColor: Colors.black.withValues(alpha: 0.55),
       transitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (context, animation, secondaryAnimation) {
         return OrderDetailsDialog(order: order, workshop: workshop);
@@ -525,7 +525,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           decoration: BoxDecoration(
             color: AppColors.surface2,
             borderRadius: BorderRadius.circular(AppTheme.radius),
-            border: Border.all(color: hasValue ? color.withOpacity(0.65) : AppColors.border),
+            border: Border.all(color: hasValue ? color.withValues(alpha: 0.65) : AppColors.border),
           ),
           child: Text(
             text,
@@ -564,11 +564,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             height: 36,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: hasValue ? color.withOpacity(enabled ? 0.15 : 0.08) : AppColors.bg.withOpacity(0.55),
+              color: hasValue ? color.withValues(alpha: enabled ? 0.15 : 0.08) : AppColors.bg.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: hasValue
-                    ? color.withOpacity(enabled ? 0.8 : 0.35)
+                    ? color.withValues(alpha: enabled ? 0.8 : 0.35)
                     : AppColors.border,
               ),
             ),
@@ -576,7 +576,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               icon,
               size: 18,
               color: hasValue
-                  ? (enabled ? color : color.withOpacity(0.45))
+                  ? (enabled ? color : color.withValues(alpha: 0.45))
                   : AppColors.textMuted,
             ),
           ),
@@ -627,12 +627,12 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: open || hasDraft
-                    ? AppColors.primary.withOpacity(0.15)
-                    : AppColors.bg.withOpacity(0.55),
+                    ? AppColors.primary.withValues(alpha: 0.15)
+                    : AppColors.bg.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: open || hasDraft
-                      ? AppColors.primary.withOpacity(0.75)
+                      ? AppColors.primary.withValues(alpha: 0.75)
                       : AppColors.border,
                 ),
               ),
@@ -1184,7 +1184,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                           Expanded(
                             flex: 3,
                             child: DropdownButtonFormField<int?>(
-                              value: (draft[i]['master_id'] as int?),
+                              initialValue: (draft[i]['master_id'] as int?),
                               isExpanded: true,
                               decoration: const InputDecoration(
                                 labelText: 'Мастер',
@@ -1356,7 +1356,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
           style: OutlinedButton.styleFrom(
             foregroundColor: total > 0.001 ? AppColors.success : AppColors.text,
             side: BorderSide(
-              color: total > 0.001 ? AppColors.success.withOpacity(0.55) : AppColors.border,
+              color: total > 0.001 ? AppColors.success.withValues(alpha: 0.55) : AppColors.border,
             ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             visualDensity: VisualDensity.compact,
@@ -1681,7 +1681,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       decoration: BoxDecoration(
         color: AppColors.bg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1712,7 +1712,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     decoration: BoxDecoration(
                       color: fromClient
                           ? AppColors.surface
-                          : AppColors.primary.withOpacity(0.18),
+                          : AppColors.primary.withValues(alpha: 0.18),
                       borderRadius: BorderRadius.only(
                         topLeft: const Radius.circular(10),
                         topRight: const Radius.circular(10),
@@ -1720,7 +1720,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                         bottomRight: Radius.circular(fromClient ? 10 : 2),
                       ),
                       border: Border.all(
-                        color: fromClient ? AppColors.border : AppColors.primary.withOpacity(0.4),
+                        color: fromClient ? AppColors.border : AppColors.primary.withValues(alpha: 0.4),
                       ),
                     ),
                     child: Column(
@@ -1858,7 +1858,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
-                  value: pickedWorkshop,
+                  initialValue: pickedWorkshop,
                   isExpanded: true,
                   decoration: const InputDecoration(labelText: 'Цех', isDense: true),
                   items: [
@@ -2620,8 +2620,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
     final atCar = _workMatchesCarLocation(w);
     final locAccent = _carLocationAccent;
     final hasLoc = _carLocationWorkshop != null;
-    final baseColor = isDone ? AppColors.primary.withOpacity(0.08) : AppColors.bg.withOpacity(0.45);
-    final baseBorder = isDone ? AppColors.primary.withOpacity(0.35) : AppColors.borderSoft;
+    final baseColor = isDone ? AppColors.primary.withValues(alpha: 0.08) : AppColors.bg.withValues(alpha: 0.45);
+    final baseBorder = isDone ? AppColors.primary.withValues(alpha: 0.35) : AppColors.borderSoft;
 
     return Opacity(
       opacity: hasLoc && !atCar ? 0.72 : 1,
@@ -2629,10 +2629,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       decoration: BoxDecoration(
-        color: atCar ? Color.alphaBlend(locAccent.withOpacity(0.14), baseColor) : baseColor,
+        color: atCar ? Color.alphaBlend(locAccent.withValues(alpha: 0.14), baseColor) : baseColor,
         borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(
-          color: atCar ? locAccent.withOpacity(0.55) : baseBorder,
+          color: atCar ? locAccent.withValues(alpha: 0.55) : baseBorder,
           width: atCar ? 1.4 : 1,
         ),
       ),
@@ -2703,7 +2703,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                             ),
                             if (!_opsRestricted) ...[
                               const SizedBox(width: 4),
-                              Icon(Icons.edit_outlined, size: 14, color: AppColors.primary.withOpacity(0.75)),
+                              Icon(Icons.edit_outlined, size: 14, color: AppColors.primary.withValues(alpha: 0.75)),
                             ],
                           ],
                         ),
@@ -2864,10 +2864,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: assigned ? AppColors.primary.withOpacity(0.16) : AppColors.bg.withOpacity(0.55),
+            color: assigned ? AppColors.primary.withValues(alpha: 0.16) : AppColors.bg.withValues(alpha: 0.55),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: assigned ? AppColors.primary.withOpacity(0.75) : AppColors.primary.withOpacity(0.45),
+              color: assigned ? AppColors.primary.withValues(alpha: 0.75) : AppColors.primary.withValues(alpha: 0.45),
             ),
           ),
           child: Row(
@@ -3022,11 +3022,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: complete
-            ? AppColors.success.withOpacity(0.08)
-            : AppColors.surface2.withOpacity(0.85),
+            ? AppColors.success.withValues(alpha: 0.08)
+            : AppColors.surface2.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
         border: Border(
-          left: BorderSide(color: accent.withOpacity(0.8), width: 3),
+          left: BorderSide(color: accent.withValues(alpha: 0.8), width: 3),
         ),
       ),
       child: Column(
@@ -3074,7 +3074,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: accent.withOpacity(0.12),
+                        color: accent.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -3138,7 +3138,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
   Widget _statusDropdown() {
     final statusValue = STATUSES.contains(_status) ? _status : STATUSES.first;
     return DropdownButtonFormField<String>(
-      value: statusValue,
+      initialValue: statusValue,
       isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'Статус',
@@ -3247,7 +3247,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
 
   Widget _carDropdown() {
     return DropdownButtonFormField<int>(
-      value: _safeCarDropdownValue,
+      initialValue: _safeCarDropdownValue,
       isExpanded: true,
       decoration: const InputDecoration(labelText: "Автомобиль", isDense: true),
       dropdownColor: AppColors.surface,
@@ -3539,10 +3539,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       decoration: BoxDecoration(
         color: AppColors.surface2,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.borderSoft.withOpacity(0.9)),
+        border: Border.all(color: AppColors.borderSoft.withValues(alpha: 0.9)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.28),
+            color: Colors.black.withValues(alpha: 0.28),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -3597,8 +3597,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             height: 36,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: AppColors.primary.withOpacity(onPressed == null ? 0.06 : 0.16),
-              border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+              color: AppColors.primary.withValues(alpha: onPressed == null ? 0.06 : 0.16),
+              border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
             ),
             child: Icon(
               icon,
@@ -3673,7 +3673,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             IconButton(
               tooltip: 'Удалить заказ',
               onPressed: _confirmDeleteThisOrder,
-              icon: Icon(Icons.delete_outline_rounded, color: AppColors.danger.withOpacity(0.9)),
+              icon: Icon(Icons.delete_outline_rounded, color: AppColors.danger.withValues(alpha: 0.9)),
             ),
           ],
           IconButton(
@@ -3722,7 +3722,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
-                          color: AppColors.primary.withOpacity(0.18),
+                          color: AppColors.primary.withValues(alpha: 0.18),
                           blurRadius: 18,
                           offset: const Offset(0, 6),
                         ),
@@ -3795,7 +3795,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 ],
               ),
               const SizedBox(height: 16),
-              Divider(height: 1, color: AppColors.borderSoft.withOpacity(0.9)),
+              Divider(height: 1, color: AppColors.borderSoft.withValues(alpha: 0.9)),
               const SizedBox(height: 14),
               Row(
                 children: [
@@ -3912,9 +3912,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                                     : EdgeInsets.zero,
                                 decoration: atCar
                                     ? BoxDecoration(
-                                        color: locAccent.withOpacity(0.12),
+                                        color: locAccent.withValues(alpha: 0.12),
                                         borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: locAccent.withOpacity(0.45)),
+                                        border: Border.all(color: locAccent.withValues(alpha: 0.45)),
                                       )
                                     : null,
                                 child: Row(
@@ -3929,12 +3929,12 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                                           begin: Alignment.topLeft,
                                           end: Alignment.bottomRight,
                                           colors: [
-                                            (atCar ? locAccent : AppColors.primary).withOpacity(0.28),
-                                            (atCar ? locAccent : AppColors.primaryDeep).withOpacity(0.18),
+                                            (atCar ? locAccent : AppColors.primary).withValues(alpha: 0.28),
+                                            (atCar ? locAccent : AppColors.primaryDeep).withValues(alpha: 0.18),
                                           ],
                                         ),
                                         border: Border.all(
-                                          color: (atCar ? locAccent : AppColors.primary).withOpacity(0.35),
+                                          color: (atCar ? locAccent : AppColors.primary).withValues(alpha: 0.35),
                                         ),
                                       ),
                                       child: Icon(
@@ -4002,11 +4002,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: AppColors.border.withOpacity(0.85)),
+                                border: Border.all(color: AppColors.border.withValues(alpha: 0.85)),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.add_rounded, size: 18, color: AppColors.primary.withOpacity(0.95)),
+                                  Icon(Icons.add_rounded, size: 18, color: AppColors.primary.withValues(alpha: 0.95)),
                                   const SizedBox(width: 8),
                                   Text(
                                     'Добавить услугу',
@@ -4053,7 +4053,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                       if (!_opsRestricted) ...[
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String?>(
-                          value: _leadSource.isEmpty ? null : _leadSource,
+                          initialValue: _leadSource.isEmpty ? null : _leadSource,
                           isExpanded: true,
                           decoration: const InputDecoration(labelText: 'Источник заказа', isDense: true),
                           dropdownColor: AppColors.surface2,
@@ -4142,8 +4142,8 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                                 onPressed: _openEditOrderDialog,
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: AppColors.text,
-                                  side: BorderSide(color: AppColors.border.withOpacity(0.95)),
-                                  backgroundColor: AppColors.bg.withOpacity(0.55),
+                                  side: BorderSide(color: AppColors.border.withValues(alpha: 0.95)),
+                                  backgroundColor: AppColors.bg.withValues(alpha: 0.55),
                                   padding: const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
@@ -4243,12 +4243,12 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border.withOpacity(0.9)),
-          color: AppColors.bg.withOpacity(0.4),
+          border: Border.all(color: AppColors.border.withValues(alpha: 0.9)),
+          color: AppColors.bg.withValues(alpha: 0.4),
         ),
         child: Row(
           children: [
-            Icon(Icons.campaign_outlined, size: 18, color: AppColors.primary.withOpacity(0.95)),
+            Icon(Icons.campaign_outlined, size: 18, color: AppColors.primary.withValues(alpha: 0.95)),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -4321,7 +4321,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                value: kind,
+                initialValue: kind,
                 decoration: const InputDecoration(labelText: 'Тип', isDense: true),
                 dropdownColor: AppColors.surface2,
                 items: const [
@@ -4403,7 +4403,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.bg.withOpacity(0.45),
+        color: AppColors.bg.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.borderSoft),
       ),
@@ -4634,7 +4634,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             child: Container(
               decoration: BoxDecoration(
                 border: Border(
-                  left: BorderSide(color: AppColors.primary.withOpacity(0.35), width: 2),
+                  left: BorderSide(color: AppColors.primary.withValues(alpha: 0.35), width: 2),
                 ),
               ),
               padding: const EdgeInsets.only(left: 12),
@@ -4910,9 +4910,9 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: accent.withOpacity(0.14),
+                color: accent.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: accent.withOpacity(0.35)),
+                border: Border.all(color: accent.withValues(alpha: 0.35)),
               ),
               child: Text(
                 complete ? 'Готово' : '$done/$total',
@@ -4946,11 +4946,11 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         Container(
           margin: const EdgeInsets.only(top: 4, bottom: 4),
           decoration: BoxDecoration(
-            color: AppColors.bg.withOpacity(0.4),
+            color: AppColors.bg.withValues(alpha: 0.4),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: complete
-                  ? AppColors.success.withOpacity(0.35)
+                  ? AppColors.success.withValues(alpha: 0.35)
                   : AppColors.borderSoft,
             ),
           ),
@@ -5001,7 +5001,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 ),
               ),
               if (_handoverExpanded) ...[
-                Divider(height: 1, color: AppColors.borderSoft.withOpacity(0.9)),
+                Divider(height: 1, color: AppColors.borderSoft.withValues(alpha: 0.9)),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 4, 8, 8),
                   child: Column(
@@ -5055,7 +5055,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
           decoration: BoxDecoration(
-            color: AppColors.bg.withOpacity(0.42),
+            color: AppColors.bg.withValues(alpha: 0.42),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.borderSoft),
           ),
@@ -5121,7 +5121,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
                   decoration: BoxDecoration(
-                    color: AppColors.bg.withOpacity(0.42),
+                    color: AppColors.bg.withValues(alpha: 0.42),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: AppColors.borderSoft),
                   ),
@@ -5228,7 +5228,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                               children: [
                                 CircleAvatar(
                                   radius: 14,
-                                  backgroundColor: AppColors.primary.withOpacity(0.2),
+                                  backgroundColor: AppColors.primary.withValues(alpha: 0.2),
                                   child: Text(
                                     initials,
                                     style: GoogleFonts.manrope(
@@ -5331,14 +5331,14 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                         aspectRatio: 1.15,
                         child: Container(
                           decoration: BoxDecoration(
-                            color: AppColors.bg.withOpacity(0.55),
+                            color: AppColors.bg.withValues(alpha: 0.55),
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(color: AppColors.borderSoft),
                           ),
                           child: Icon(
                             Icons.image_outlined,
                             size: 18,
-                            color: AppColors.textDim.withOpacity(0.7),
+                            color: AppColors.textDim.withValues(alpha: 0.7),
                           ),
                         ),
                       ),
@@ -5377,7 +5377,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                       ),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.text,
-                        side: BorderSide(color: AppColors.primary.withOpacity(0.55)),
+                        side: BorderSide(color: AppColors.primary.withValues(alpha: 0.55)),
                         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -5482,7 +5482,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               height: 280,
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: AppColors.bg.withOpacity(0.55),
+                color: AppColors.bg.withValues(alpha: 0.55),
                 borderRadius: BorderRadius.circular(AppTheme.radius),
                 border: Border.all(color: AppColors.border),
               ),
@@ -5834,7 +5834,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isDone ? AppColors.primary.withOpacity(0.4) : AppColors.border,
+          color: isDone ? AppColors.primary.withValues(alpha: 0.4) : AppColors.border,
         ),
       ),
       child: Column(
@@ -5920,13 +5920,13 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       decoration: BoxDecoration(
         color: atCar
-            ? Color.alphaBlend(locAccent.withOpacity(0.14), AppColors.surface2)
+            ? Color.alphaBlend(locAccent.withValues(alpha: 0.14), AppColors.surface2)
             : AppColors.surface2,
         borderRadius: BorderRadius.circular(AppTheme.radius),
         border: Border.all(
           color: atCar
-              ? locAccent.withOpacity(0.55)
-              : (allDone ? AppColors.primary.withOpacity(0.45) : AppColors.border),
+              ? locAccent.withValues(alpha: 0.55)
+              : (allDone ? AppColors.primary.withValues(alpha: 0.45) : AppColors.border),
           width: atCar ? 1.4 : 1,
         ),
       ),
@@ -6003,7 +6003,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                             Icon(
                               Icons.edit_outlined,
                               size: 14,
-                              color: AppColors.success.withOpacity(0.75),
+                              color: AppColors.success.withValues(alpha: 0.75),
                             ),
                           ],
                         ),
@@ -6238,7 +6238,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                           style: GoogleFonts.manrope(color: AppColors.text, fontSize: 14),
                         ),
                         value: enabled,
-                        activeColor: AppColors.primary,
+                        activeThumbColor: AppColors.primary,
                         onChanged: (v) => setLocal(() => enabled = v),
                       ),
                       if (enabled) ...[
@@ -6332,10 +6332,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
             vertical: compact ? 6 : 12,
           ),
           decoration: BoxDecoration(
-            color: active ? AppColors.primary.withOpacity(0.12) : AppColors.surface2,
+            color: active ? AppColors.primary.withValues(alpha: 0.12) : AppColors.surface2,
             borderRadius: BorderRadius.circular(AppTheme.radius),
             border: Border.all(
-              color: active ? AppColors.primary.withOpacity(0.55) : AppColors.border,
+              color: active ? AppColors.primary.withValues(alpha: 0.55) : AppColors.border,
             ),
           ),
           alignment: Alignment.centerLeft,
@@ -6493,7 +6493,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
               Container(
                 padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
                 decoration: BoxDecoration(
-                  color: AppColors.bg.withOpacity(0.45),
+                  color: AppColors.bg.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(AppTheme.radius),
                 ),
                 child: Column(
@@ -7169,10 +7169,10 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(8, 6, 12, 8),
       decoration: BoxDecoration(
-        color: isDone ? AppColors.primary.withOpacity(0.08) : AppColors.surface,
+        color: isDone ? AppColors.primary.withValues(alpha: 0.08) : AppColors.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDone ? AppColors.primary.withOpacity(0.35) : AppColors.border,
+          color: isDone ? AppColors.primary.withValues(alpha: 0.35) : AppColors.border,
         ),
       ),
       child: Column(
@@ -7470,7 +7470,7 @@ class _OrderDetailsDialogState extends State<OrderDetailsDialog>
                                 hintStyle: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
                                 isDense: true,
                                 filled: true,
-                                fillColor: AppColors.bg.withOpacity(0.45),
+                                fillColor: AppColors.bg.withValues(alpha: 0.45),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(10),
                                   borderSide: BorderSide.none,

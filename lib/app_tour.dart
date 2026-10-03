@@ -755,7 +755,7 @@ class _TourOverlayState extends State<_TourOverlay>
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.primary.withOpacity(0.45)),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.45)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,

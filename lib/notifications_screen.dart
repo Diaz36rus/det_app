@@ -338,7 +338,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE8A838).withOpacity(0.14),
+                    color: const Color(0xFFE8A838).withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(Icons.payments_outlined, size: 18, color: Color(0xFFE8A838)),
@@ -401,7 +401,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: unread ? AppColors.primary.withOpacity(0.45) : AppColors.borderSoft,
+                color: unread ? AppColors.primary.withValues(alpha: 0.45) : AppColors.borderSoft,
               ),
             ),
             child: Row(
@@ -411,7 +411,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(unread ? 0.18 : 0.1),
+                    color: AppColors.primary.withValues(alpha: unread ? 0.18 : 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(_iconFor(type), size: 18, color: AppColors.primary),
@@ -487,7 +487,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11.5),
             ),
             value: _prefWorkshop,
-            activeColor: AppColors.primary,
+            activeThumbColor: AppColors.primary,
             onChanged: (v) async {
               setState(() => _prefWorkshop = v);
               await NotificationPrefs.setEnabled(NotificationPrefs.workshopDone, v);
@@ -501,7 +501,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11.5),
             ),
             value: _prefReady,
-            activeColor: AppColors.primary,
+            activeThumbColor: AppColors.primary,
             onChanged: (v) async {
               setState(() => _prefReady = v);
               await NotificationPrefs.setEnabled(NotificationPrefs.statusReady, v);
@@ -512,7 +512,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             title: Text('Показывать долги', style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5)),
             subtitle: Text('Блок сверху на этом экране', style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 11.5)),
             value: _showDebts,
-            activeColor: AppColors.primary,
+            activeThumbColor: AppColors.primary,
             onChanged: (v) async {
               await NotificationPrefs.setEnabled(NotificationPrefs.showDebts, v);
               if (mounted) _reload();

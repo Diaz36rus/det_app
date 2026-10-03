@@ -191,10 +191,10 @@ class _OutsourcersPanelState extends State<OutsourcersPanel> {
                           margin: const EdgeInsets.only(bottom: 10),
                           padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
                           decoration: BoxDecoration(
-                            color: AppColors.surface2.withOpacity(0.92),
+                            color: AppColors.surface2.withValues(alpha: 0.92),
                             borderRadius: BorderRadius.circular(AppTheme.radiusLg),
                             border: Border.all(
-                              color: active ? AppColors.borderSoft : AppColors.borderSoft.withOpacity(0.5),
+                              color: active ? AppColors.borderSoft : AppColors.borderSoft.withValues(alpha: 0.5),
                             ),
                           ),
                           child: Row(

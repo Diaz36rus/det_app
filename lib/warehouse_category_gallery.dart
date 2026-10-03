@@ -85,7 +85,7 @@ class _WarehouseCategoryTile extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 _WarehouseCategoryImage(asset: asset),
-                Container(color: Colors.black.withOpacity(0.34)),
+                Container(color: Colors.black.withValues(alpha: 0.34)),
                 Positioned(
                   left: 10,
                   right: 10,
@@ -210,8 +210,8 @@ class WarehouseCategoryExpand extends StatelessWidget {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Colors.black.withOpacity(0.5),
-                                Colors.black.withOpacity(0.86),
+                                Colors.black.withValues(alpha: 0.5),
+                                Colors.black.withValues(alpha: 0.86),
                               ],
                             ),
                           ),
@@ -315,7 +315,7 @@ Future<void> showWarehouseCategoryExpand({
     context: context,
     barrierDismissible: true,
     barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-    barrierColor: Colors.black.withOpacity(0.72),
+    barrierColor: Colors.black.withValues(alpha: 0.72),
     transitionDuration: const Duration(milliseconds: 300),
     pageBuilder: (ctx, anim, secondary) {
       return SafeArea(

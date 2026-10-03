@@ -134,7 +134,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   label: Text(cam.label),
                   selected: on,
                   onSelected: (_) => _set(_config.copyWith(camera: cam)),
-                  selectedColor: AppColors.primary.withOpacity(0.35),
+                  selectedColor: AppColors.primary.withValues(alpha: 0.35),
                   labelStyle: GoogleFonts.manrope(
                     color: on ? AppColors.text : AppColors.textMuted,
                     fontWeight: FontWeight.w600,
@@ -183,7 +183,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   _ColorSwatch(
                     color: c.color,
                     label: c.name,
-                    selected: _config.bodyColor.value == c.color.value,
+                    selected: _config.bodyColor.toARGB32() == c.color.toARGB32(),
                     onTap: () => _set(_config.copyWith(bodyColor: c.color)),
                   ),
               ],
@@ -218,7 +218,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
                   label: Text(ch.shortLabel),
                   selected: on,
                   onSelected: (_) => _set(_config.copyWith(chrome: ch)),
-                  selectedColor: AppColors.primary.withOpacity(0.35),
+                  selectedColor: AppColors.primary.withValues(alpha: 0.35),
                   labelStyle: GoogleFonts.manrope(
                     color: on ? AppColors.text : AppColors.textMuted,
                     fontWeight: FontWeight.w700,
@@ -258,7 +258,7 @@ class _PreviewScreenState extends State<PreviewScreen> {
 
   String _selectedColorName() {
     for (final c in kPreviewBodyColors) {
-      if (c.color.value == _config.bodyColor.value) return c.name;
+      if (c.color.toARGB32() == _config.bodyColor.toARGB32()) return c.name;
     }
     return 'Свой цвет';
   }
@@ -291,11 +291,11 @@ class _ColorSwatch extends StatelessWidget {
             color: color,
             shape: BoxShape.circle,
             border: Border.all(
-              color: selected ? AppColors.primary : Colors.white.withOpacity(0.25),
+              color: selected ? AppColors.primary : Colors.white.withValues(alpha: 0.25),
               width: selected ? 2.5 : 1,
             ),
             boxShadow: selected
-                ? [BoxShadow(color: AppColors.primary.withOpacity(0.45), blurRadius: 8)]
+                ? [BoxShadow(color: AppColors.primary.withValues(alpha: 0.45), blurRadius: 8)]
                 : null,
           ),
         ),

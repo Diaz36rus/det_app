@@ -58,7 +58,7 @@ class _AppSplashScreenState extends State<AppSplashScreen>
                       borderRadius: BorderRadius.circular(22),
                       boxShadow: [
                         BoxShadow(
-                          color: AppColors.primary.withOpacity(0.22),
+                          color: AppColors.primary.withValues(alpha: 0.22),
                           blurRadius: 24,
                           spreadRadius: 1,
                         ),
@@ -100,7 +100,7 @@ class _AppSplashScreenState extends State<AppSplashScreen>
                       child: LinearProgressIndicator(
                         minHeight: 3,
                         backgroundColor: AppColors.surface2,
-                        color: AppColors.primary.withOpacity(0.85),
+                        color: AppColors.primary.withValues(alpha: 0.85),
                       ),
                     ),
                   ),

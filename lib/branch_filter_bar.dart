@@ -85,10 +85,10 @@ class _BranchFilterBarState extends State<BranchFilterBar> {
       ),
       selected: selected,
       onSelected: (_) => onTap(),
-      selectedColor: AppColors.primary.withOpacity(0.28),
+      selectedColor: AppColors.primary.withValues(alpha: 0.28),
       backgroundColor: AppColors.surface2,
       side: BorderSide(
-        color: selected ? AppColors.primary.withOpacity(0.55) : AppColors.borderSoft,
+        color: selected ? AppColors.primary.withValues(alpha: 0.55) : AppColors.borderSoft,
       ),
       showCheckmark: false,
       visualDensity: VisualDensity.compact,

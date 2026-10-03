@@ -424,7 +424,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
       decoration: BoxDecoration(
         color: AppColors.surface2,
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.success.withOpacity(0.55)),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.55)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -467,7 +467,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
       decoration: BoxDecoration(
         color: AppColors.surface2,
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: AppColors.success.withOpacity(0.55)),
+        border: Border.all(color: AppColors.success.withValues(alpha: 0.55)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -531,7 +531,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
       decoration: BoxDecoration(
         color: AppColors.surface2,
         borderRadius: BorderRadius.circular(AppTheme.radius),
-        border: Border.all(color: color.withOpacity(0.45)),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

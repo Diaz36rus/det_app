@@ -335,7 +335,7 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
       ),
       selected: selected,
       onSelected: onSelected,
-      selectedColor: color.withOpacity(0.55),
+      selectedColor: color.withValues(alpha: 0.55),
       backgroundColor: AppColors.surface2,
       side: BorderSide(color: selected ? color : AppColors.border),
       showCheckmark: false,
@@ -621,7 +621,7 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: AppColors.bg.withOpacity(0.55),
+              color: AppColors.bg.withValues(alpha: 0.55),
               borderRadius: BorderRadius.circular(10),
             ),
             child: SelectableText(
@@ -692,7 +692,7 @@ class _ConnStatusSheetState extends State<_ConnStatusSheet> with SingleTickerPro
               (h) => Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Material(
-                  color: AppColors.bg.withOpacity(0.55),
+                  color: AppColors.bg.withValues(alpha: 0.55),
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
@@ -859,9 +859,9 @@ class _CloudHero extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            AppColors.primarySoft.withOpacity(0.55),
+            AppColors.primarySoft.withValues(alpha: 0.55),
             AppColors.surface2,
-            AppColors.bg.withOpacity(0.9),
+            AppColors.bg.withValues(alpha: 0.9),
           ],
         ),
         border: Border.all(color: AppColors.borderSoft),
@@ -880,11 +880,11 @@ class _CloudHero extends StatelessWidget {
                     height: 10,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: accent.withOpacity(t),
+                      color: accent.withValues(alpha: t),
                       boxShadow: online
                           ? [
                               BoxShadow(
-                                color: accent.withOpacity(0.35 * pulse.value),
+                                color: accent.withValues(alpha: 0.35 * pulse.value),
                                 blurRadius: 10,
                                 spreadRadius: 1,
                               ),
@@ -906,7 +906,7 @@ class _CloudHero extends StatelessWidget {
                   ),
                 ),
               ),
-              Icon(Icons.cloud_outlined, color: accent.withOpacity(0.9), size: 22),
+              Icon(Icons.cloud_outlined, color: accent.withValues(alpha: 0.9), size: 22),
             ],
           ),
           const SizedBox(height: 6),
@@ -1324,9 +1324,9 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE8A838).withOpacity(0.12),
+                  color: const Color(0xFFE8A838).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFE8A838).withOpacity(0.45)),
+                  border: Border.all(color: const Color(0xFFE8A838).withValues(alpha: 0.45)),
                 ),
                 child: Text(
                   'Похожие названия студий: ${_duplicateNameKeys.join(', ')}. '
@@ -1347,7 +1347,7 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Material(
-                  color: AppColors.bg.withOpacity(0.5),
+                  color: AppColors.bg.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(10),
                   child: Column(
                     children: [
@@ -1430,7 +1430,7 @@ class _PlatformStudiosBlockState extends State<_PlatformStudiosBlock> {
                                   if (c.slug != 'demo')
                                     ElevatedButton(
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: AppColors.danger.withOpacity(0.9),
+                                        backgroundColor: AppColors.danger.withValues(alpha: 0.9),
                                       ),
                                       onPressed: () => _wipeCompany(c, hard: true),
                                       child: const Text('Удалить студию'),
@@ -2024,7 +2024,7 @@ class _InviteStepCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: BoxDecoration(
-        color: AppColors.bg.withOpacity(0.45),
+        color: AppColors.bg.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.borderSoft),
       ),
@@ -2039,7 +2039,7 @@ class _InviteStepCard extends StatelessWidget {
                 height: 24,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.2),
+                  color: AppColors.primary.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -2130,7 +2130,7 @@ class _SoftExpansionState extends State<_SoftExpansion> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: _open ? AppColors.border : AppColors.borderSoft),
-          color: _open ? AppColors.surface2.withOpacity(0.65) : Colors.transparent,
+          color: _open ? AppColors.surface2.withValues(alpha: 0.65) : Colors.transparent,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2474,7 +2474,7 @@ class _StudioAccessBlockState extends State<_StudioAccessBlock> {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Material(
-                    color: AppColors.bg.withOpacity(0.55),
+                    color: AppColors.bg.withValues(alpha: 0.55),
                     borderRadius: BorderRadius.circular(10),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(10),

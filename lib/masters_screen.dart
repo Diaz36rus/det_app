@@ -266,15 +266,15 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
             style: GoogleFonts.manrope(
               fontSize: 12,
               fontWeight: FontWeight.w700,
-              color: on ? color : color.withOpacity(0.85),
+              color: on ? color : color.withValues(alpha: 0.85),
             ),
           ),
           selected: on,
           onSelected: (val) => onToggle(r, val),
-          selectedColor: color.withOpacity(0.28),
+          selectedColor: color.withValues(alpha: 0.28),
           checkmarkColor: color,
-          backgroundColor: color.withOpacity(0.10),
-          side: BorderSide(color: color.withOpacity(on ? 0.75 : 0.4)),
+          backgroundColor: color.withValues(alpha: 0.10),
+          side: BorderSide(color: color.withValues(alpha: on ? 0.75 : 0.4)),
           showCheckmark: true,
         );
       }).toList(),
@@ -416,9 +416,9 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
-          color: AppColors.surface2.withOpacity(0.92),
+          color: AppColors.surface2.withValues(alpha: 0.92),
           borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-          border: Border.all(color: accent.withOpacity(0.45)),
+          border: Border.all(color: accent.withValues(alpha: 0.45)),
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(
@@ -477,9 +477,9 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
                               return Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: color.withOpacity(0.16),
+                                  color: color.withValues(alpha: 0.16),
                                   borderRadius: BorderRadius.circular(AppTheme.radius),
-                                  border: Border.all(color: color.withOpacity(0.45)),
+                                  border: Border.all(color: color.withValues(alpha: 0.45)),
                                 ),
                                 child: Text(
                                   r,
@@ -515,7 +515,7 @@ class _MastersScreenState extends State<MastersScreen> with PulseHighlightMixin 
                             const Spacer(),
                             Switch.adaptive(
                               value: onShift,
-                              activeColor: AppColors.success,
+                              activeThumbColor: AppColors.success,
                               onChanged: (v) async {
                                 final err =
                                     await OnShiftController.instance.setMasterOnShift(masterId, v);

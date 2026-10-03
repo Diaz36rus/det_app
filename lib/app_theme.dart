@@ -93,7 +93,7 @@ class AppTheme {
         border: Border.all(color: AppColors.borderSoft),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.35),
+            color: Colors.black.withValues(alpha: 0.35),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -101,7 +101,7 @@ class AppTheme {
       );
 
   static BoxDecoration get panelDecoration => BoxDecoration(
-        color: AppColors.surface2.withOpacity(0.92),
+        color: AppColors.surface2.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(radiusLg),
         border: Border.all(color: AppColors.borderSoft),
       );
@@ -111,9 +111,9 @@ class AppTheme {
   static BoxDecoration listTileDecoration({Color? accent}) {
     final edge = accent ?? AppColors.primary;
     return BoxDecoration(
-      color: AppColors.surface2.withOpacity(0.92),
+      color: AppColors.surface2.withValues(alpha: 0.92),
       borderRadius: BorderRadius.circular(radiusLg),
-      border: Border.all(color: edge.withOpacity(0.45)),
+      border: Border.all(color: edge.withValues(alpha: 0.45)),
     );
   }
 
@@ -126,7 +126,7 @@ class AppTheme {
       color: AppColors.surface2,
       borderRadius: BorderRadius.circular(radius),
       border: Border.all(
-        color: emphasized ? edge.withOpacity(0.55) : edge.withOpacity(0.35),
+        color: emphasized ? edge.withValues(alpha: 0.55) : edge.withValues(alpha: 0.35),
         width: emphasized ? 1.25 : 1,
       ),
     );
@@ -134,10 +134,10 @@ class AppTheme {
 
   static BoxDecoration kpiDecoration({required Color accent, bool emphasize = false}) {
     return BoxDecoration(
-      color: emphasize ? AppColors.surface2 : AppColors.surface2.withOpacity(0.7),
+      color: emphasize ? AppColors.surface2 : AppColors.surface2.withValues(alpha: 0.7),
       borderRadius: BorderRadius.circular(radius),
       border: Border(
-        left: BorderSide(color: accent.withOpacity(emphasize ? 0.9 : 0.55), width: 3),
+        left: BorderSide(color: accent.withValues(alpha: emphasize ? 0.9 : 0.55), width: 3),
       ),
     );
   }
@@ -164,7 +164,7 @@ class AppTheme {
         bodyColor: AppColors.text,
         displayColor: AppColors.text,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: AppColors.surface2,
         elevation: 0,
         shape: RoundedRectangleBorder(
@@ -177,7 +177,7 @@ class AppTheme {
         thickness: 1,
         space: 1,
       ),
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: AppColors.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radiusLg)),
         elevation: 0,

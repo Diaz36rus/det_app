@@ -376,7 +376,7 @@ class ConnStatusDot extends StatelessWidget {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: color.withOpacity(0.45),
+                          color: color.withValues(alpha: 0.45),
                           blurRadius: 6,
                           spreadRadius: 0.5,
                         ),

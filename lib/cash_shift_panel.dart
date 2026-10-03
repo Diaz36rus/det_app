@@ -100,7 +100,7 @@ class CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: moneyType,
+                initialValue: moneyType,
                 decoration: const InputDecoration(labelText: 'Вид денег', isDense: true),
                 dropdownColor: AppColors.surface2,
                 items: CashMethods.all
@@ -271,7 +271,7 @@ class CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withValues(alpha: 0.9)),
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Закрыть смену'),
             ),
@@ -426,7 +426,7 @@ class CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin
         ElevatedButton(
           onPressed: () => _closeShift(context),
           style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.danger.withOpacity(0.9),
+            backgroundColor: AppColors.danger.withValues(alpha: 0.9),
             visualDensity: VisualDensity.compact,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
@@ -454,11 +454,11 @@ class CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin
       child: Container(
       padding: EdgeInsets.fromLTRB(mobile ? 12 : 16, 14, mobile ? 12 : 16, 14),
       decoration: BoxDecoration(
-        color: AppColors.surface2.withOpacity(0.92),
+        color: AppColors.surface2.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
         border: Border(
           left: BorderSide(
-            color: (open ? AppColors.success : AppColors.textDim).withOpacity(0.85),
+            color: (open ? AppColors.success : AppColors.textDim).withValues(alpha: 0.85),
             width: 3,
           ),
         ),
@@ -565,10 +565,10 @@ class CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin
             duration: const Duration(milliseconds: 160),
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
             decoration: BoxDecoration(
-              color: selected ? color.withOpacity(0.12) : AppColors.bg.withOpacity(0.4),
+              color: selected ? color.withValues(alpha: 0.12) : AppColors.bg.withValues(alpha: 0.4),
               borderRadius: BorderRadius.circular(12),
               border: Border(
-                left: BorderSide(color: color.withOpacity(selected ? 0.95 : 0.55), width: 3),
+                left: BorderSide(color: color.withValues(alpha: selected ? 0.95 : 0.55), width: 3),
               ),
             ),
             child: Column(
@@ -594,7 +594,7 @@ class CashShiftPanelState extends State<CashShiftPanel> with PulseHighlightMixin
                         ),
                       ),
                     ),
-                    Icon(Icons.chevron_right, size: 18, color: AppColors.textDim.withOpacity(0.8)),
+                    Icon(Icons.chevron_right, size: 18, color: AppColors.textDim.withValues(alpha: 0.8)),
                   ],
                 ),
                 const SizedBox(height: 3),

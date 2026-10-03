@@ -147,7 +147,7 @@ class _CashRegisterTxDialogState extends State<CashRegisterTxDialog> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Нет')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withValues(alpha: 0.9)),
             onPressed: () => Navigator.pop(ctx, true),
             child: Text(source == 'payment' ? 'Отменить' : 'Удалить'),
           ),
@@ -238,7 +238,7 @@ class _CashRegisterTxDialogState extends State<CashRegisterTxDialog> {
                             ),
                             IconButton(
                               tooltip: 'Удалить',
-                              icon: Icon(Icons.delete_outline, size: 18, color: AppColors.danger.withOpacity(0.9)),
+                              icon: Icon(Icons.delete_outline, size: 18, color: AppColors.danger.withValues(alpha: 0.9)),
                               onPressed: () => _deleteRow(row),
                             ),
                           ],

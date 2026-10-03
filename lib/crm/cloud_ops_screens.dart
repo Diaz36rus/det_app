@@ -206,7 +206,7 @@ class _OrderSheetHostState extends State<_OrderSheetHost> {
       backgroundColor: AppColors.surface,
       title: Text('Заказ #${widget.order.id}', style: GoogleFonts.manrope(fontWeight: FontWeight.w800)),
       content: DropdownButtonFormField<String>(
-        value: kCloudStatuses.contains(_status) ? _status : kCloudStatuses[1],
+        initialValue: kCloudStatuses.contains(_status) ? _status : kCloudStatuses[1],
         items: kCloudStatuses.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
         onChanged: _busy ? null : (v) => setState(() => _status = v ?? _status),
         decoration: const InputDecoration(labelText: 'Статус'),

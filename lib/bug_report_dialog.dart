@@ -405,7 +405,7 @@ class _BugReportsListDialogState extends State<BugReportsListDialog> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.2),
+                color: AppColors.danger.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -448,21 +448,21 @@ class _BugReportsListDialogState extends State<BugReportsListDialog> {
                   label: const Text('Все'),
                   selected: _filter == 'all',
                   onSelected: (_) => setState(() => _filter = 'all'),
-                  selectedColor: AppColors.primary.withOpacity(0.4),
+                  selectedColor: AppColors.primary.withValues(alpha: 0.4),
                   showCheckmark: false,
                 ),
                 FilterChip(
                   label: const Text('Открытые'),
                   selected: _filter == 'open',
                   onSelected: (_) => setState(() => _filter = 'open'),
-                  selectedColor: AppColors.danger.withOpacity(0.35),
+                  selectedColor: AppColors.danger.withValues(alpha: 0.35),
                   showCheckmark: false,
                 ),
                 FilterChip(
                   label: const Text('Исправлены'),
                   selected: _filter == 'fixed',
                   onSelected: (_) => setState(() => _filter = 'fixed'),
-                  selectedColor: AppColors.success.withOpacity(0.35),
+                  selectedColor: AppColors.success.withValues(alpha: 0.35),
                   showCheckmark: false,
                 ),
               ],
@@ -514,7 +514,7 @@ class _BugReportsListDialogState extends State<BugReportsListDialog> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: (open ? AppColors.danger : AppColors.success).withOpacity(0.18),
+                        color: (open ? AppColors.danger : AppColors.success).withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -612,7 +612,7 @@ class _BugReportsListDialogState extends State<BugReportsListDialog> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: (open ? AppColors.danger : AppColors.success).withOpacity(0.18),
+                        color: (open ? AppColors.danger : AppColors.success).withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(

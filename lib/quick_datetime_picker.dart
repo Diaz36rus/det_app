@@ -224,7 +224,7 @@ class _QuickPickerDialogState extends State<_QuickPickerDialog> {
                   decoration: BoxDecoration(
                     color: const Color(0xFF0D2137),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.5)),
+                    border: Border.all(color: const Color(0xFF3B82F6).withValues(alpha: 0.5)),
                   ),
                   child: Row(
                     children: [

@@ -349,8 +349,8 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                         backgroundColor: WidgetStateProperty.resolveWith((states) {
                           if (states.contains(WidgetState.selected)) {
                             return _type == 'Приход'
-                                ? AppColors.success.withOpacity(0.35)
-                                : AppColors.danger.withOpacity(0.35);
+                                ? AppColors.success.withValues(alpha: 0.35)
+                                : AppColors.danger.withValues(alpha: 0.35);
                           }
                           return AppColors.surface2;
                         }),
@@ -394,7 +394,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                           ),
                           selected: selected,
                           onSelected: (_) => _applyTemplate(t),
-                          selectedColor: AppColors.primary.withOpacity(0.35),
+                          selectedColor: AppColors.primary.withValues(alpha: 0.35),
                           backgroundColor: AppColors.surface2,
                           side: BorderSide(color: selected ? AppColors.primary : AppColors.border),
                           showCheckmark: false,
@@ -403,7 +403,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: categories.contains(_category) ? _category : categories.first,
+                      initialValue: categories.contains(_category) ? _category : categories.first,
                       decoration: const InputDecoration(labelText: 'Категория', isDense: true),
                       dropdownColor: AppColors.surface2,
                       items: categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
@@ -416,7 +416,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                     const SizedBox(height: 10),
                     if (_registers.isNotEmpty)
                       DropdownButtonFormField<int>(
-                        value: _registers.any((r) => (r['id'] as num).toInt() == _registerId)
+                        initialValue: _registers.any((r) => (r['id'] as num).toInt() == _registerId)
                             ? _registerId
                             : (_registers.first['id'] as num).toInt(),
                         decoration: const InputDecoration(labelText: 'Касса', isDense: true),
@@ -444,7 +444,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                       )
                     else
                       DropdownButtonFormField<String>(
-                        value: CashMethods.all.contains(_method) ? _method : CashMethods.cash,
+                        initialValue: CashMethods.all.contains(_method) ? _method : CashMethods.cash,
                         decoration: const InputDecoration(labelText: 'Способ', isDense: true),
                         dropdownColor: AppColors.surface2,
                         items: CashMethods.all
@@ -463,7 +463,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                     if (_needsMaster) ...[
                       const SizedBox(height: 10),
                       DropdownButtonFormField<int?>(
-                        value: _masterId,
+                        initialValue: _masterId,
                         decoration: const InputDecoration(labelText: 'Мастер', isDense: true),
                         dropdownColor: AppColors.surface2,
                         items: [
@@ -503,7 +503,7 @@ class _CashOperationDialogState extends State<CashOperationDialog> {
                     if (_needsInventory) ...[
                       const SizedBox(height: 10),
                       DropdownButtonFormField<int?>(
-                        value: _inventoryId,
+                        initialValue: _inventoryId,
                         decoration: const InputDecoration(labelText: 'На склад (опционально)', isDense: true),
                         dropdownColor: AppColors.surface2,
                         items: [

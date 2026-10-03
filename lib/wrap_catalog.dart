@@ -256,7 +256,7 @@ class WrapPackageEditorState extends State<WrapPackageEditor> {
 
   Color get _fg => widget.dark ? Colors.white : AppColors.text;
   Color get _muted => widget.dark ? Colors.white70 : AppColors.textDim;
-  Color get _card => widget.dark ? Colors.black.withOpacity(0.35) : AppColors.surface2;
+  Color get _card => widget.dark ? Colors.black.withValues(alpha: 0.35) : AppColors.surface2;
   Color get _border => widget.dark ? Colors.white24 : AppColors.border;
   Color get _accent => widget.dark ? const Color(0xFF86EFAC) : AppColors.primary;
 
@@ -538,7 +538,7 @@ class WrapPackageEditorState extends State<WrapPackageEditor> {
           Text(
             'В работе: Салон, полная оклейка, полная оклейка с детализацией — автовыбор зон позже',
             style: GoogleFonts.manrope(
-              color: _muted.withOpacity(0.85),
+              color: _muted.withValues(alpha: 0.85),
               fontSize: 10,
               fontWeight: FontWeight.w500,
               height: 1.25,
@@ -609,7 +609,7 @@ class WrapPackageEditorState extends State<WrapPackageEditor> {
         padding: const EdgeInsets.fromLTRB(4, 2, 8, 2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: on ? _accent.withOpacity(0.55) : Colors.transparent),
+          border: Border.all(color: on ? _accent.withValues(alpha: 0.55) : Colors.transparent),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -648,9 +648,9 @@ class WrapPackageEditorState extends State<WrapPackageEditor> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF59E0B).withOpacity(0.2),
+                                color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.55)),
+                                border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.55)),
                               ),
                               child: Text(
                                 'скоро',
@@ -696,7 +696,7 @@ class WrapPackageEditorState extends State<WrapPackageEditor> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           margin: const EdgeInsets.only(right: 4),
           decoration: BoxDecoration(
-            color: active ? _accent.withOpacity(0.25) : Colors.transparent,
+            color: active ? _accent.withValues(alpha: 0.25) : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
             border: Border.all(color: active ? _accent : _border),
           ),
@@ -725,7 +725,7 @@ class WrapPackageEditorState extends State<WrapPackageEditor> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: active ? _accent.withOpacity(0.25) : Colors.transparent,
+            color: active ? _accent.withValues(alpha: 0.25) : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
             border: Border.all(color: active ? _accent : _border),
           ),
@@ -763,7 +763,7 @@ class WrapPackageEditorState extends State<WrapPackageEditor> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           margin: const EdgeInsets.only(right: 4),
           decoration: BoxDecoration(
-            color: active ? _accent.withOpacity(0.25) : Colors.transparent,
+            color: active ? _accent.withValues(alpha: 0.25) : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
             border: Border.all(color: active ? _accent : _border),
           ),

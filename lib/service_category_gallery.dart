@@ -62,7 +62,7 @@ class ServiceCategoryGallery extends StatelessWidget {
       context: context,
       barrierDismissible: true,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black.withOpacity(0.72),
+      barrierColor: Colors.black.withValues(alpha: 0.72),
       transitionDuration: const Duration(milliseconds: 320),
       pageBuilder: (ctx, anim, secondary) {
         return SafeArea(
@@ -187,7 +187,7 @@ class _CategoryTile extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 _CategoryImage(asset: asset),
-                Container(color: Colors.black.withOpacity(0.32)),
+                Container(color: Colors.black.withValues(alpha: 0.32)),
                 Positioned(
                   left: 10,
                   right: 10,
@@ -307,8 +307,8 @@ class _WrapExpandCard extends StatelessWidget {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Colors.black.withOpacity(0.5),
-                                Colors.black.withOpacity(0.82),
+                                Colors.black.withValues(alpha: 0.5),
+                                Colors.black.withValues(alpha: 0.82),
                               ],
                             ),
                           ),
@@ -450,8 +450,8 @@ class _CategoryExpandCardState extends State<_CategoryExpandCard> {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                Colors.black.withOpacity(0.45),
-                                Colors.black.withOpacity(0.78),
+                                Colors.black.withValues(alpha: 0.45),
+                                Colors.black.withValues(alpha: 0.78),
                               ],
                             ),
                           ),
@@ -529,8 +529,8 @@ class _CategoryExpandCardState extends State<_CategoryExpandCard> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               color: selected
-                  ? Colors.white.withOpacity(0.22)
-                  : Colors.black.withOpacity(0.35),
+                  ? Colors.white.withValues(alpha: 0.22)
+                  : Colors.black.withValues(alpha: 0.35),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                 color: selected ? const Color(0xFF86EFAC) : Colors.white24,

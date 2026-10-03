@@ -73,9 +73,9 @@ class MenuBackgrounds {
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                     colors: [
-                      AppColors.bg.withOpacity(0.22),
-                      AppColors.bg.withOpacity(0.40),
-                      AppColors.bg.withOpacity(0.62),
+                      AppColors.bg.withValues(alpha: 0.22),
+                      AppColors.bg.withValues(alpha: 0.40),
+                      AppColors.bg.withValues(alpha: 0.62),
                     ],
                   ),
                 ),

@@ -201,10 +201,10 @@ class _StatsScreenState extends State<StatsScreen> {
             setState(() => _period = p);
             _loadStats();
           },
-          selectedColor: AppColors.primary.withOpacity(0.28),
+          selectedColor: AppColors.primary.withValues(alpha: 0.28),
           checkmarkColor: AppColors.primary,
           backgroundColor: AppColors.surface2,
-          side: BorderSide(color: on ? AppColors.primary.withOpacity(0.7) : AppColors.border),
+          side: BorderSide(color: on ? AppColors.primary.withValues(alpha: 0.7) : AppColors.border),
         ),
       );
     }
@@ -320,7 +320,7 @@ class _StatsScreenState extends State<StatsScreen> {
                       barRods: [
                         BarChartRodData(
                           toY: _dayTotals[i],
-                          color: i == n - 1 ? AppColors.primary : AppColors.primary.withOpacity(0.55),
+                          color: i == n - 1 ? AppColors.primary : AppColors.primary.withValues(alpha: 0.55),
                           width: n <= 7 ? 14 : (n <= 14 ? 8 : 5),
                           borderRadius: const BorderRadius.vertical(top: Radius.circular(3)),
                         ),
@@ -455,7 +455,7 @@ class _StatsScreenState extends State<StatsScreen> {
                   value: frac.clamp(0.0, 1.0),
                   minHeight: 5,
                   backgroundColor: AppColors.surface,
-                  color: color.withOpacity(0.85),
+                  color: color.withValues(alpha: 0.85),
                 ),
               ),
             ],
@@ -623,7 +623,7 @@ class _StatsScreenState extends State<StatsScreen> {
                         value: (val / maxVal).clamp(0.0, 1.0),
                         minHeight: 5,
                         backgroundColor: AppColors.surface,
-                        color: AppColors.primary.withOpacity(0.85),
+                        color: AppColors.primary.withValues(alpha: 0.85),
                       ),
                     ),
                   ],
@@ -643,9 +643,9 @@ class _StatsScreenState extends State<StatsScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: on ? AppColors.primary.withOpacity(0.22) : Colors.transparent,
+          color: on ? AppColors.primary.withValues(alpha: 0.22) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: on ? AppColors.primary.withOpacity(0.55) : AppColors.border),
+          border: Border.all(color: on ? AppColors.primary.withValues(alpha: 0.55) : AppColors.border),
         ),
         child: Text(
           label,

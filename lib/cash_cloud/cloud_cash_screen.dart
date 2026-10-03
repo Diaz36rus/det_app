@@ -326,7 +326,7 @@ class _FlowDialogState extends State<_FlowDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             DropdownButtonFormField<String>(
-              value: _type,
+              initialValue: _type,
               items: const [
                 DropdownMenuItem(value: 'Приход', child: Text('Приход')),
                 DropdownMenuItem(value: 'Расход', child: Text('Расход')),
@@ -336,7 +336,7 @@ class _FlowDialogState extends State<_FlowDialog> {
             ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
-              value: _method,
+              initialValue: _method,
               items: methods.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
               onChanged: _busy ? null : (v) => setState(() => _method = v ?? 'Наличные'),
               decoration: const InputDecoration(labelText: 'Метод'),
@@ -465,7 +465,7 @@ class _PayOrderDialogState extends State<_PayOrderDialog> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           DropdownButtonFormField<CrmOrder>(
-                            value: _selected,
+                            initialValue: _selected,
                             items: _orders
                                 .map(
                                   (o) => DropdownMenuItem(
@@ -491,7 +491,7 @@ class _PayOrderDialogState extends State<_PayOrderDialog> {
                           ),
                           const SizedBox(height: 10),
                           DropdownButtonFormField<String>(
-                            value: _method,
+                            initialValue: _method,
                             items: methods.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
                             onChanged: _busy ? null : (v) => setState(() => _method = v ?? 'Наличные'),
                             decoration: const InputDecoration(labelText: 'Метод'),

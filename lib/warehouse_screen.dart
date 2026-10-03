@@ -193,7 +193,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
                         ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<String>(
-                          value: category,
+                          initialValue: category,
                           decoration: const InputDecoration(labelText: 'Категория', isDense: true),
                           dropdownColor: AppColors.surface2,
                           items: InventoryCategories.all
@@ -220,7 +220,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
                         ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<String>(
-                          value: unit,
+                          initialValue: unit,
                           decoration: InputDecoration(
                             labelText: 'Единица учёта',
                             helperText: InventoryUnits.helperFor(unit, category: category),
@@ -572,7 +572,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
               ElevatedButton(
                 style: income
                     ? null
-                    : ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
+                    : ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withValues(alpha: 0.9)),
                 onPressed: () => Navigator.pop(ctx, true),
                 child: Text(income ? 'Приход' : 'Списать'),
               ),
@@ -730,8 +730,8 @@ class _WarehouseScreenState extends State<WarehouseScreen>
                       ),
                       selected: _lowOnly,
                       onSelected: (v) => setState(() => _lowOnly = v),
-                      selectedColor: AppColors.danger.withOpacity(0.35),
-                      backgroundColor: AppColors.bg.withOpacity(0.35),
+                      selectedColor: AppColors.danger.withValues(alpha: 0.35),
+                      backgroundColor: AppColors.bg.withValues(alpha: 0.35),
                       side: BorderSide(color: _lowOnly ? AppColors.danger : AppColors.border),
                       showCheckmark: false,
                       visualDensity: VisualDensity.compact,
@@ -807,7 +807,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
 
     final titleColor = AppColors.text;
     final subColor = low ? AppColors.danger : AppColors.textMuted;
-    final bg = low ? AppColors.danger.withOpacity(0.08) : AppColors.surface2.withOpacity(0.92);
+    final bg = low ? AppColors.danger.withValues(alpha: 0.08) : AppColors.surface2.withValues(alpha: 0.92);
 
     Future<void> run(Future<void> Function() action) async {
       await action();
@@ -823,7 +823,7 @@ class _WarehouseScreenState extends State<WarehouseScreen>
           color: bg,
           borderRadius: BorderRadius.circular(compact ? 12 : AppTheme.radiusLg),
           border: Border.all(
-            color: (low ? AppColors.danger : AppColors.primary).withOpacity(0.45),
+            color: (low ? AppColors.danger : AppColors.primary).withValues(alpha: 0.45),
           ),
         ),
         child: Padding(

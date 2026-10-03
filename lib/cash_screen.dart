@@ -358,7 +358,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Нет')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withOpacity(0.9)),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger.withValues(alpha: 0.9)),
               onPressed: () => Navigator.pop(ctx, true),
               child: Text(source == 'payment' ? 'Отменить' : 'Удалить'),
             ),
@@ -607,9 +607,9 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
-                                color: AppColors.success.withOpacity(0.12),
+                                color: AppColors.success.withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: AppColors.success.withOpacity(0.35)),
+                                border: Border.all(color: AppColors.success.withValues(alpha: 0.35)),
                               ),
                               child: Row(
                                 children: [
@@ -638,7 +638,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                               onPressed: () => _shiftPanelKey.currentState?.closeShiftDialog(),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: AppColors.danger,
-                                side: BorderSide(color: AppColors.danger.withOpacity(0.5)),
+                                side: BorderSide(color: AppColors.danger.withValues(alpha: 0.5)),
                               ),
                               child: Text('Закрыть', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
                             ),
@@ -650,7 +650,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                           label: Text('Открыть смену', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.primary,
-                            side: BorderSide(color: AppColors.primary.withOpacity(0.55)),
+                            side: BorderSide(color: AppColors.primary.withValues(alpha: 0.55)),
                           ),
                         ),
                 ),
@@ -666,9 +666,9 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                             decoration: BoxDecoration(
-                              color: AppColors.success.withOpacity(0.12),
+                              color: AppColors.success.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: AppColors.success.withOpacity(0.35)),
+                              border: Border.all(color: AppColors.success.withValues(alpha: 0.35)),
                             ),
                             child: Text(
                               openedAt.isEmpty ? 'Смена открыта' : 'Смена · $openedAt',
@@ -686,7 +686,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                           style: OutlinedButton.styleFrom(
                             foregroundColor: AppColors.danger,
                             minimumSize: const Size(48, 48),
-                            side: BorderSide(color: AppColors.danger.withOpacity(0.5)),
+                            side: BorderSide(color: AppColors.danger.withValues(alpha: 0.5)),
                           ),
                           child: Text('Закрыть', style: GoogleFonts.manrope(fontWeight: FontWeight.w700)),
                         ),
@@ -701,7 +701,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.primary,
                           minimumSize: const Size(48, 48),
-                          side: BorderSide(color: AppColors.primary.withOpacity(0.55)),
+                          side: BorderSide(color: AppColors.primary.withValues(alpha: 0.55)),
                         ),
                       ),
                     ),
@@ -735,15 +735,15 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
       child: Container(
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
         decoration: BoxDecoration(
-          color: AppColors.surface2.withOpacity(0.9),
+          color: AppColors.surface2.withValues(alpha: 0.9),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.borderSoft.withOpacity(0.7)),
+          border: Border.all(color: AppColors.borderSoft.withValues(alpha: 0.7)),
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              AppColors.primaryDeep.withOpacity(0.22),
-              AppColors.surface2.withOpacity(0.95),
+              AppColors.primaryDeep.withValues(alpha: 0.22),
+              AppColors.surface2.withValues(alpha: 0.95),
             ],
           ),
         ),
@@ -790,7 +790,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                 ],
               ),
             ),
-            Icon(Icons.directions_car_filled_rounded, size: 72, color: AppColors.primary.withOpacity(0.28)),
+            Icon(Icons.directions_car_filled_rounded, size: 72, color: AppColors.primary.withValues(alpha: 0.28)),
           ],
         ),
       ),
@@ -814,9 +814,9 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
           child: Container(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
             decoration: BoxDecoration(
-              color: AppColors.surface2.withOpacity(0.88),
+              color: AppColors.surface2.withValues(alpha: 0.88),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppColors.borderSoft.withOpacity(0.65)),
+              border: Border.all(color: AppColors.borderSoft.withValues(alpha: 0.65)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -880,9 +880,9 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
               height: compact ? 84 : 96,
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
               decoration: BoxDecoration(
-                color: AppColors.surface2.withOpacity(0.88),
+                color: AppColors.surface2.withValues(alpha: 0.88),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.borderSoft.withOpacity(0.65)),
+                border: Border.all(color: AppColors.borderSoft.withValues(alpha: 0.65)),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -891,7 +891,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                     width: compact ? 36 : 40,
                     height: compact ? 36 : 40,
                     decoration: BoxDecoration(
-                      color: accent.withOpacity(0.18),
+                      color: accent.withValues(alpha: 0.18),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(icon, color: accent, size: compact ? 20 : 22),
@@ -1015,9 +1015,9 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                 width: mobile ? 140 : 160,
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 decoration: BoxDecoration(
-                  color: selected ? color.withOpacity(0.14) : AppColors.surface2.withOpacity(0.75),
+                  color: selected ? color.withValues(alpha: 0.14) : AppColors.surface2.withValues(alpha: 0.75),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: color.withOpacity(selected ? 0.7 : 0.35)),
+                  border: Border.all(color: color.withValues(alpha: selected ? 0.7 : 0.35)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1070,7 +1070,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: accent.withOpacity(0.14),
+                  color: accent.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -1132,9 +1132,9 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
         key: TourKeys.cashJournal,
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
         decoration: BoxDecoration(
-          color: AppColors.surface2.withOpacity(0.9),
+          color: AppColors.surface2.withValues(alpha: 0.9),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.borderSoft.withOpacity(0.65)),
+          border: Border.all(color: AppColors.borderSoft.withValues(alpha: 0.65)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1179,7 +1179,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
               Expanded(
                 child: ListView.separated(
                   itemCount: rows.length,
-                  separatorBuilder: (_, __) => Divider(height: 1, color: AppColors.borderSoft.withOpacity(0.7)),
+                  separatorBuilder: (_, __) => Divider(height: 1, color: AppColors.borderSoft.withValues(alpha: 0.7)),
                   itemBuilder: (_, i) => _paymentTile(rows[i]),
                 ),
               ),
@@ -1197,7 +1197,7 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: _showDebts,
-                  icon: Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.danger.withOpacity(0.9)),
+                  icon: Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.danger.withValues(alpha: 0.9)),
                   label: Text(
                     'Долги · ${_money.format(_debtTotal)} ₽',
                     style: GoogleFonts.manrope(color: AppColors.danger, fontWeight: FontWeight.w700),
@@ -1246,9 +1246,9 @@ class _CashScreenState extends State<CashScreen> with DbRefreshMixin, PulseHighl
       return Container(
         padding: EdgeInsets.fromLTRB(mobile ? 12 : 16, 12, mobile ? 12 : 16, 12),
         decoration: BoxDecoration(
-          color: AppColors.surface2.withOpacity(0.88),
+          color: AppColors.surface2.withValues(alpha: 0.88),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppColors.borderSoft.withOpacity(0.6)),
+          border: Border.all(color: AppColors.borderSoft.withValues(alpha: 0.6)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

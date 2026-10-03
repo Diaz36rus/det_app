@@ -147,7 +147,7 @@ class _StatusColumn extends StatelessWidget {
       margin: const EdgeInsets.only(right: 12),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: AppColors.surface.withOpacity(0.7),
+        color: AppColors.surface.withValues(alpha: 0.7),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -290,7 +290,7 @@ class _CreateDialogState extends State<_CreateDialog> {
               if (_services.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 DropdownButtonFormField<CrmService>(
-                  value: _svc,
+                  initialValue: _svc,
                   items: _services
                       .map((s) => DropdownMenuItem(value: s, child: Text('${s.name} · ${s.price.toStringAsFixed(0)}')))
                       .toList(),
@@ -301,7 +301,7 @@ class _CreateDialogState extends State<_CreateDialog> {
               if (_masters.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 DropdownButtonFormField<CrmMaster>(
-                  value: _master,
+                  initialValue: _master,
                   items: _masters
                       .map((m) => DropdownMenuItem(value: m, child: Text('${m.name} · ${m.role}')))
                       .toList(),
@@ -412,7 +412,7 @@ class _OrderSheetState extends State<_OrderSheet> {
               Text('${o.clientName}\n${o.carLabel}', style: GoogleFonts.manrope(color: AppColors.textMuted)),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: kCloudStatuses.contains(_status) ? _status : kCloudStatuses[1],
+                initialValue: kCloudStatuses.contains(_status) ? _status : kCloudStatuses[1],
                 items: kCloudStatuses.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
                 onChanged: _busy ? null : (v) => setState(() => _status = v ?? _status),
                 decoration: const InputDecoration(labelText: 'Статус'),

@@ -107,7 +107,7 @@ class _PulseAnchorState extends State<PulseAnchor> with SingleTickerProviderStat
             boxShadow: glow
                 ? [
                     BoxShadow(
-                      color: widget.accent.withOpacity(0.12 + 0.38 * t),
+                      color: widget.accent.withValues(alpha: 0.12 + 0.38 * t),
                       blurRadius: 6 + 14 * t,
                       spreadRadius: 0.5 + 2.5 * t,
                     ),
@@ -115,7 +115,7 @@ class _PulseAnchorState extends State<PulseAnchor> with SingleTickerProviderStat
                 : null,
             border: glow
                 ? Border.all(
-                    color: widget.accent.withOpacity(0.2 + 0.55 * t),
+                    color: widget.accent.withValues(alpha: 0.2 + 0.55 * t),
                     width: 1.25 + 0.75 * t,
                   )
                 : null,

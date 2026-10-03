@@ -494,7 +494,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.danger,
-                disabledBackgroundColor: AppColors.danger.withOpacity(0.25),
+                disabledBackgroundColor: AppColors.danger.withValues(alpha: 0.25),
               ),
               onPressed: pinOk ? () => Navigator.pop(ctx, true) : null,
               child: Text(
@@ -704,10 +704,10 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             constraints: BoxConstraints(minHeight: touchFriendly ? AppResponsive.minTap : 0),
             padding: EdgeInsets.fromLTRB(12, vPad, trailing != null ? 4 : 12, vPad),
             decoration: BoxDecoration(
-              color: active && !disabled ? AppColors.primary.withOpacity(0.18) : Colors.transparent,
+              color: active && !disabled ? AppColors.primary.withValues(alpha: 0.18) : Colors.transparent,
               borderRadius: BorderRadius.circular(12),
               border: active && !disabled
-                  ? Border.all(color: AppColors.primary.withOpacity(0.28))
+                  ? Border.all(color: AppColors.primary.withValues(alpha: 0.28))
                   : null,
             ),
             child: Row(
@@ -827,7 +827,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               decoration: BoxDecoration(
-                color: AppColors.bg.withOpacity(0.45),
+                color: AppColors.bg.withValues(alpha: 0.45),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -1011,11 +1011,11 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              AppColors.primaryDeep.withOpacity(0.55),
+              AppColors.primaryDeep.withValues(alpha: 0.55),
               AppColors.primarySoft,
             ],
           ),
-          border: Border.all(color: AppColors.primary.withOpacity(0.35)),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.35)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1043,7 +1043,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
               child: LinearProgressIndicator(
                 value: 0.35,
                 minHeight: 6,
-                backgroundColor: Colors.black.withOpacity(0.35),
+                backgroundColor: Colors.black.withValues(alpha: 0.35),
                 color: AppColors.primary,
               ),
             ),
@@ -1171,7 +1171,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                           decoration: BoxDecoration(
                             color: isSelected
                                 ? AppColors.primary
-                                : (isToday ? AppColors.primary.withOpacity(0.18) : Colors.transparent),
+                                : (isToday ? AppColors.primary.withValues(alpha: 0.18) : Colors.transparent),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -1282,7 +1282,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
             color: selected ? AppColors.primarySoft : AppColors.surface2,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected ? AppColors.primary.withOpacity(0.45) : AppColors.border,
+              color: selected ? AppColors.primary.withValues(alpha: 0.45) : AppColors.border,
             ),
           ),
           child: Row(
@@ -1365,7 +1365,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
           foregroundColor: color,
-          side: BorderSide(color: (accent ?? AppColors.border).withOpacity(0.7)),
+          side: BorderSide(color: (accent ?? AppColors.border).withValues(alpha: 0.7)),
           padding: stylePadding,
           visualDensity: VisualDensity.compact,
         ),
@@ -1586,7 +1586,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 child: Text(
                   'Очистить БД…',
                   style: GoogleFonts.manrope(
-                    color: AppColors.textDim.withOpacity(0.75),
+                    color: AppColors.textDim.withValues(alpha: 0.75),
                     fontWeight: FontWeight.w500,
                     fontSize: 11,
                   ),
@@ -1611,7 +1611,7 @@ class _HomeScreenState extends State<HomeScreen> with PulseHighlightMixin {
                 child: Text(
                   _mobileFullPhone ? 'Режим: полный телефон' : 'Режим: ПК + телефон',
                   style: GoogleFonts.manrope(
-                    color: AppColors.textDim.withOpacity(0.45),
+                    color: AppColors.textDim.withValues(alpha: 0.45),
                     fontWeight: FontWeight.w500,
                     fontSize: 10.5,
                   ),

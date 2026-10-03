@@ -243,24 +243,31 @@ class _OutsourceAssignDialogState extends State<_OutsourceAssignDialog> {
                         style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 13),
                       )
                     else
-                      ..._list.map((r) {
-                        final id = (r['id'] as num).toInt();
-                        final phone = r['phone']?.toString() ?? '';
-                        return RadioListTile<int>(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          value: id,
-                          groupValue: _selectedId,
-                          onChanged: (v) => setState(() => _selectedId = v),
-                          title: Text(
-                            r['name']?.toString() ?? '',
-                            style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5),
-                          ),
-                          subtitle: phone.isEmpty
-                              ? null
-                              : Text(phone, style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12)),
-                        );
-                      }),
+                      RadioGroup<int>(
+                        groupValue: _selectedId,
+                        onChanged: (v) => setState(() => _selectedId = v),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final r in _list)
+                              RadioListTile<int>(
+                                dense: true,
+                                contentPadding: EdgeInsets.zero,
+                                value: (r['id'] as num).toInt(),
+                                title: Text(
+                                  r['name']?.toString() ?? '',
+                                  style: GoogleFonts.manrope(fontWeight: FontWeight.w700, fontSize: 13.5),
+                                ),
+                                subtitle: (r['phone']?.toString() ?? '').isEmpty
+                                    ? null
+                                    : Text(
+                                        r['phone'].toString(),
+                                        style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                                      ),
+                              ),
+                          ],
+                        ),
+                      ),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(

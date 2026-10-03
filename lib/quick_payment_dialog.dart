@@ -90,7 +90,7 @@ class QuickPaymentDialog {
                       ),
                       const SizedBox(height: 10),
                       DropdownButtonFormField<String>(
-                        value: method,
+                        initialValue: method,
                         decoration: const InputDecoration(labelText: 'Способ', isDense: true),
                         dropdownColor: AppColors.surface2,
                         items: CashMethods.all
@@ -113,7 +113,7 @@ class QuickPaymentDialog {
                       if (registers.isNotEmpty) ...[
                         const SizedBox(height: 10),
                         DropdownButtonFormField<int>(
-                          value: registerId != null &&
+                          initialValue: registerId != null &&
                                   registers.any((r) => (r['id'] as num).toInt() == registerId)
                               ? registerId
                               : null,

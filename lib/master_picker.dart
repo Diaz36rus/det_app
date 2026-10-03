@@ -175,34 +175,34 @@ Future<List<int>?> pickOrderStaff(
                       constraints: BoxConstraints(
                         maxHeight: MediaQuery.sizeOf(context).height * 0.55,
                       ),
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: [
-                          RadioListTile<int?>(
-                            value: null,
-                            groupValue: selected,
-                            title: Text(
-                              'Не назначен',
-                              style: GoogleFonts.manrope(color: AppColors.textDim),
-                            ),
-                            onChanged: (v) => setDialogState(() => selected = v),
-                          ),
-                          ...candidates.map((m) {
-                            final id = (m['id'] as num).toInt();
-                            final name = m['name']?.toString() ?? '';
-                            final role = m['role']?.toString() ?? '';
-                            return RadioListTile<int?>(
-                              value: id,
-                              groupValue: selected,
-                              title: Text(name, style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
-                              subtitle: Text(
-                                role,
-                                style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                      child: RadioGroup<int?>(
+                        groupValue: selected,
+                        onChanged: (v) => setDialogState(() => selected = v),
+                        child: ListView(
+                          shrinkWrap: true,
+                          children: [
+                            RadioListTile<int?>(
+                              value: null,
+                              title: Text(
+                                'Не назначен',
+                                style: GoogleFonts.manrope(color: AppColors.textDim),
                               ),
-                              onChanged: (v) => setDialogState(() => selected = v),
-                            );
-                          }),
-                        ],
+                            ),
+                            ...candidates.map((m) {
+                              final id = (m['id'] as num).toInt();
+                              final name = m['name']?.toString() ?? '';
+                              final role = m['role']?.toString() ?? '';
+                              return RadioListTile<int?>(
+                                value: id,
+                                title: Text(name, style: GoogleFonts.manrope(fontWeight: FontWeight.w600)),
+                                subtitle: Text(
+                                  role,
+                                  style: GoogleFonts.manrope(color: AppColors.textDim, fontSize: 12),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
                       ),
                     ),
             ),
