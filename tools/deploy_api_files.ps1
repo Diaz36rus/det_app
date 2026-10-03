@@ -82,7 +82,7 @@ foreach ($f in $infra) {
 & $ssh @sshArgs $remote "sed -i 's/\r$//' /opt/det-app/backup/*.sh && chmod 600 /opt/det-app/.env"
 
 Write-Host '==> rebuild api + reload caddy + start db-backup' -ForegroundColor Cyan
-& $ssh @sshArgs $remote 'cd /opt/det-app && docker compose up -d --build api && docker compose up -d db-backup && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile && sleep 10 && curl -sf https://api.det-app.ru/health'
+& $ssh @sshArgs $remote 'cd /opt/det-app && docker compose build api && docker compose run --rm --no-deps --user root --entrypoint chown api -R 10001:10001 /data/releases && docker compose up -d api && docker compose up -d db-backup && docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile && sleep 10 && curl -sf https://api.det-app.ru/health'
 Write-Host ''
 if ($LASTEXITCODE -ne 0) { throw 'api rebuild failed' }
 

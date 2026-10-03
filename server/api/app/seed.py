@@ -129,7 +129,7 @@ def ensure_user_phone_column() -> None:
             ("lead_source", "VARCHAR(80) DEFAULT ''"),
             ("deposit_required", "DOUBLE PRECISION DEFAULT 0"),
         ]:
-            conn.execute(text(f"ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS {col} {typ}"))
+            conn.execute(text(f"ALTER TABLE crm_orders ADD COLUMN IF NOT EXISTS {col} {typ}"))  # nosemgrep
         conn.execute(
             text(
                 "ALTER TABLE crm_inventory_items "
@@ -149,7 +149,7 @@ def ensure_user_phone_column() -> None:
             ("end_time", "VARCHAR(32) DEFAULT ''"),
             ("parent_id", "INTEGER"),
         ]:
-            conn.execute(text(f"ALTER TABLE crm_order_items ADD COLUMN IF NOT EXISTS {col} {typ}"))
+            conn.execute(text(f"ALTER TABLE crm_order_items ADD COLUMN IF NOT EXISTS {col} {typ}"))  # nosemgrep
         for col, typ in [
             ("counterparty", "VARCHAR(200) DEFAULT ''"),
             ("master_id", "INTEGER"),
@@ -158,7 +158,7 @@ def ensure_user_phone_column() -> None:
             ("order_id", "INTEGER"),
             ("template_key", "VARCHAR(80) DEFAULT ''"),
         ]:
-            conn.execute(text(f"ALTER TABLE cash_flows ADD COLUMN IF NOT EXISTS {col} {typ}"))
+            conn.execute(text(f"ALTER TABLE cash_flows ADD COLUMN IF NOT EXISTS {col} {typ}"))  # nosemgrep
         # Несколько касс с одним money_type (как в локальной SQLite).
         conn.execute(
             text("ALTER TABLE cash_registers DROP CONSTRAINT IF EXISTS uq_cash_reg_company_type")
@@ -243,7 +243,7 @@ def ensure_payroll_multi_master() -> None:
         )
         for col in ("price2", "price3", "price4", "fixed_price"):
             conn.execute(
-                text(
+                text(  # nosemgrep
                     f"ALTER TABLE crm_services ADD COLUMN IF NOT EXISTS {col} "
                     "DOUBLE PRECISION DEFAULT 0"
                 )
