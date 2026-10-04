@@ -14,6 +14,19 @@ from app.seed import ensure_payroll_multi_master, ensure_user_phone_column, seed
 
 API_VERSION = "0.16.23"
 
+if settings.sentry_dsn:
+    import sentry_sdk
+
+    # Тела запросов и PII не отправляем: там телефоны и данные клиентов студий.
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        release=f"det-api@{API_VERSION}",
+        environment=settings.app_env or "dev",
+        send_default_pii=False,
+        max_request_body_size="never",
+        traces_sample_rate=0.0,
+    )
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):

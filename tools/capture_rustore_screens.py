@@ -6,7 +6,7 @@ import sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-ADB = r"C:\Users\KDFX Modes\AppData\Local\Android\Sdk\platform-tools\adb.exe"
+ADB = r"D:\Android\Sdk\platform-tools\adb.exe"
 DIR = pathlib.Path(r"D:\Projects\det_app\tools\rustore_screens")
 
 

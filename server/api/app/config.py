@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # SMS fallback: POST JSON {phone, text}; Authorization: Bearer key
     sms_api_url: str = ""
     sms_api_key: str = ""
+    # GlitchTip/Sentry DSN; пусто — отчёты об ошибках выключены.
+    sentry_dsn: str = ""
 
     @property
     def is_production(self) -> bool:

@@ -40,3 +40,13 @@ api.det-app.ru {
 	import security_headers
 	reverse_proxy api:8000
 }
+
+# Нужна A-запись errors.det-app.ru и запущенный /opt/glitchtip (server/glitchtip/compose.yml).
+errors.det-app.ru {
+	import security_headers
+	header X-Frame-Options "DENY"
+	request_body {
+		max_size 40MB
+	}
+	reverse_proxy glitchtip-web:8000
+}

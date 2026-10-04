@@ -1,0 +1,64 @@
+# GlitchTip (Sentry-совместимый сбор ошибок) — отдельный compose-проект в /opt/glitchtip.
+# Наружу порт не публикуется: Caddy из det-app ходит в glitchtip-web:8000 через сеть det-app_default.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-environment: &default-environment
+  DATABASE_URL: postgres://glitchtip:${POSTGRES_PASSWORD}@postgres:5432/glitchtip
+  VALKEY_URL: ""
+  SECRET_KEY: ${SECRET_KEY}
+  EMAIL_URL: consolemail://
+  GLITCHTIP_DOMAIN: https://errors.det-app.ru
+  DEFAULT_FROM_EMAIL: admin@det-app.ru
+  ALLOWED_HOSTS: errors.det-app.ru
+  CSRF_TRUSTED_ORIGINS: https://errors.det-app.ru
+  ENABLE_USER_REGISTRATION: "False"
+  ENABLE_ORGANIZATION_CREATION: "False"
+  ENABLE_ADMIN: "False"
+  ENABLE_OPENAPI: "False"
+  GLITCHTIP_ENABLE_MCP: "True"
+  GLITCHTIP_ENABLE_UPTIME: "True"
+  GLITCHTIP_ENABLE_LOGS: "False"
+  GLITCHTIP_ENABLE_DUCKDB: "False"
+  GLITCHTIP_MAX_EVENT_LIFE_DAYS: "60"
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: glitchtip
+      POSTGRES_DB: glitchtip
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    restart: unless-stopped
+    volumes:
+      - pg-data:/var/lib/postgresql
+    logging: *default-logging
+
+  web:
+    image: glitchtip/glitchtip:6
+    container_name: glitchtip-web
+    depends_on:
+      - postgres
+    environment:
+      <<: *default-environment
+      SERVER_ROLE: all_in_one
+    restart: unless-stopped
+    mem_limit: 768m
+    volumes:
+      - uploads:/code/uploads
+    networks:
+      - default
+      - detapp
+    logging: *default-logging
+
+networks:
+  detapp:
+    external: true
+    name: det-app_default
+
+volumes:
+  pg-data:
+  uploads:
