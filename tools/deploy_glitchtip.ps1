@@ -28,18 +28,36 @@ if (-not (Test-Path $KeyPath)) { throw "SSH key missing: $KeyPath" }
 $remote = "${User}@${HostName}"
 $sshArgs = @('-i', $KeyPath, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new')
 
-Write-Host '==> upload compose + Caddyfile' -ForegroundColor Cyan
+Write-Host '==> upload compose' -ForegroundColor Cyan
 & $ssh @sshArgs $remote 'mkdir -p /opt/glitchtip'
 & $scp @sshArgs (Join-Path $root 'server\glitchtip\compose.yml') "${remote}:/opt/glitchtip/compose.yml"
 if ($LASTEXITCODE -ne 0) { throw 'scp compose.yml failed' }
-& $scp @sshArgs (Join-Path $root 'server\Caddyfile') "${remote}:/opt/det-app/Caddyfile"
-if ($LASTEXITCODE -ne 0) { throw 'scp Caddyfile failed' }
 
 Write-Host '==> secrets (.env создаётся один раз) + start' -ForegroundColor Cyan
+# Полный Caddyfile уезжает через deploy_api_files.ps1; здесь только дописываем блок errors.det-app.ru.
 $remoteScript = @'
 set -eu
+docker network inspect det-app_default >/dev/null
 cd /opt/glitchtip
-sed -i 's/\r$//' compose.yml /opt/det-app/Caddyfile
+sed -i 's/\r$//' compose.yml
+if ! grep -q 'errors.det-app.ru' /opt/det-app/Caddyfile; then
+  cp /opt/det-app/Caddyfile /opt/det-app/Caddyfile.bak-glitchtip
+  cat >> /opt/det-app/Caddyfile <<'EOF'
+
+errors.det-app.ru {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		-Server
+	}
+	request_body {
+		max_size 40MB
+	}
+	reverse_proxy glitchtip-web:8000
+}
+EOF
+fi
 if [ ! -f .env ]; then
   umask 077
   printf 'SECRET_KEY=%s\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 24)" > .env
@@ -48,9 +66,13 @@ chmod 600 .env
 docker compose pull -q
 docker compose up -d
 cd /opt/det-app
+if ! docker compose exec -T caddy caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1; then
+  [ -f Caddyfile.bak-glitchtip ] && cp Caddyfile.bak-glitchtip Caddyfile
+  echo "Caddyfile invalid, restored backup"; exit 1
+fi
 docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
 for i in $(seq 1 30); do
-  if docker exec glitchtip-web python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/_health/')" 2>/dev/null; then
+  if docker exec glitchtip-web python -c "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/api/settings/')" 2>/dev/null; then
     echo "glitchtip healthy"; break
   fi
   sleep 5
