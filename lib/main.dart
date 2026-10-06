@@ -24,6 +24,7 @@ import 'backup_helper.dart';
 import 'bug_report_dialog.dart';
 import 'bug_reports_api.dart';
 import 'conn_status_sheet.dart';
+import 'crash_reporting.dart';
 import 'crm/cloud_db_bridge.dart';
 import 'crm/cloud_mode.dart';
 import 'tour_keys.dart';
@@ -61,6 +62,7 @@ void main() async {
   GoogleFonts.config.allowRuntimeFetching = false;
   await initializeDateFormatting('ru');
   await AppVersion.ensureLoaded();
+  await CrashReporting.init();
   // Desktop: sqflite через FFI. Android/iOS: встроенный sqflite-плагин.
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     sqfliteFfiInit();

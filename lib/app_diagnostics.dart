@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'auth/auth_api.dart';
 import 'bug_reports_api.dart';
+import 'crash_reporting.dart';
 import 'crm/cloud_mode.dart';
 import 'database.dart';
 import 'sync/sync_config.dart';
@@ -44,6 +45,7 @@ class AppDiagnostics extends ChangeNotifier {
       FlutterError.presentError(details);
       final msg = details.exceptionAsString();
       final overflow = msg.contains('OVERFLOWED') || msg.contains('overflowed');
+      if (!overflow) CrashReporting.capture(details.exception, details.stack);
       unawaited(log(
         level: overflow ? 'warn' : 'error',
         source: 'FlutterError',
@@ -54,6 +56,7 @@ class AppDiagnostics extends ChangeNotifier {
     };
 
     PlatformDispatcher.instance.onError = (error, stack) {
+      CrashReporting.capture(error, stack);
       unawaited(log(
         level: 'error',
         source: 'PlatformDispatcher',
