@@ -27,12 +27,12 @@ Set-Location $ProjectRoot
 
 if ($Build) {
   Write-Host "==> flutter build windows --release" -ForegroundColor Cyan
-  flutter build windows --release
+  flutter build windows --release --dart-define-from-file=tools/dart_defines.json
   if ($LASTEXITCODE -ne 0) { throw "windows build failed" }
 }
 if ($BuildApk) {
   Write-Host "==> flutter build apk --release" -ForegroundColor Cyan
-  flutter build apk --release
+  flutter build apk --release --dart-define-from-file=tools/dart_defines.json
   if ($LASTEXITCODE -ne 0) { throw "apk build failed" }
 }
 

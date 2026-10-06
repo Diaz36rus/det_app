@@ -59,7 +59,7 @@ if ($DryRun) {
 }
 
 Write-Host '==> flutter build appbundle --release' -ForegroundColor Cyan
-flutter build appbundle --release
+flutter build appbundle --release --dart-define-from-file=tools/dart_defines.json
 if ($LASTEXITCODE -ne 0) { throw 'appbundle build failed' }
 
 $aab = Join-Path $ProjectRoot 'build\app\outputs\bundle\release\app-release.aab'

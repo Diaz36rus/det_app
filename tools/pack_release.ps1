@@ -38,7 +38,7 @@ $ZipPath = Join-Path $DistRoot "DetApp-portable-$stamp.zip"
 # --- 1. Build ---
 if (-not $SkipBuild) {
   Write-Step "flutter build windows --release"
-  flutter build windows --release
+  flutter build windows --release --dart-define-from-file=tools/dart_defines.json
   if ($LASTEXITCODE -ne 0) {
     throw "flutter build windows --release failed (exit $LASTEXITCODE)"
   }
