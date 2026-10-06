@@ -29,6 +29,14 @@ class PatchRelease {
 /// При обновлении показываем все записи с build в (lastSeen; current].
 const List<PatchRelease> kPatchNotes = [
   PatchRelease(
+    build: 128,
+    version: '1.0.1',
+    items: [
+      'Стабильность: автоматические отчёты о сбоях (без данных клиентов и скриншотов) — ошибки чиним быстрее',
+      'Безопасность: обновлены серверные компоненты, закрыты известные уязвимости',
+    ],
+  ),
+  PatchRelease(
     build: 127,
     version: '1.0.1',
     items: [
