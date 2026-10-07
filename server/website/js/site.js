@@ -501,6 +501,7 @@
     });
     document.addEventListener("keydown", (e) => {
       if (document.getElementById("zoom")?.open) return;
+      if (e.target?.closest?.("#deck")) return;
       const tag = (e.target && e.target.tagName) || "";
       if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
       const ids = Object.keys(SCREENS);
@@ -521,10 +522,13 @@
     const closeBtn = document.getElementById("zoom-close");
     const prevBtn = document.getElementById("zoom-prev");
     const nextBtn = document.getElementById("zoom-next");
-    if (!dialog || !img) return;
-    const items = [...document.querySelectorAll(".is-zoom")]
-      .map((el) => ({ src: el.dataset.zoom, alt: el.dataset.zoomAlt || "" }))
-      .filter((x) => x.src);
+    if (!dialog || !img) return null;
+    const zoomEls = [...document.querySelectorAll(".is-zoom")];
+    const fromEls = () =>
+      zoomEls
+        .map((el) => ({ src: el.dataset.zoom, alt: el.dataset.zoomAlt || "" }))
+        .filter((x) => x.src);
+    let items = fromEls();
     let idx = 0;
     const paint = (i) => {
       if (!items.length) return;
@@ -542,8 +546,11 @@
       if (typeof dialog.close === "function") dialog.close();
       else dialog.removeAttribute("open");
     };
-    document.querySelectorAll(".is-zoom").forEach((el, i) => {
-      el.addEventListener("click", () => openAt(i));
+    zoomEls.forEach((el) => {
+      el.addEventListener("click", () => {
+        items = fromEls();
+        openAt(Math.max(0, items.findIndex((x) => x.src === el.dataset.zoom)));
+      });
     });
     prevBtn?.addEventListener("click", () => paint(idx - 1));
     nextBtn?.addEventListener("click", () => paint(idx + 1));
@@ -557,6 +564,238 @@
       if (e.key === "ArrowRight") paint(idx + 1);
       if (e.key === "ArrowLeft") paint(idx - 1);
     });
+    return (list, i) => {
+      items = list;
+      openAt(i);
+    };
+  }
+
+  function setupDeck(openZoom) {
+    const deck = document.getElementById("screens");
+    const stage = document.getElementById("deck");
+    const ring = document.getElementById("deck-ring");
+    if (!deck || !stage || !ring) return;
+    const cards = [...ring.querySelectorAll(".deck__card")];
+    const notes = {};
+    document.querySelectorAll("#deck-notes li").forEach((li) => {
+      notes[li.dataset.key] = {
+        title: li.querySelector("b")?.textContent || "",
+        text: li.querySelector("span")?.textContent || "",
+      };
+    });
+    const caption = document.getElementById("deck-caption");
+    const countEl = document.getElementById("deck-count");
+    const titleEl = document.getElementById("deck-title");
+    const textEl = document.getElementById("deck-text");
+    const dotsEl = document.getElementById("deck-dots");
+    const modeBtns = [...document.querySelectorAll("#deck-mode [data-mode]")];
+    // x — доля ширины кадра, z — px, r — градусы; индекс = расстояние от центра.
+    const LAYOUT = {
+      pc: { x: [0, 0.56, 0.9, 1.15], z: [0, -260, -460, -620], r: [0, 40, 50, 56], o: [1, 0.85, 0.45, 0], b: [1, 0.55, 0.38, 0.3] },
+      phone: { x: [0, 0.8, 1.45, 1.95], z: [0, -200, -360, -500], r: [0, 32, 42, 50], o: [1, 0.9, 0.55, 0], b: [1, 0.6, 0.42, 0.3] },
+      flat: { x: [0, 1.06, 2.12, 3.18], z: [0, 0, 0, 0], r: [0, 0, 0, 0], o: [1, 0.5, 0.25, 0], b: [1, 1, 1, 1] },
+    };
+    const AUTOPLAY_MS = 5500;
+    let mode = "pc";
+    let list = [];
+    let active = 0;
+    let timer = 0;
+    let captionTimer = 0;
+    let paused = false;
+    let visible = false;
+    const pad = (n) => String(n).padStart(2, "0");
+
+    const layout = () => {
+      const L = reduceMotion ? LAYOUT.flat : LAYOUT[mode];
+      const n = list.length;
+      list.forEach((card, i) => {
+        let d = i - active;
+        if (d > n / 2) d -= n;
+        if (d < -n / 2) d += n;
+        const a = Math.min(Math.abs(d), 3);
+        const s = Math.sign(d);
+        card.style.transform =
+          `translateX(${(-50 + s * L.x[a] * 100).toFixed(1)}%) ` +
+          `translateZ(${L.z[a]}px) rotateY(${-s * L.r[a]}deg)`;
+        card.style.opacity = String(L.o[a]);
+        card.style.filter = a && L.b[a] < 1 ? `brightness(${L.b[a]})` : "";
+        card.style.zIndex = String(10 - a);
+        card.style.pointerEvents = L.o[a] > 0 ? "" : "none";
+        card.classList.toggle("is-active", d === 0);
+        card.setAttribute("aria-hidden", d === 0 ? "false" : "true");
+      });
+    };
+
+    const paintCaption = (animate) => {
+      const note = notes[list[active]?.dataset.key] || { title: "", text: "" };
+      const apply = () => {
+        if (countEl) countEl.textContent = `${pad(active + 1)} / ${pad(list.length)}`;
+        if (titleEl) titleEl.textContent = note.title;
+        if (textEl) textEl.textContent = note.text;
+        caption?.classList.remove("is-out");
+      };
+      clearTimeout(captionTimer);
+      if (!animate || reduceMotion || !caption) {
+        apply();
+        return;
+      }
+      caption.classList.add("is-out");
+      captionTimer = setTimeout(apply, 200);
+    };
+
+    const paintDots = () => {
+      [...dotsEl.children].forEach((b, i) => {
+        b.classList.toggle("is-on", i === active);
+        if (i === active) b.setAttribute("aria-current", "true");
+        else b.removeAttribute("aria-current");
+      });
+    };
+
+    const stop = () => {
+      clearInterval(timer);
+      timer = 0;
+    };
+    const restart = () => {
+      stop();
+      if (reduceMotion || paused || !visible || document.hidden) return;
+      timer = setInterval(() => go(active + 1, false), AUTOPLAY_MS);
+    };
+
+    function go(i, byUser, animate = true) {
+      const n = list.length;
+      if (!n) return;
+      active = ((i % n) + n) % n;
+      layout();
+      paintCaption(animate);
+      paintDots();
+      if (byUser) restart();
+    }
+
+    const buildDots = () => {
+      dotsEl.textContent = "";
+      list.forEach((card, i) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "deck__dot";
+        b.setAttribute("aria-label", `Экран ${i + 1}: ${notes[card.dataset.key]?.title || ""}`);
+        b.addEventListener("click", () => go(i, true));
+        dotsEl.appendChild(b);
+      });
+    };
+
+    const setMode = (m) => {
+      const key = list[active]?.dataset.key;
+      mode = m;
+      deck.dataset.mode = m;
+      list = cards.filter((c) => c.dataset.mode === m);
+      cards.forEach((c) => {
+        c.hidden = c.dataset.mode !== m;
+        if (c.hidden) c.classList.remove("is-active");
+      });
+      modeBtns.forEach((b) => {
+        const on = b.dataset.mode === m;
+        b.classList.toggle("is-on", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      buildDots();
+      const j = list.findIndex((c) => c.dataset.key === key);
+      list.forEach((c) => {
+        c.style.transition = "none";
+      });
+      go(j >= 0 ? j : 0, false, false);
+      void ring.offsetWidth;
+      list.forEach((c) => {
+        c.style.transition = "";
+      });
+      restart();
+    };
+
+    const zoomActive = () => {
+      if (!openZoom) return;
+      const shots = list.map((c) => {
+        const img = c.querySelector("img");
+        return { src: img.getAttribute("src"), alt: img.alt };
+      });
+      openZoom(shots, active);
+    };
+
+    let x0 = null;
+    let swiped = false;
+    ring.addEventListener("pointerdown", (e) => {
+      x0 = e.clientX;
+      swiped = false;
+    });
+    ring.addEventListener("pointerup", (e) => {
+      if (x0 === null) return;
+      const dx = e.clientX - x0;
+      x0 = null;
+      if (Math.abs(dx) > 40) {
+        swiped = true;
+        go(active + (dx < 0 ? 1 : -1), true);
+      }
+    });
+    ring.addEventListener("pointercancel", () => {
+      x0 = null;
+    });
+    ring.addEventListener("click", (e) => {
+      if (swiped) {
+        swiped = false;
+        return;
+      }
+      const i = list.indexOf(e.target.closest(".deck__card"));
+      if (i < 0) return;
+      if (i === active) zoomActive();
+      else go(i, true);
+    });
+
+    document.getElementById("deck-prev")?.addEventListener("click", () => go(active - 1, true));
+    document.getElementById("deck-next")?.addEventListener("click", () => go(active + 1, true));
+    modeBtns.forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+    stage.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        go(active + 1, true);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        go(active - 1, true);
+      } else if ((e.key === "Enter" || e.key === " ") && e.target === stage) {
+        e.preventDefault();
+        zoomActive();
+      }
+    });
+
+    stage.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "mouse") return;
+      paused = true;
+      stop();
+    });
+    stage.addEventListener("pointerleave", (e) => {
+      if (e.pointerType !== "mouse") return;
+      paused = false;
+      restart();
+    });
+    stage.addEventListener("focusin", () => {
+      paused = true;
+      stop();
+    });
+    stage.addEventListener("focusout", () => {
+      paused = false;
+      restart();
+    });
+    document.addEventListener("visibilitychange", restart);
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(
+        (entries) => {
+          visible = entries.some((en) => en.isIntersecting);
+          restart();
+        },
+        { threshold: 0.35 }
+      ).observe(stage);
+    }
+
+    deck.classList.add("is-live");
+    setMode("pc");
   }
 
   function setupCopies() {
@@ -932,7 +1171,7 @@
   setupLead();
   fillChangelogPage();
   setupExplorer();
-  setupZoom();
+  setupDeck(setupZoom());
   setupCopies();
   setupDemo();
   setupDock();

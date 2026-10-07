@@ -22,7 +22,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/site.css?v=20260915j" />
+  <link rel="stylesheet" href="css/site.css?v=20261007a" />
 </head>
 <body>
   <a class="skip" href="#day">К содержанию</a>
@@ -142,77 +142,49 @@
       </article>
     </section>
 
-    <section class="phones" id="screens" aria-label="Телефон">
-      <div class="phones__head reveal">
-        <p class="eyebrow">Телефон</p>
-        <h2>Тот же контур в кармане</h2>
+    <section class="deck" id="screens" aria-label="Экраны" data-mode="pc">
+      <div class="deck__head reveal">
+        <p class="eyebrow">Экраны</p>
+        <h2>Вся студия — на ПК и в кармане</h2>
         <p>Windows и Android смотрят одни данные. Без отдельной «мобильной админки».</p>
       </div>
-      <div class="phones__rail atlas__phones">
-        <figure class="handset is-zoom" data-screen="calendar" data-zoom="assets/ui-phone-calendar.jpg" data-zoom-alt="Календарь на телефоне">
-          <img src="assets/ui-phone-calendar.jpg" alt="Календарь на телефоне" loading="lazy" />
-          <figcaption>Календарь</figcaption>
-        </figure>
-        <figure class="handset is-zoom" data-screen="board" data-zoom="assets/ui-phone.jpg" data-zoom-alt="Доска на телефоне">
-          <img src="assets/ui-phone.jpg" alt="Доска на телефоне" loading="lazy" />
-          <figcaption>Доска</figcaption>
-        </figure>
-        <figure class="handset is-zoom" data-screen="order" data-zoom="assets/ui-order.jpg" data-zoom-alt="Заказ на телефоне">
-          <img src="assets/ui-order.jpg" alt="Заказ на телефоне" loading="lazy" />
-          <figcaption>Заказ</figcaption>
-        </figure>
-        <figure class="handset is-zoom" data-screen="cash" data-zoom="assets/ui-phone-cash.jpg" data-zoom-alt="Касса на телефоне">
-          <img src="assets/ui-phone-cash.jpg" alt="Касса на телефоне" loading="lazy" />
-          <figcaption>Касса</figcaption>
-        </figure>
-        <figure class="handset is-zoom" data-zoom="assets/ui-phone-clients.jpg" data-zoom-alt="Клиенты на телефоне">
-          <img src="assets/ui-phone-clients.jpg" alt="Клиенты на телефоне" loading="lazy" />
-          <figcaption>Клиенты</figcaption>
-        </figure>
-        <figure class="handset is-zoom" data-zoom="assets/ui-phone-inventory.jpg" data-zoom-alt="Склад на телефоне">
-          <img src="assets/ui-phone-inventory.jpg" alt="Склад на телефоне" loading="lazy" />
-          <figcaption>Склад</figcaption>
-        </figure>
+      <div class="hero__mode deck__mode" id="deck-mode" role="group" aria-label="ПК или телефон">
+        <button type="button" class="hero__mode-btn is-on" data-mode="pc" aria-pressed="true">ПК</button>
+        <button type="button" class="hero__mode-btn" data-mode="phone" aria-pressed="false">Телефон</button>
       </div>
-    </section>
-
-    <section class="gallery" id="atlas" aria-label="Ещё экраны">
-      <div class="gallery__head reveal">
-        <p class="eyebrow">Ещё на ПК</p>
-        <h2>Клиенты, склад, аналитика</h2>
+      <div class="deck__stage" id="deck" role="region" aria-roledescription="карусель" aria-label="Экраны приложения" tabindex="0">
+        <div class="deck__ring" id="deck-ring">
+          <figure class="deck__card window" data-mode="pc" data-key="board"><div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="assets/ui-board.jpg" alt="Доска заказов на ПК" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card window" data-mode="pc" data-key="calendar"><div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="assets/ui-calendar.jpg" alt="Календарь на ПК" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card window" data-mode="pc" data-key="order"><div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="assets/screen-orders.jpg" alt="Карточка заказа на ПК" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card window" data-mode="pc" data-key="cash"><div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="assets/ui-cash.jpg" alt="Касса на ПК" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card window" data-mode="pc" data-key="clients"><div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="assets/screen-clients.jpg" alt="Клиенты на ПК" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card window" data-mode="pc" data-key="stats"><div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div><img src="assets/screen-stats.jpg" alt="Аналитика на ПК" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card deck__card--phone" data-mode="phone" data-key="board"><img src="assets/ui-phone.jpg" alt="Доска на телефоне" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card deck__card--phone" data-mode="phone" data-key="calendar"><img src="assets/ui-phone-calendar.jpg" alt="Календарь на телефоне" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card deck__card--phone" data-mode="phone" data-key="order"><img src="assets/ui-order.jpg" alt="Заказ на телефоне" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card deck__card--phone" data-mode="phone" data-key="cash"><img src="assets/ui-phone-cash.jpg" alt="Касса на телефоне" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card deck__card--phone" data-mode="phone" data-key="clients"><img src="assets/ui-phone-clients.jpg" alt="Клиенты на телефоне" loading="lazy" draggable="false" /></figure>
+          <figure class="deck__card deck__card--phone" data-mode="phone" data-key="inventory"><img src="assets/ui-phone-inventory.jpg" alt="Склад на телефоне" loading="lazy" draggable="false" /></figure>
+        </div>
+        <button type="button" class="deck__nav deck__nav--prev" id="deck-prev" aria-label="Предыдущий экран"><span aria-hidden="true">‹</span></button>
+        <button type="button" class="deck__nav deck__nav--next" id="deck-next" aria-label="Следующий экран"><span aria-hidden="true">›</span></button>
       </div>
-      <div class="gallery__grid" id="atlas-pc">
-        <figure class="window is-zoom" data-zoom="assets/screen-clients.jpg" data-zoom-alt="Клиенты">
-          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/screen-clients.jpg" alt="Клиенты" loading="lazy" />
-          <figcaption>Клиенты</figcaption>
-        </figure>
-        <figure class="window is-zoom" data-zoom="assets/screen-stats.jpg" data-zoom-alt="Аналитика">
-          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/screen-stats.jpg" alt="Аналитика" loading="lazy" />
-          <figcaption>Аналитика</figcaption>
-        </figure>
-        <figure class="window is-zoom" data-zoom="assets/screen-inventory.jpg" data-zoom-alt="Склад">
-          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/screen-inventory.jpg" alt="Склад" loading="lazy" />
-          <figcaption>Склад</figcaption>
-        </figure>
-        <figure class="window is-zoom" data-zoom="assets/screen-masters.jpg" data-zoom-alt="Сотрудники">
-          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/screen-masters.jpg" alt="Сотрудники" loading="lazy" />
-          <figcaption>Сотрудники</figcaption>
-        </figure>
-        <figure class="window is-zoom" data-zoom="assets/screen-done.jpg" data-zoom-alt="Выдача">
-          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/screen-done.jpg" alt="Выдача" loading="lazy" />
-          <figcaption>Выдача</figcaption>
-        </figure>
-        <figure class="window is-zoom" data-zoom="assets/screen-cash.jpg" data-zoom-alt="Касса · другой кадр">
-          <div class="window__bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/screen-cash.jpg" alt="Касса · другой кадр" loading="lazy" />
-          <figcaption>Касса</figcaption>
-        </figure>
+      <div class="deck__caption" id="deck-caption" aria-live="polite">
+        <p class="deck__count" id="deck-count"></p>
+        <h3 id="deck-title"></h3>
+        <p id="deck-text"></p>
       </div>
+      <div class="deck__dots" id="deck-dots"></div>
+      <ul class="deck__notes" id="deck-notes">
+        <li data-key="board"><b>Доска</b> <span>Все машины смены по цехам. Мастер видит свой поток, владелец — всю студию сразу.</span></li>
+        <li data-key="calendar"><b>Календарь</b> <span>Клиент, авто и услуги — сразу в слот. Загрузка дня и недели видна без блокнота.</span></li>
+        <li data-key="order"><b>Заказ</b> <span>Клиент, авто, слот и услуги из прайса. Работы, мастера и сумма — рядом с машиной, а не в Excel.</span></li>
+        <li data-key="cash"><b>Касса</b> <span>Оплаты, смена и долги. День закрывается одной сверкой, а не перепиской в мессенджере.</span></li>
+        <li data-key="clients"><b>Клиенты</b> <span>Контакты, машины и история визитов. Постоянного клиента находите за пару секунд.</span></li>
+        <li data-key="stats"><b>Аналитика</b> <span>Выручка, средний чек, долги и загрузка цехов. Отдельно — сколько сделал каждый мастер.</span></li>
+        <li data-key="inventory"><b>Склад</b> <span>Остатки по категориям, плёнка и приходы. Фильтр «Мало» показывает, что пора докупить.</span></li>
+      </ul>
     </section>
 
     <section class="roles" id="roles">
@@ -452,6 +424,6 @@
   </nav>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js" defer></script>
-  <script src="js/site.js?v=20260915j" defer></script>
+  <script src="js/site.js?v=20261007a" defer></script>
 </body>
 </html>
